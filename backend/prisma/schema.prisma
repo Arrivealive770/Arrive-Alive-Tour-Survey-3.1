@@ -1,0 +1,276 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "sqlite"
+  url      = env("DATABASE_URL")
+}
+
+// ==========================================
+// Better Auth Models
+// ==========================================
+
+model User {
+  id            String    @id @default(cuid())
+  name          String
+  email         String    @unique
+  emailVerified Boolean   @default(false)
+  image         String?
+  createdAt     DateTime  @default(now())
+  updatedAt     DateTime  @updatedAt
+  sessions      Session[]
+  accounts      Account[]
+}
+
+model Session {
+  id        String   @id @default(cuid())
+  expiresAt DateTime
+  token     String   @unique
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+  ipAddress String?
+  userAgent String?
+  userId    String
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+}
+
+model Account {
+  id                    String    @id @default(cuid())
+  accountId             String
+  providerId            String
+  userId                String
+  user                  User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  accessToken           String?
+  refreshToken          String?
+  idToken               String?
+  accessTokenExpiresAt  DateTime?
+  refreshTokenExpiresAt DateTime?
+  scope                 String?
+  password              String?
+  createdAt             DateTime  @default(now())
+  updatedAt             DateTime  @updatedAt
+}
+
+model Verification {
+  id         String   @id @default(cuid())
+  identifier String
+  value      String
+  expiresAt  DateTime
+  createdAt  DateTime @default(now())
+  updatedAt  DateTime @updatedAt
+}
+
+// ==========================================
+// Arrive Alive Tour Kiosk Models
+// ==========================================
+
+model Team {
+  id        String   @id @default(cuid())
+  name      String
+  code      String   @unique // Unique short code for the team
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  // Relations
+  devices         Device[]
+  events          Event[]
+  surveyResponses SurveyResponse[]
+  pledges         Pledge[]
+  photos          Photo[]
+  syncLogs        SyncLog[]
+
+  @@index([code])
+}
+
+model Device {
+  id         String   @id @default(cuid())
+  teamId     String
+  deviceType String   // "tablet" | "phone"
+  deviceName String
+  lastSyncAt DateTime?
+  isActive   Boolean  @default(true)
+  createdAt  DateTime @default(now())
+
+  // Relations
+  team            Team             @relation(fields: [teamId], references: [id], onDelete: Cascade)
+  surveyResponses SurveyResponse[]
+  syncLogs        SyncLog[]
+
+  @@index([teamId])
+  @@index([deviceType])
+}
+
+model Event {
+  id          String   @id @default(cuid())
+  teamId      String
+  venueName   String
+  venueCity   String
+  venueState  String
+  eventDate   DateTime
+  surveyTypes String   // JSON string array of survey type slugs enabled for this event
+  overlayType String   // Photo overlay type for this event
+  status      String   @default("active") // "active" | "completed"
+  createdAt   DateTime @default(now())
+
+  // Relations
+  team            Team             @relation(fields: [teamId], references: [id], onDelete: Cascade)
+  surveyResponses SurveyResponse[]
+  pledges         Pledge[]
+  photos          Photo[]
+
+  @@index([teamId])
+  @@index([eventDate])
+  @@index([status])
+}
+
+model SurveyType {
+  id          String   @id @default(cuid())
+  slug        String   @unique // "marijuana", "alcohol", "distracted", "impaired", "combo"
+  name        String
+  description String?
+  isActive    Boolean  @default(true)
+  createdAt   DateTime @default(now())
+
+  // Relations
+  questions SurveyQuestion[]
+
+  @@index([slug])
+  @@index([isActive])
+}
+
+model SurveyQuestion {
+  id           String   @id @default(cuid())
+  surveyTypeId String
+  orderIndex   Int      // 1-11
+  questionText String
+  answerType   String   @default("single_choice") // Currently only "single_choice"
+  options      String   // JSON array of answer options
+  isRequired   Boolean  @default(true)
+  createdAt    DateTime @default(now())
+
+  // Relations
+  surveyType SurveyType @relation(fields: [surveyTypeId], references: [id], onDelete: Cascade)
+
+  @@unique([surveyTypeId, orderIndex])
+  @@index([surveyTypeId])
+}
+
+model SurveyResponse {
+  id              String    @id @default(cuid())
+  localId         String    @unique // Unique ID from device for deduplication
+  teamId          String
+  eventId         String
+  surveyTypeSlug  String    // e.g., "marijuana", "alcohol"
+  responses       String    // JSON object of question answers
+  ageRange        String?   // "13-17", "18-24", "25-34", "35+"
+  deviceId        String?
+  completedAt     DateTime  @default(now())
+  syncedAt        DateTime?
+  durationSeconds Int?      // Time taken to complete survey
+
+  // Relations
+  team    Team     @relation(fields: [teamId], references: [id], onDelete: Cascade)
+  event   Event    @relation(fields: [eventId], references: [id], onDelete: Cascade)
+  device  Device?  @relation(fields: [deviceId], references: [id], onDelete: SetNull)
+  pledges Pledge[]
+
+  @@index([localId])
+  @@index([teamId])
+  @@index([eventId])
+  @@index([surveyTypeSlug])
+  @@index([completedAt])
+}
+
+model Pledge {
+  id               String    @id @default(cuid())
+  localId          String    @unique // Unique ID from device for deduplication
+  surveyResponseId String?   // Optional link to survey response
+  teamId           String
+  eventId          String
+  email            String
+  photoId          String?   // Optional link to photo
+  emailStatus      String    @default("pending") // "pending" | "queued" | "sent" | "failed"
+  emailSentAt      DateTime?
+  emailError       String?
+  createdAt        DateTime  @default(now())
+  syncedAt         DateTime?
+
+  // Relations
+  surveyResponse SurveyResponse? @relation(fields: [surveyResponseId], references: [id], onDelete: SetNull)
+  team           Team            @relation(fields: [teamId], references: [id], onDelete: Cascade)
+  event          Event           @relation(fields: [eventId], references: [id], onDelete: Cascade)
+  photo          Photo?          @relation(fields: [photoId], references: [id], onDelete: SetNull)
+  emailQueue     EmailQueue[]
+
+  @@index([localId])
+  @@index([teamId])
+  @@index([eventId])
+  @@index([email])
+  @@index([emailStatus])
+}
+
+model Photo {
+  id          String    @id @default(cuid())
+  localId     String    @unique // Unique ID from device for deduplication
+  teamId      String
+  eventId     String
+  storageKey  String?   // Key in storage system (e.g., S3 key)
+  storageUrl  String?   // Full URL to access the photo
+  overlayType String    // Type of overlay applied
+  status      String    @default("pending") // "pending" | "uploaded" | "used" | "purged"
+  usedAt      DateTime?
+  createdAt   DateTime  @default(now())
+  syncedAt    DateTime?
+
+  // Relations
+  team    Team     @relation(fields: [teamId], references: [id], onDelete: Cascade)
+  event   Event    @relation(fields: [eventId], references: [id], onDelete: Cascade)
+  pledges Pledge[]
+
+  @@index([localId])
+  @@index([teamId])
+  @@index([eventId])
+  @@index([status])
+}
+
+model EmailQueue {
+  id          String    @id @default(cuid())
+  pledgeId    String
+  toEmail     String
+  subject     String
+  htmlBody    String
+  photoUrl    String?
+  attempts    Int       @default(0)
+  maxAttempts Int       @default(3)
+  status      String    @default("pending") // "pending" | "processing" | "sent" | "failed"
+  lastError   String?
+  scheduledAt DateTime  @default(now())
+  processedAt DateTime?
+
+  // Relations
+  pledge Pledge @relation(fields: [pledgeId], references: [id], onDelete: Cascade)
+
+  @@index([pledgeId])
+  @@index([status])
+  @@index([scheduledAt])
+}
+
+model SyncLog {
+  id          String   @id @default(cuid())
+  deviceId    String?
+  teamId      String
+  syncType    String   // Type of sync operation
+  itemCount   Int      @default(0)
+  status      String   // "success" | "partial" | "failed"
+  errorDetail String?
+  syncedAt    DateTime @default(now())
+
+  // Relations
+  device Device? @relation(fields: [deviceId], references: [id], onDelete: SetNull)
+  team   Team    @relation(fields: [teamId], references: [id], onDelete: Cascade)
+
+  @@index([deviceId])
+  @@index([teamId])
+  @@index([syncedAt])
+}
