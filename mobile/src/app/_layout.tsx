@@ -1,5 +1,5 @@
 import { DarkTheme, DefaultTheme, ThemeProvider } from '@react-navigation/native';
-import { Stack } from 'expo-router';
+import { Slot } from 'expo-router';
 import * as SplashScreen from 'expo-splash-screen';
 import { StatusBar } from 'expo-status-bar';
 import { useColorScheme } from '@/lib/useColorScheme';
@@ -19,24 +19,6 @@ SplashScreen.preventAutoHideAsync();
 
 const queryClient = new QueryClient();
 
-function RootLayoutNav({ colorScheme }: { colorScheme: 'light' | 'dark' | null | undefined }) {
-  return (
-    <ThemeProvider value={colorScheme === 'dark' ? DarkTheme : DefaultTheme}>
-      <Stack>
-        <Stack.Screen name="index" options={{ headerShown: false }} />
-        <Stack.Screen name="(tabs)" options={{ headerShown: false }} />
-        <Stack.Screen name="setup" options={{ headerShown: false }} />
-        <Stack.Screen name="kiosk" options={{ headerShown: false }} />
-        <Stack.Screen name="photo-hub" options={{ headerShown: false }} />
-        <Stack.Screen name="admin" options={{ headerShown: false }} />
-        <Stack.Screen name="modal" options={{ presentation: 'modal' }} />
-      </Stack>
-    </ThemeProvider>
-  );
-}
-
-
-
 export default function RootLayout() {
   const colorScheme = useColorScheme();
 
@@ -46,8 +28,10 @@ export default function RootLayout() {
         <SyncProvider>
           <GestureHandlerRootView style={{ flex: 1 }}>
             <KeyboardProvider>
-              <StatusBar style={colorScheme === 'dark' ? 'light' : 'dark'} />
-              <RootLayoutNav colorScheme={colorScheme} />
+              <ThemeProvider value={colorScheme === 'dark' ? DarkTheme : DefaultTheme}>
+                <StatusBar style={colorScheme === 'dark' ? 'light' : 'dark'} />
+                <Slot />
+              </ThemeProvider>
             </KeyboardProvider>
           </GestureHandlerRootView>
         </SyncProvider>

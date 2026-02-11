@@ -1,7 +1,7 @@
-import { useState, useEffect } from 'react';
+import { useState } from 'react';
 import { View, Text, Pressable, TextInput, Modal } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
-import { router } from 'expo-router';
+import { router, Redirect } from 'expo-router';
 import { Play, LayoutDashboard, RefreshCw, Camera, Tablet } from 'lucide-react-native';
 import { useDeviceStore, useDeviceType, useTeamId } from '@/lib/state/device-store';
 import { cn } from '@/lib/cn';
@@ -17,13 +17,6 @@ export default function HomeScreen() {
   const [pinError, setPinError] = useState(false);
 
   const isConfigured = teamId !== null && deviceType !== null;
-
-  // Redirect to setup if not configured
-  useEffect(() => {
-    if (!isConfigured) {
-      router.replace('/setup' as any);
-    }
-  }, [isConfigured]);
 
   const handleStartKiosk = () => {
     router.push('/kiosk' as any);
@@ -53,13 +46,9 @@ export default function HomeScreen() {
     }
   };
 
-  // If not configured, show nothing (redirect will happen)
+  // Redirect to setup if not configured
   if (!isConfigured) {
-    return (
-      <View className="flex-1 bg-black items-center justify-center">
-        <Text className="text-white">Loading...</Text>
-      </View>
-    );
+    return <Redirect href="/setup" />;
   }
 
   return (
