@@ -21,39 +21,36 @@ const MOCK_EVENTS: Event[] = [
     id: '1',
     teamId: 'team-1',
     venueName: 'Central High School',
-    city: 'Austin',
-    state: 'TX',
+    venueCity: 'Austin',
+    venueState: 'TX',
+    eventDate: new Date().toISOString(),
     surveyTypes: ['marijuana', 'alcohol', 'distracted'],
     overlayType: 'marijuana',
     status: 'active',
-    startedAt: new Date().toISOString(),
-    endedAt: null,
     createdAt: new Date().toISOString(),
   },
   {
     id: '2',
     teamId: 'team-1',
     venueName: 'Westside Community Center',
-    city: 'Houston',
-    state: 'TX',
+    venueCity: 'Houston',
+    venueState: 'TX',
+    eventDate: new Date(Date.now() - 7 * 24 * 60 * 60 * 1000).toISOString(),
     surveyTypes: ['alcohol', 'impaired'],
     overlayType: 'alcohol',
     status: 'completed',
-    startedAt: new Date(Date.now() - 7 * 24 * 60 * 60 * 1000).toISOString(),
-    endedAt: new Date(Date.now() - 6 * 24 * 60 * 60 * 1000).toISOString(),
     createdAt: new Date(Date.now() - 7 * 24 * 60 * 60 * 1000).toISOString(),
   },
   {
     id: '3',
     teamId: 'team-1',
     venueName: 'Lincoln Academy',
-    city: 'Dallas',
-    state: 'TX',
+    venueCity: 'Dallas',
+    venueState: 'TX',
+    eventDate: new Date(Date.now() - 14 * 24 * 60 * 60 * 1000).toISOString(),
     surveyTypes: ['distracted', 'combo'],
     overlayType: 'distracted',
     status: 'completed',
-    startedAt: new Date(Date.now() - 14 * 24 * 60 * 60 * 1000).toISOString(),
-    endedAt: new Date(Date.now() - 13 * 24 * 60 * 60 * 1000).toISOString(),
     createdAt: new Date(Date.now() - 14 * 24 * 60 * 60 * 1000).toISOString(),
   },
 ];
@@ -111,7 +108,7 @@ export default function EventsScreen() {
             setEvents((prev) =>
               prev.map((e) =>
                 e.id === eventId
-                  ? { ...e, status: 'completed' as const, endedAt: new Date().toISOString() }
+                  ? { ...e, status: 'completed' as const }
                   : e
               )
             );
@@ -132,13 +129,12 @@ export default function EventsScreen() {
       id: `event-${Date.now()}`,
       teamId: teamId || 'team-1',
       venueName: newVenueName,
-      city: newCity,
-      state: newState,
+      venueCity: newCity,
+      venueState: newState,
+      eventDate: new Date().toISOString(),
       surveyTypes: newSurveyTypes,
       overlayType: newOverlayType,
       status: 'active',
-      startedAt: new Date().toISOString(),
-      endedAt: null,
       createdAt: new Date().toISOString(),
     };
 
@@ -186,9 +182,9 @@ export default function EventsScreen() {
                 key={event.id}
                 id={event.id}
                 venueName={event.venueName}
-                city={event.city}
-                state={event.state}
-                date={event.startedAt}
+                city={event.venueCity}
+                state={event.venueState}
+                date={event.eventDate}
                 surveyCount={MOCK_SURVEY_COUNTS[event.id] || 0}
                 pledgeCount={MOCK_PLEDGE_COUNTS[event.id] || 0}
                 status={event.status}
@@ -214,9 +210,9 @@ export default function EventsScreen() {
                 key={event.id}
                 id={event.id}
                 venueName={event.venueName}
-                city={event.city}
-                state={event.state}
-                date={event.startedAt}
+                city={event.venueCity}
+                state={event.venueState}
+                date={event.eventDate}
                 surveyCount={MOCK_SURVEY_COUNTS[event.id] || 0}
                 pledgeCount={MOCK_PLEDGE_COUNTS[event.id] || 0}
                 status={event.status}
@@ -263,7 +259,7 @@ export default function EventsScreen() {
                 <View className="flex-row items-center mb-4">
                   <MapPin size={16} color="#71717a" />
                   <Text className="text-zinc-400 ml-1">
-                    {selectedEvent.city}, {selectedEvent.state}
+                    {selectedEvent.venueCity}, {selectedEvent.venueState}
                   </Text>
                 </View>
 
@@ -295,19 +291,11 @@ export default function EventsScreen() {
 
                 <View className="bg-zinc-800 rounded-xl p-4 mb-6">
                   <View className="flex-row justify-between mb-2">
-                    <Text className="text-zinc-400 text-sm">Started</Text>
+                    <Text className="text-zinc-400 text-sm">Event Date</Text>
                     <Text className="text-white text-sm">
-                      {new Date(selectedEvent.startedAt).toLocaleString()}
+                      {new Date(selectedEvent.eventDate).toLocaleString()}
                     </Text>
                   </View>
-                  {selectedEvent.endedAt ? (
-                    <View className="flex-row justify-between">
-                      <Text className="text-zinc-400 text-sm">Ended</Text>
-                      <Text className="text-white text-sm">
-                        {new Date(selectedEvent.endedAt).toLocaleString()}
-                      </Text>
-                    </View>
-                  ) : null}
                 </View>
 
                 {selectedEvent.status === 'active' ? (

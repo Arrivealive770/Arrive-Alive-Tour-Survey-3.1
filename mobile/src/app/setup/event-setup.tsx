@@ -36,8 +36,9 @@ export default function EventSetupScreen() {
       const request: CreateEventRequest = {
         teamId: teamId!,
         venueName,
-        city,
-        state,
+        venueCity: city,
+        venueState: state,
+        eventDate: new Date().toISOString(),
         surveyTypes,
         overlayType: overlayType!,
       };
@@ -58,7 +59,7 @@ export default function EventSetupScreen() {
           surveyTypes: JSON.stringify(event.surveyTypes),
           overlayType: event.overlayType,
           activeSurveyType: event.surveyTypes[0] || null,
-          startedAt: new Date().toISOString(),
+          startedAt: event.eventDate,
         });
       }
 

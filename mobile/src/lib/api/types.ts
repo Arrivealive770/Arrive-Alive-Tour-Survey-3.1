@@ -47,21 +47,21 @@ export interface Event {
   id: string;
   teamId: string;
   venueName: string;
-  city: string;
-  state: string;
+  venueCity: string;
+  venueState: string;
+  eventDate: string;
   surveyTypes: SurveyTypeSlug[];
   overlayType: SurveyTypeSlug;
   status: 'active' | 'completed';
-  startedAt: string;
-  endedAt: string | null;
   createdAt: string;
 }
 
 export interface CreateEventRequest {
   teamId: string;
   venueName: string;
-  city: string;
-  state: string;
+  venueCity: string;
+  venueState: string;
+  eventDate: string;
   surveyTypes: SurveyTypeSlug[];
   overlayType: SurveyTypeSlug;
 }
