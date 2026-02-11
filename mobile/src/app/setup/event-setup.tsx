@@ -29,6 +29,7 @@ export default function EventSetupScreen() {
   const teamCode = useDeviceStore((s) => s.teamCode);
   const deviceType = useDeviceStore((s) => s.deviceType);
   const setCurrentEventId = useDeviceStore((s) => s.setCurrentEvent);
+  const setDeviceConfig = useDeviceStore((s) => s.setDeviceConfig);
 
   const { db } = useDatabase();
 
@@ -66,6 +67,12 @@ export default function EventSetupScreen() {
 
     // Store event in device store
     setCurrentEventId(event.id);
+
+    // Store picture pledge settings in device store
+    setDeviceConfig({
+      picturePledgeEnabled: event.picturePledgeEnabled ?? false,
+      currentEventOverlayId: event.overlayType || null,
+    });
 
     // Store event in local database
     if (db) {

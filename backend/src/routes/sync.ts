@@ -418,6 +418,7 @@ syncRouter.post(
               eventDate: activeEvent.eventDate,
               surveyTypes: JSON.parse(activeEvent.surveyTypes),
               overlayType: activeEvent.overlayType,
+              picturePledgeEnabled: activeEvent.picturePledgeEnabled,
             }
           : null,
         pendingWork: {
