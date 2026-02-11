@@ -274,3 +274,22 @@ model SyncLog {
   @@index([teamId])
   @@index([syncedAt])
 }
+
+// ==========================================
+// Overlay Model (Custom Photo Overlays)
+// ==========================================
+
+model Overlay {
+  id          String   @id @default(cuid())
+  name        String
+  fileId      String   // For deletion from storage
+  url         String   // CDN URL
+  filename    String
+  contentType String
+  sizeBytes   Int
+  isActive    Boolean  @default(true)
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  @@index([isActive])
+}

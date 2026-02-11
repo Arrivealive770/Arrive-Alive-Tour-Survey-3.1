@@ -449,6 +449,7 @@ adminPortalRouter.get("/", (c) => {
         <nav class="tabs">
           <div class="tab active" data-tab="teams">Teams</div>
           <div class="tab" data-tab="events">Events</div>
+          <div class="tab" data-tab="overlays">Overlays</div>
           <div class="tab" data-tab="data">Data</div>
         </nav>
 
@@ -515,6 +516,32 @@ adminPortalRouter.get("/", (c) => {
                 <tbody id="eventsBody"></tbody>
               </table>
               <div id="eventsEmpty" class="empty-state" style="display: none;">No events found.</div>
+            </div>
+          </div>
+
+          <!-- Overlays Tab -->
+          <div class="tab-content" id="overlaysTab">
+            <div class="card">
+              <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 20px;">
+                <h2>Photo Overlays</h2>
+                <button class="btn btn-primary btn-sm" onclick="openOverlayModal()">Add Overlay</button>
+              </div>
+              <div id="overlaysLoading" class="loading">Loading overlays...</div>
+              <table id="overlaysTable" style="display: none;">
+                <thead>
+                  <tr>
+                    <th>Preview</th>
+                    <th>Name</th>
+                    <th>Filename</th>
+                    <th>Size</th>
+                    <th>Status</th>
+                    <th>Created</th>
+                    <th>Actions</th>
+                  </tr>
+                </thead>
+                <tbody id="overlaysBody"></tbody>
+              </table>
+              <div id="overlaysEmpty" class="empty-state" style="display: none;">No overlays found. Upload your first overlay!</div>
             </div>
           </div>
 
@@ -676,14 +703,10 @@ adminPortalRouter.get("/", (c) => {
               </div>
             </div>
             <div class="form-group">
-              <label for="eventOverlay">Photo Overlay Type</label>
+              <label for="eventOverlay">Photo Overlay</label>
               <select id="eventOverlay" required>
                 <option value="">Select overlay</option>
-                <option value="standard">Standard</option>
-                <option value="prom">Prom</option>
-                <option value="graduation">Graduation</option>
-                <option value="homecoming">Homecoming</option>
-                <option value="custom">Custom</option>
+                <!-- Options will be populated from database -->
               </select>
             </div>
             <div class="form-group" id="eventStatusGroup" style="display: none;">
@@ -701,10 +724,46 @@ adminPortalRouter.get("/", (c) => {
         </div>
       </div>
 
+      <!-- Overlay Modal -->
+      <div class="modal" id="overlayModal">
+        <div class="modal-content">
+          <div class="modal-header">
+            <h2>Add Overlay</h2>
+            <button class="modal-close" onclick="closeOverlayModal()">&times;</button>
+          </div>
+          <form id="overlayForm">
+            <div class="form-group">
+              <label for="overlayName">Overlay Name</label>
+              <input type="text" id="overlayName" placeholder="e.g., Prom 2026" required>
+            </div>
+            <div class="form-group">
+              <label for="overlayFile">Overlay Image</label>
+              <input type="file" id="overlayFile" accept="image/png,image/jpeg,image/jpg,image/gif,image/webp" required style="padding: 8px;">
+              <p style="font-size: 12px; color: #888; margin-top: 8px;">Accepted formats: PNG, JPG, GIF, WebP</p>
+            </div>
+            <div id="overlayPreview" style="display: none; margin-bottom: 20px;">
+              <label>Preview</label>
+              <img id="overlayPreviewImg" src="" alt="Preview" style="max-width: 100%; max-height: 200px; border-radius: 8px; border: 1px solid #333; margin-top: 8px;">
+            </div>
+            <div id="overlayUploadProgress" style="display: none; margin-bottom: 20px;">
+              <div style="background: #252525; border-radius: 8px; overflow: hidden;">
+                <div id="overlayProgressBar" style="background: #4a9eff; height: 8px; width: 0%; transition: width 0.3s;"></div>
+              </div>
+              <p style="font-size: 12px; color: #888; margin-top: 8px; text-align: center;">Uploading...</p>
+            </div>
+            <div class="modal-footer">
+              <button type="button" class="btn btn-secondary" onclick="closeOverlayModal()">Cancel</button>
+              <button type="submit" class="btn btn-primary" id="overlaySubmitBtn">Upload Overlay</button>
+            </div>
+          </form>
+        </div>
+      </div>
+
       <script>
         // State
         let teams = [];
         let events = [];
+        let overlays = [];
         let analytics = null;
 
         // API Base URL
@@ -727,6 +786,7 @@ adminPortalRouter.get("/", (c) => {
               // Load data for the tab
               if (tab.dataset.tab === 'teams') loadTeams();
               if (tab.dataset.tab === 'events') loadEvents();
+              if (tab.dataset.tab === 'overlays') loadOverlays();
               if (tab.dataset.tab === 'data') {
                 loadAnalytics();
                 loadSurveyResponses();
@@ -738,6 +798,10 @@ adminPortalRouter.get("/", (c) => {
           document.getElementById('loginForm').addEventListener('submit', handleLogin);
           document.getElementById('teamForm').addEventListener('submit', handleTeamSubmit);
           document.getElementById('eventForm').addEventListener('submit', handleEventSubmit);
+          document.getElementById('overlayForm').addEventListener('submit', handleOverlaySubmit);
+
+          // Overlay file preview
+          document.getElementById('overlayFile').addEventListener('change', handleOverlayFileChange);
         });
 
         // Login handler
@@ -779,6 +843,20 @@ adminPortalRouter.get("/", (c) => {
           document.getElementById('loginScreen').style.display = 'none';
           document.getElementById('dashboard').style.display = 'block';
           loadTeams();
+          // Pre-load overlays for the event dropdown
+          loadOverlaysForDropdown();
+        }
+
+        // Load overlays silently for dropdown (doesn't update UI table)
+        async function loadOverlaysForDropdown() {
+          try {
+            const res = await fetch(API_BASE + '/overlays');
+            const data = await res.json();
+            overlays = data.data || [];
+            updateOverlayDropdown();
+          } catch (err) {
+            console.error('Error loading overlays for dropdown:', err);
+          }
         }
 
         // Teams
@@ -1091,6 +1169,215 @@ adminPortalRouter.get("/", (c) => {
           } catch (err) {
             alert('Error saving event');
           }
+        }
+
+        // Overlays
+        async function loadOverlays() {
+          document.getElementById('overlaysLoading').style.display = 'block';
+          document.getElementById('overlaysTable').style.display = 'none';
+          document.getElementById('overlaysEmpty').style.display = 'none';
+
+          try {
+            const res = await fetch(API_BASE + '/overlays');
+            const data = await res.json();
+            overlays = data.data || [];
+
+            if (overlays.length === 0) {
+              document.getElementById('overlaysLoading').style.display = 'none';
+              document.getElementById('overlaysEmpty').style.display = 'block';
+              updateOverlayDropdown();
+              return;
+            }
+
+            const tbody = document.getElementById('overlaysBody');
+            tbody.innerHTML = overlays.map(overlay => \`
+              <tr>
+                <td>
+                  <img src="\${escapeHtml(overlay.url)}" alt="\${escapeHtml(overlay.name)}"
+                       style="max-width: 80px; max-height: 60px; border-radius: 4px; border: 1px solid #333;">
+                </td>
+                <td>\${escapeHtml(overlay.name)}</td>
+                <td>\${escapeHtml(overlay.filename)}</td>
+                <td>\${formatFileSize(overlay.sizeBytes)}</td>
+                <td>
+                  <span class="badge \${overlay.isActive ? 'badge-success' : 'badge-warning'}">
+                    \${overlay.isActive ? 'Active' : 'Inactive'}
+                  </span>
+                </td>
+                <td>\${new Date(overlay.createdAt).toLocaleDateString()}</td>
+                <td class="actions">
+                  <button class="btn btn-secondary btn-sm" onclick="toggleOverlayStatus('\${overlay.id}', \${!overlay.isActive})">
+                    \${overlay.isActive ? 'Deactivate' : 'Activate'}
+                  </button>
+                  <button class="btn btn-danger btn-sm" onclick="deleteOverlay('\${overlay.id}')">Delete</button>
+                </td>
+              </tr>
+            \`).join('');
+
+            document.getElementById('overlaysLoading').style.display = 'none';
+            document.getElementById('overlaysTable').style.display = 'table';
+
+            // Update overlay dropdown in event modal
+            updateOverlayDropdown();
+          } catch (err) {
+            document.getElementById('overlaysLoading').textContent = 'Error loading overlays';
+            console.error('Error loading overlays:', err);
+          }
+        }
+
+        function updateOverlayDropdown() {
+          const select = document.getElementById('eventOverlay');
+          const currentValue = select.value;
+          select.innerHTML = '<option value="">Select overlay</option>';
+
+          // Add active overlays from database
+          const activeOverlays = overlays.filter(o => o.isActive);
+          activeOverlays.forEach(overlay => {
+            const option = document.createElement('option');
+            option.value = overlay.id;
+            option.textContent = overlay.name;
+            select.appendChild(option);
+          });
+
+          // If no overlays exist, show a hint
+          if (activeOverlays.length === 0) {
+            const option = document.createElement('option');
+            option.value = "";
+            option.textContent = "No overlays available - add one in Overlays tab";
+            option.disabled = true;
+            select.appendChild(option);
+          }
+
+          select.value = currentValue;
+        }
+
+        function openOverlayModal() {
+          document.getElementById('overlayName').value = '';
+          document.getElementById('overlayFile').value = '';
+          document.getElementById('overlayPreview').style.display = 'none';
+          document.getElementById('overlayUploadProgress').style.display = 'none';
+          document.getElementById('overlaySubmitBtn').disabled = false;
+          document.getElementById('overlayModal').classList.add('active');
+        }
+
+        function closeOverlayModal() {
+          document.getElementById('overlayModal').classList.remove('active');
+        }
+
+        function handleOverlayFileChange(e) {
+          const file = e.target.files[0];
+          if (file) {
+            const reader = new FileReader();
+            reader.onload = function(e) {
+              document.getElementById('overlayPreviewImg').src = e.target.result;
+              document.getElementById('overlayPreview').style.display = 'block';
+            };
+            reader.readAsDataURL(file);
+          } else {
+            document.getElementById('overlayPreview').style.display = 'none';
+          }
+        }
+
+        async function handleOverlaySubmit(e) {
+          e.preventDefault();
+          const name = document.getElementById('overlayName').value;
+          const fileInput = document.getElementById('overlayFile');
+          const file = fileInput.files[0];
+
+          if (!file) {
+            alert('Please select a file');
+            return;
+          }
+
+          // Show progress
+          document.getElementById('overlayUploadProgress').style.display = 'block';
+          document.getElementById('overlaySubmitBtn').disabled = true;
+          document.getElementById('overlayProgressBar').style.width = '30%';
+
+          try {
+            const formData = new FormData();
+            formData.append('file', file);
+            formData.append('name', name);
+
+            document.getElementById('overlayProgressBar').style.width = '60%';
+
+            const res = await fetch(API_BASE + '/overlays', {
+              method: 'POST',
+              body: formData
+            });
+
+            document.getElementById('overlayProgressBar').style.width = '90%';
+
+            const data = await res.json();
+
+            if (data.error) {
+              alert(data.error.message);
+              document.getElementById('overlayUploadProgress').style.display = 'none';
+              document.getElementById('overlaySubmitBtn').disabled = false;
+              return;
+            }
+
+            document.getElementById('overlayProgressBar').style.width = '100%';
+
+            setTimeout(() => {
+              closeOverlayModal();
+              loadOverlays();
+            }, 300);
+          } catch (err) {
+            alert('Error uploading overlay');
+            document.getElementById('overlayUploadProgress').style.display = 'none';
+            document.getElementById('overlaySubmitBtn').disabled = false;
+          }
+        }
+
+        async function toggleOverlayStatus(id, isActive) {
+          try {
+            const res = await fetch(API_BASE + '/overlays/' + id, {
+              method: 'PUT',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({ isActive })
+            });
+
+            const data = await res.json();
+
+            if (data.error) {
+              alert(data.error.message);
+              return;
+            }
+
+            loadOverlays();
+          } catch (err) {
+            alert('Error updating overlay');
+          }
+        }
+
+        async function deleteOverlay(id) {
+          if (!confirm('Are you sure you want to delete this overlay? This cannot be undone.')) return;
+
+          try {
+            const res = await fetch(API_BASE + '/overlays/' + id, {
+              method: 'DELETE'
+            });
+
+            const data = await res.json();
+
+            if (data.error) {
+              alert(data.error.message);
+              return;
+            }
+
+            loadOverlays();
+          } catch (err) {
+            alert('Error deleting overlay');
+          }
+        }
+
+        function formatFileSize(bytes) {
+          if (bytes === 0) return '0 Bytes';
+          const k = 1024;
+          const sizes = ['Bytes', 'KB', 'MB', 'GB'];
+          const i = Math.floor(Math.log(bytes) / Math.log(k));
+          return parseFloat((bytes / Math.pow(k, i)).toFixed(2)) + ' ' + sizes[i];
         }
 
         // Analytics & Data
