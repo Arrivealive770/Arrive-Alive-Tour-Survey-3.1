@@ -1,5 +1,5 @@
 import { useEffect, useState, useRef, useCallback } from 'react';
-import { View, Pressable, BackHandler, StatusBar } from 'react-native';
+import { View, Pressable, BackHandler, StatusBar, Platform } from 'react-native';
 import { Stack, useRouter } from 'expo-router';
 import * as KeepAwake from 'expo-keep-awake';
 import { useDeviceStore } from '@/lib/state/device-store';
@@ -14,8 +14,10 @@ export default function KioskLayout() {
   const tapCountRef = useRef(0);
   const lastTapRef = useRef<number>(0);
 
-  // Keep screen awake in kiosk mode
+  // Keep screen awake in kiosk mode (native only - not supported on web)
   useEffect(() => {
+    if (Platform.OS === 'web') return;
+
     KeepAwake.activateKeepAwakeAsync('kiosk-mode');
 
     return () => {
