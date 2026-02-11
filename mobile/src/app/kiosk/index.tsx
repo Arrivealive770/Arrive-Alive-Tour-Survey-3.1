@@ -5,9 +5,11 @@ import { useRouter } from 'expo-router';
 import { Cannabis, Wine, Smartphone, AlertTriangle, Layers } from 'lucide-react-native';
 import { SurveyTypeCard } from '@/components/kiosk';
 import { useSurveyStore } from '@/lib/state/survey-store';
+import { useDeviceStore } from '@/lib/state/device-store';
 import { useDatabase } from '@/providers/DatabaseProvider';
+import { api } from '@/lib/api/api';
 import type { LucideIcon } from 'lucide-react-native';
-import type { SurveyTypeSlug } from '@/lib/api/types';
+import type { SurveyTypeSlug, Event } from '@/lib/api/types';
 
 const AATLogo = require('@/assets/aat-logo.png');
 
@@ -24,13 +26,15 @@ export default function KioskHome() {
   const router = useRouter();
   const { db, isReady } = useDatabase();
   const startSurvey = useSurveyStore((s) => s.startSurvey);
+  const currentEventId = useDeviceStore((s) => s.currentEventId);
+  const setDeviceConfig = useDeviceStore((s) => s.setDeviceConfig);
 
   const [surveyTypes, setSurveyTypes] = useState<SurveyTypeSlug[]>([]);
   const [venueName, setVenueName] = useState<string>('');
   const [loading, setLoading] = useState(true);
   const [autoStarted, setAutoStarted] = useState(false);
 
-  // Load survey types from the current event
+  // Load survey types from the current event AND refresh picture pledge settings from server
   useEffect(() => {
     async function loadEventData() {
       if (!isReady || !db) return;
@@ -51,6 +55,23 @@ export default function KioskHome() {
             }
           }
         }
+
+        // Refresh event settings from server to get latest picturePledgeEnabled
+        if (currentEventId) {
+          try {
+            const event = await api.get<Event>(`/api/events/${currentEventId}`);
+            console.log('[KioskHome] Refreshed event from server:', {
+              picturePledgeEnabled: event.picturePledgeEnabled,
+              overlayType: event.overlayType,
+            });
+            setDeviceConfig({
+              picturePledgeEnabled: event.picturePledgeEnabled ?? false,
+              currentEventOverlayId: event.overlayType || null,
+            });
+          } catch (err) {
+            console.error('[KioskHome] Failed to refresh event from server:', err);
+          }
+        }
       } catch (error) {
         console.error('[KioskHome] Error loading event data:', error);
       } finally {
@@ -59,7 +80,7 @@ export default function KioskHome() {
     }
 
     loadEventData();
-  }, [isReady, db]);
+  }, [isReady, db, currentEventId, setDeviceConfig]);
 
   // Auto-start if only one survey type
   useEffect(() => {
