@@ -30,7 +30,13 @@ eventsRouter.get("/", async (c) => {
     orderBy: { eventDate: "desc" },
   });
 
-  return c.json({ data: events });
+  // Parse surveyTypes JSON string to array
+  const parsedEvents = events.map(event => ({
+    ...event,
+    surveyTypes: JSON.parse(event.surveyTypes),
+  }));
+
+  return c.json({ data: parsedEvents });
 });
 
 // GET /api/events/:id - Get event by ID
