@@ -16,7 +16,7 @@ const batchSurveySchema = z.object({
       teamId: z.string(),
       eventId: z.string(),
       surveyTypeSlug: z.string(),
-      responses: z.record(z.string(), z.any()),
+      responses: z.union([z.string(), z.record(z.string(), z.any())]), // Accept string OR object
       ageRange: z.string().optional().nullable(),
       deviceId: z.string().optional(), // Mobile may include this
       completedAt: z.string().optional(),
@@ -76,7 +76,10 @@ syncRouter.post(
             teamId: survey.teamId,
             eventId: survey.eventId,
             surveyTypeSlug: survey.surveyTypeSlug,
-            responses: JSON.stringify(survey.responses),
+            // Handle responses as either string or object
+            responses: typeof survey.responses === 'string'
+              ? survey.responses
+              : JSON.stringify(survey.responses),
             ageRange: survey.ageRange,
             deviceId: deviceId,
             completedAt: survey.completedAt ? new Date(survey.completedAt) : new Date(),
