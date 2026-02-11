@@ -1,120 +1,131 @@
-import { useState, useEffect, useCallback, useMemo } from 'react';
+import { useState, useEffect, useCallback } from 'react';
 import { View, Text, ScrollView, ActivityIndicator } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useRouter } from 'expo-router';
-import { ClipboardList, Users, Car, Shield, GraduationCap, Heart } from 'lucide-react-native';
-import { SurveyTypeCard, IdleResetTimer } from '@/components/kiosk';
+import { Cannabis, Wine, Smartphone, AlertTriangle, Layers } from 'lucide-react-native';
+import { SurveyTypeCard } from '@/components/kiosk';
 import { useSurveyStore } from '@/lib/state/survey-store';
 import { useDatabase } from '@/providers/DatabaseProvider';
 import type { LucideIcon } from 'lucide-react-native';
+import type { SurveyTypeSlug } from '@/lib/api/types';
 
-// Mock survey types - in production, these come from current_event.surveyTypes
-const MOCK_SURVEY_TYPES = [
-  { slug: 'high-school', name: 'High School', icon: 'graduation' },
-  { slug: 'college', name: 'College', icon: 'users' },
-  { slug: 'general', name: 'General Public', icon: 'clipboard' },
-  { slug: 'military', name: 'Military', icon: 'shield' },
-];
-
-// Map icon names to Lucide components
-const ICON_MAP: Record<string, LucideIcon> = {
-  graduation: GraduationCap,
-  users: Users,
-  clipboard: ClipboardList,
-  car: Car,
-  shield: Shield,
-  heart: Heart,
+// Map survey type slugs to display info
+const SURVEY_TYPE_INFO: Record<SurveyTypeSlug, { name: string; Icon: LucideIcon }> = {
+  marijuana: { name: 'Marijuana', Icon: Cannabis },
+  alcohol: { name: 'Alcohol', Icon: Wine },
+  distracted: { name: 'Distracted Driving', Icon: Smartphone },
+  impaired: { name: 'Impaired Driving', Icon: AlertTriangle },
+  combo: { name: 'Combo Survey', Icon: Layers },
 };
 
-interface SurveyType {
-  slug: string;
-  name: string;
-  icon?: string;
-}
-
-export default function SurveyTypeSelection() {
+export default function KioskHome() {
   const router = useRouter();
   const { db, isReady } = useDatabase();
   const startSurvey = useSurveyStore((s) => s.startSurvey);
 
-  const [surveyTypes, setSurveyTypes] = useState<SurveyType[]>([]);
+  const [surveyTypes, setSurveyTypes] = useState<SurveyTypeSlug[]>([]);
+  const [venueName, setVenueName] = useState<string>('');
   const [loading, setLoading] = useState(true);
+  const [autoStarted, setAutoStarted] = useState(false);
 
-  // Load survey types from database
+  // Load survey types from the current event
   useEffect(() => {
-    async function loadSurveyTypes() {
+    async function loadEventData() {
       if (!isReady || !db) return;
 
       try {
         const currentEvent = await db.getCurrentEvent();
 
-        if (currentEvent?.surveyTypes) {
-          try {
-            const types = JSON.parse(currentEvent.surveyTypes) as SurveyType[];
-            if (types.length > 0) {
+        if (currentEvent) {
+          setVenueName(currentEvent.venueName || '');
+
+          if (currentEvent.surveyTypes) {
+            try {
+              const types = JSON.parse(currentEvent.surveyTypes) as SurveyTypeSlug[];
               setSurveyTypes(types);
-            } else {
-              setSurveyTypes(MOCK_SURVEY_TYPES);
+            } catch {
+              console.error('[KioskHome] Failed to parse survey types');
+              setSurveyTypes([]);
             }
-          } catch {
-            setSurveyTypes(MOCK_SURVEY_TYPES);
           }
-        } else {
-          // Use mock data if no event configured
-          setSurveyTypes(MOCK_SURVEY_TYPES);
         }
       } catch (error) {
-        console.error('[SurveyTypeSelection] Error loading survey types:', error);
-        setSurveyTypes(MOCK_SURVEY_TYPES);
+        console.error('[KioskHome] Error loading event data:', error);
       } finally {
         setLoading(false);
       }
     }
 
-    loadSurveyTypes();
+    loadEventData();
   }, [isReady, db]);
+
+  // Auto-start if only one survey type
+  useEffect(() => {
+    if (!loading && surveyTypes.length === 1 && !autoStarted) {
+      setAutoStarted(true);
+      startSurvey(surveyTypes[0]);
+      if (db) {
+        db.updateActiveSurveyType(surveyTypes[0]).catch(console.error);
+      }
+      router.push('/kiosk/survey/1' as any);
+    }
+  }, [loading, surveyTypes, autoStarted, startSurvey, db, router]);
 
   const handleSelectSurveyType = useCallback(
     (slug: string) => {
-      // Start the survey with the selected type
       startSurvey(slug);
-
-      // Update active survey type in database
       if (db) {
         db.updateActiveSurveyType(slug).catch(console.error);
       }
-
-      // Navigate to first question
       router.push('/kiosk/survey/1' as any);
     },
     [startSurvey, db, router]
   );
 
-  // This is the staff selection screen - no idle reset here
-  // Idle reset only happens on survey screens
-
-  if (loading) {
+  if (loading || (surveyTypes.length === 1 && !autoStarted)) {
     return (
       <SafeAreaView className="flex-1 bg-black" edges={['top', 'bottom']}>
         <View className="flex-1 items-center justify-center">
           <ActivityIndicator size="large" color="#22c55e" />
-          <Text className="text-zinc-400 mt-4 text-lg">Loading survey types...</Text>
+          <Text className="text-zinc-400 mt-4 text-lg">
+            {surveyTypes.length === 1 ? 'Starting survey...' : 'Loading...'}
+          </Text>
         </View>
       </SafeAreaView>
     );
   }
 
+  // If no survey types configured, show error
+  if (surveyTypes.length === 0) {
+    return (
+      <SafeAreaView className="flex-1 bg-black" edges={['top', 'bottom']}>
+        <View className="flex-1 items-center justify-center px-8">
+          <AlertTriangle size={64} color="#ef4444" />
+          <Text className="text-white text-2xl font-bold mt-6 text-center">
+            No Surveys Configured
+          </Text>
+          <Text className="text-zinc-400 text-lg mt-2 text-center">
+            This event has no survey types set up. Contact your administrator.
+          </Text>
+        </View>
+      </SafeAreaView>
+    );
+  }
+
+  // Multiple survey types - show selection screen
   return (
     <SafeAreaView className="flex-1 bg-black" edges={['top', 'bottom']}>
       <View className="flex-1 px-6">
         {/* Header */}
         <View className="py-8">
           <Text className="text-4xl font-bold text-white text-center mb-2">
-            Select Survey Type
+            Select Survey
           </Text>
-          <Text className="text-lg text-zinc-400 text-center">
-            Choose the appropriate survey for this participant
-          </Text>
+          {venueName ? (
+            <Text className="text-lg text-zinc-400 text-center">
+              {venueName}
+            </Text>
+          ) : null}
         </View>
 
         {/* Survey Type Grid */}
@@ -129,15 +140,20 @@ export default function SurveyTypeSelection() {
           }}
           showsVerticalScrollIndicator={false}
         >
-          {surveyTypes.map((type) => (
-            <SurveyTypeCard
-              key={type.slug}
-              name={type.name}
-              slug={type.slug}
-              Icon={type.icon ? ICON_MAP[type.icon] : ClipboardList}
-              onPress={handleSelectSurveyType}
-            />
-          ))}
+          {surveyTypes.map((slug) => {
+            const info = SURVEY_TYPE_INFO[slug];
+            if (!info) return null;
+
+            return (
+              <SurveyTypeCard
+                key={slug}
+                name={info.name}
+                slug={slug}
+                Icon={info.Icon}
+                onPress={handleSelectSurveyType}
+              />
+            );
+          })}
         </ScrollView>
       </View>
     </SafeAreaView>
