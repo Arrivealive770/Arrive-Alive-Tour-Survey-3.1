@@ -68,6 +68,9 @@ app.get("/health", (c) => c.json({ status: "ok" }));
 // Serve uploaded files
 app.use("/uploads/*", serveStatic({ root: "./" }));
 
+// Serve static public assets
+app.use("/public/*", serveStatic({ root: "./src" }));
+
 // Routes
 app.route("/api/sample", sampleRouter);
 app.route("/api/teams", teamsRouter);

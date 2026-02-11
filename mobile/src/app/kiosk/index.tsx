@@ -1,5 +1,5 @@
 import { useState, useEffect, useCallback } from 'react';
-import { View, Text, ScrollView, ActivityIndicator } from 'react-native';
+import { View, Text, ScrollView, ActivityIndicator, Image } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useRouter } from 'expo-router';
 import { Cannabis, Wine, Smartphone, AlertTriangle, Layers } from 'lucide-react-native';
@@ -8,6 +8,8 @@ import { useSurveyStore } from '@/lib/state/survey-store';
 import { useDatabase } from '@/providers/DatabaseProvider';
 import type { LucideIcon } from 'lucide-react-native';
 import type { SurveyTypeSlug } from '@/lib/api/types';
+
+const AATLogo = require('@/assets/aat-logo.png');
 
 // Map survey type slugs to display info
 const SURVEY_TYPE_INFO: Record<SurveyTypeSlug, { name: string; Icon: LucideIcon }> = {
@@ -116,8 +118,15 @@ export default function KioskHome() {
   return (
     <SafeAreaView className="flex-1 bg-black" edges={['top', 'bottom']}>
       <View className="flex-1 px-6">
-        {/* Header */}
-        <View className="py-8">
+        {/* Logo and Header */}
+        <View className="py-6">
+          <View className="items-center mb-4">
+            <Image
+              source={AATLogo}
+              style={{ width: 160, height: 80 }}
+              resizeMode="contain"
+            />
+          </View>
           <Text className="text-4xl font-bold text-white text-center mb-2">
             Select Survey
           </Text>

@@ -420,6 +420,9 @@ adminPortalRouter.get("/", (c) => {
       <!-- Login Screen -->
       <div class="login-container" id="loginScreen">
         <div class="login-box">
+          <div style="text-align: center; margin-bottom: 24px;">
+            <img src="/public/aat-logo.png" alt="Arrive Alive Tour" style="max-width: 200px; height: auto;">
+          </div>
           <h1>Arrive Alive Tour</h1>
           <p>Admin Portal</p>
           <form id="loginForm">
@@ -436,7 +439,10 @@ adminPortalRouter.get("/", (c) => {
       <!-- Dashboard -->
       <div class="dashboard" id="dashboard">
         <header class="header">
-          <h1>Arrive Alive Tour Admin</h1>
+          <div style="display: flex; align-items: center; gap: 16px;">
+            <img src="/public/aat-logo.png" alt="Arrive Alive Tour" style="height: 40px; width: auto;">
+            <h1>Arrive Alive Tour Admin</h1>
+          </div>
           <button class="btn btn-secondary btn-sm" onclick="logout()">Logout</button>
         </header>
 

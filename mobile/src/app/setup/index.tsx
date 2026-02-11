@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { View, Text, Pressable, ActivityIndicator } from 'react-native';
+import { View, Text, Pressable, ActivityIndicator, Image } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { router } from 'expo-router';
 import { useMutation } from '@tanstack/react-query';
@@ -7,6 +7,8 @@ import { TeamCodeInput } from '@/components/setup';
 import { useDeviceStore } from '@/lib/state/device-store';
 import { api } from '@/lib/api/api';
 import type { Team } from '@/lib/api/types';
+
+const AATLogo = require('@/assets/aat-logo.png');
 
 export default function TeamSelectionScreen() {
   const [teamCode, setTeamCode] = useState('');
@@ -47,9 +49,18 @@ export default function TeamSelectionScreen() {
 
   return (
     <SafeAreaView className="flex-1 bg-black">
-      <View className="flex-1 px-8 pt-16">
+      <View className="flex-1 px-8 pt-8">
+        {/* Logo */}
+        <View className="items-center mb-8">
+          <Image
+            source={AATLogo}
+            style={{ width: 200, height: 100 }}
+            resizeMode="contain"
+          />
+        </View>
+
         {/* Header */}
-        <View className="mb-16">
+        <View className="mb-12">
           <Text className="text-4xl font-bold text-white mb-2">
             Setup Device
           </Text>
