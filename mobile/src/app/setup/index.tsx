@@ -3,7 +3,6 @@ import { View, Text, Pressable, ActivityIndicator } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { router } from 'expo-router';
 import { useMutation } from '@tanstack/react-query';
-import { Lock } from 'lucide-react-native';
 import { TeamCodeInput } from '@/components/setup';
 import { useDeviceStore } from '@/lib/state/device-store';
 import { api } from '@/lib/api/api';
@@ -94,20 +93,11 @@ export default function TeamSelectionScreen() {
           )}
         </Pressable>
 
-        {/* Footer with Admin Access */}
+        {/* Footer */}
         <View className="flex-1 justify-end pb-8">
-          <Text className="text-center text-zinc-600 text-sm mb-6">
+          <Text className="text-center text-zinc-600 text-sm">
             Contact your team administrator if you don't have a team code
           </Text>
-
-          {/* Admin Access Link */}
-          <Pressable
-            onPress={() => router.push('/admin/login' as any)}
-            className="flex-row items-center justify-center py-3 active:opacity-70"
-          >
-            <Lock size={16} color="#3b82f6" />
-            <Text className="text-blue-500 ml-2 font-medium">Admin Access</Text>
-          </Pressable>
         </View>
       </View>
     </SafeAreaView>

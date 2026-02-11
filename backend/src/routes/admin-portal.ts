@@ -1,0 +1,1209 @@
+import { Hono } from "hono";
+import { html } from "hono/html";
+
+const adminPortalRouter = new Hono();
+
+// Admin password (in production, this should be hashed and stored securely)
+const ADMIN_PASSWORD = "admin123";
+
+// POST /admin/verify-password - Verify admin password
+adminPortalRouter.post("/verify-password", async (c) => {
+  const { password } = await c.req.json();
+  if (password === ADMIN_PASSWORD) {
+    return c.json({ success: true });
+  }
+  return c.json({ success: false, error: "Invalid password" }, 401);
+});
+
+// GET /admin - Serve the admin portal HTML
+adminPortalRouter.get("/", (c) => {
+  return c.html(html`
+    <!DOCTYPE html>
+    <html lang="en">
+    <head>
+      <meta charset="UTF-8">
+      <meta name="viewport" content="width=device-width, initial-scale=1.0">
+      <title>Arrive Alive Tour - Admin Portal</title>
+      <style>
+        * {
+          margin: 0;
+          padding: 0;
+          box-sizing: border-box;
+        }
+
+        body {
+          font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, sans-serif;
+          background: #0f0f0f;
+          color: #e0e0e0;
+          min-height: 100vh;
+        }
+
+        .login-container {
+          display: flex;
+          justify-content: center;
+          align-items: center;
+          min-height: 100vh;
+          padding: 20px;
+        }
+
+        .login-box {
+          background: #1a1a1a;
+          border: 1px solid #2a2a2a;
+          border-radius: 12px;
+          padding: 40px;
+          width: 100%;
+          max-width: 400px;
+        }
+
+        .login-box h1 {
+          color: #fff;
+          margin-bottom: 8px;
+          font-size: 24px;
+        }
+
+        .login-box p {
+          color: #888;
+          margin-bottom: 24px;
+        }
+
+        .form-group {
+          margin-bottom: 20px;
+        }
+
+        .form-group label {
+          display: block;
+          margin-bottom: 8px;
+          color: #aaa;
+          font-size: 14px;
+        }
+
+        .form-group input, .form-group select, .form-group textarea {
+          width: 100%;
+          padding: 12px 16px;
+          background: #252525;
+          border: 1px solid #333;
+          border-radius: 8px;
+          color: #fff;
+          font-size: 16px;
+        }
+
+        .form-group input:focus, .form-group select:focus, .form-group textarea:focus {
+          outline: none;
+          border-color: #4a9eff;
+        }
+
+        .btn {
+          padding: 12px 24px;
+          border: none;
+          border-radius: 8px;
+          cursor: pointer;
+          font-size: 16px;
+          font-weight: 500;
+          transition: background 0.2s;
+        }
+
+        .btn-primary {
+          background: #4a9eff;
+          color: #fff;
+          width: 100%;
+        }
+
+        .btn-primary:hover {
+          background: #3a8eef;
+        }
+
+        .btn-secondary {
+          background: #333;
+          color: #fff;
+        }
+
+        .btn-secondary:hover {
+          background: #444;
+        }
+
+        .btn-danger {
+          background: #dc3545;
+          color: #fff;
+        }
+
+        .btn-danger:hover {
+          background: #c82333;
+        }
+
+        .btn-success {
+          background: #28a745;
+          color: #fff;
+        }
+
+        .btn-success:hover {
+          background: #218838;
+        }
+
+        .error-message {
+          color: #ff6b6b;
+          margin-top: 12px;
+          text-align: center;
+        }
+
+        /* Dashboard Styles */
+        .dashboard {
+          display: none;
+        }
+
+        .header {
+          background: #1a1a1a;
+          border-bottom: 1px solid #2a2a2a;
+          padding: 16px 24px;
+          display: flex;
+          justify-content: space-between;
+          align-items: center;
+        }
+
+        .header h1 {
+          color: #fff;
+          font-size: 20px;
+        }
+
+        .tabs {
+          display: flex;
+          background: #1a1a1a;
+          border-bottom: 1px solid #2a2a2a;
+          padding: 0 24px;
+        }
+
+        .tab {
+          padding: 16px 24px;
+          color: #888;
+          cursor: pointer;
+          border-bottom: 2px solid transparent;
+          transition: all 0.2s;
+        }
+
+        .tab:hover {
+          color: #ccc;
+        }
+
+        .tab.active {
+          color: #4a9eff;
+          border-bottom-color: #4a9eff;
+        }
+
+        .content {
+          padding: 24px;
+          max-width: 1400px;
+          margin: 0 auto;
+        }
+
+        .tab-content {
+          display: none;
+        }
+
+        .tab-content.active {
+          display: block;
+        }
+
+        .card {
+          background: #1a1a1a;
+          border: 1px solid #2a2a2a;
+          border-radius: 12px;
+          padding: 24px;
+          margin-bottom: 24px;
+        }
+
+        .card h2 {
+          color: #fff;
+          margin-bottom: 16px;
+          font-size: 18px;
+        }
+
+        .card h3 {
+          color: #ccc;
+          margin-bottom: 12px;
+          font-size: 16px;
+        }
+
+        table {
+          width: 100%;
+          border-collapse: collapse;
+        }
+
+        th, td {
+          padding: 12px 16px;
+          text-align: left;
+          border-bottom: 1px solid #2a2a2a;
+        }
+
+        th {
+          color: #888;
+          font-weight: 500;
+          font-size: 14px;
+        }
+
+        td {
+          color: #e0e0e0;
+        }
+
+        tr:hover {
+          background: #252525;
+        }
+
+        .badge {
+          display: inline-block;
+          padding: 4px 12px;
+          border-radius: 20px;
+          font-size: 12px;
+          font-weight: 500;
+        }
+
+        .badge-success {
+          background: rgba(40, 167, 69, 0.2);
+          color: #28a745;
+        }
+
+        .badge-warning {
+          background: rgba(255, 193, 7, 0.2);
+          color: #ffc107;
+        }
+
+        .badge-danger {
+          background: rgba(220, 53, 69, 0.2);
+          color: #dc3545;
+        }
+
+        .badge-info {
+          background: rgba(74, 158, 255, 0.2);
+          color: #4a9eff;
+        }
+
+        .stats-grid {
+          display: grid;
+          grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+          gap: 16px;
+          margin-bottom: 24px;
+        }
+
+        .stat-card {
+          background: #1a1a1a;
+          border: 1px solid #2a2a2a;
+          border-radius: 12px;
+          padding: 20px;
+        }
+
+        .stat-card h3 {
+          color: #888;
+          font-size: 14px;
+          margin-bottom: 8px;
+        }
+
+        .stat-card .value {
+          color: #fff;
+          font-size: 32px;
+          font-weight: 600;
+        }
+
+        .actions {
+          display: flex;
+          gap: 8px;
+        }
+
+        .btn-sm {
+          padding: 6px 12px;
+          font-size: 14px;
+        }
+
+        .modal {
+          display: none;
+          position: fixed;
+          top: 0;
+          left: 0;
+          right: 0;
+          bottom: 0;
+          background: rgba(0, 0, 0, 0.8);
+          justify-content: center;
+          align-items: center;
+          z-index: 1000;
+        }
+
+        .modal.active {
+          display: flex;
+        }
+
+        .modal-content {
+          background: #1a1a1a;
+          border: 1px solid #2a2a2a;
+          border-radius: 12px;
+          padding: 24px;
+          width: 100%;
+          max-width: 500px;
+          max-height: 90vh;
+          overflow-y: auto;
+        }
+
+        .modal-header {
+          display: flex;
+          justify-content: space-between;
+          align-items: center;
+          margin-bottom: 20px;
+        }
+
+        .modal-header h2 {
+          color: #fff;
+          font-size: 20px;
+        }
+
+        .modal-close {
+          background: none;
+          border: none;
+          color: #888;
+          font-size: 24px;
+          cursor: pointer;
+        }
+
+        .modal-close:hover {
+          color: #fff;
+        }
+
+        .modal-footer {
+          display: flex;
+          justify-content: flex-end;
+          gap: 12px;
+          margin-top: 24px;
+        }
+
+        .checkbox-group {
+          display: flex;
+          flex-wrap: wrap;
+          gap: 12px;
+        }
+
+        .checkbox-item {
+          display: flex;
+          align-items: center;
+          gap: 8px;
+        }
+
+        .checkbox-item input {
+          width: 18px;
+          height: 18px;
+        }
+
+        .filter-row {
+          display: flex;
+          gap: 16px;
+          flex-wrap: wrap;
+          margin-bottom: 20px;
+        }
+
+        .filter-row .form-group {
+          margin-bottom: 0;
+          min-width: 200px;
+        }
+
+        .loading {
+          text-align: center;
+          padding: 40px;
+          color: #888;
+        }
+
+        .empty-state {
+          text-align: center;
+          padding: 40px;
+          color: #666;
+        }
+
+        .text-muted {
+          color: #666;
+        }
+      </style>
+    </head>
+    <body>
+      <!-- Login Screen -->
+      <div class="login-container" id="loginScreen">
+        <div class="login-box">
+          <h1>Arrive Alive Tour</h1>
+          <p>Admin Portal</p>
+          <form id="loginForm">
+            <div class="form-group">
+              <label for="password">Password</label>
+              <input type="password" id="password" placeholder="Enter admin password" required>
+            </div>
+            <button type="submit" class="btn btn-primary">Sign In</button>
+            <p class="error-message" id="loginError" style="display: none;"></p>
+          </form>
+        </div>
+      </div>
+
+      <!-- Dashboard -->
+      <div class="dashboard" id="dashboard">
+        <header class="header">
+          <h1>Arrive Alive Tour Admin</h1>
+          <button class="btn btn-secondary btn-sm" onclick="logout()">Logout</button>
+        </header>
+
+        <nav class="tabs">
+          <div class="tab active" data-tab="teams">Teams</div>
+          <div class="tab" data-tab="events">Events</div>
+          <div class="tab" data-tab="data">Data</div>
+        </nav>
+
+        <main class="content">
+          <!-- Teams Tab -->
+          <div class="tab-content active" id="teamsTab">
+            <div class="card">
+              <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 20px;">
+                <h2>Tour Teams</h2>
+                <button class="btn btn-primary btn-sm" onclick="openTeamModal()">Add Team</button>
+              </div>
+              <div id="teamsLoading" class="loading">Loading teams...</div>
+              <table id="teamsTable" style="display: none;">
+                <thead>
+                  <tr>
+                    <th>Name</th>
+                    <th>Code</th>
+                    <th>Created</th>
+                    <th>Actions</th>
+                  </tr>
+                </thead>
+                <tbody id="teamsBody"></tbody>
+              </table>
+              <div id="teamsEmpty" class="empty-state" style="display: none;">No teams found. Create your first team!</div>
+            </div>
+          </div>
+
+          <!-- Events Tab -->
+          <div class="tab-content" id="eventsTab">
+            <div class="card">
+              <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 20px;">
+                <h2>Events</h2>
+                <button class="btn btn-primary btn-sm" onclick="openEventModal()">Add Event</button>
+              </div>
+              <div class="filter-row">
+                <div class="form-group">
+                  <label for="eventTeamFilter">Filter by Team</label>
+                  <select id="eventTeamFilter" onchange="loadEvents()">
+                    <option value="">All Teams</option>
+                  </select>
+                </div>
+                <div class="form-group">
+                  <label for="eventStatusFilter">Status</label>
+                  <select id="eventStatusFilter" onchange="loadEvents()">
+                    <option value="">All</option>
+                    <option value="active">Active</option>
+                    <option value="completed">Completed</option>
+                  </select>
+                </div>
+              </div>
+              <div id="eventsLoading" class="loading">Loading events...</div>
+              <table id="eventsTable" style="display: none;">
+                <thead>
+                  <tr>
+                    <th>Venue</th>
+                    <th>Location</th>
+                    <th>Date</th>
+                    <th>Team</th>
+                    <th>Status</th>
+                    <th>Surveys</th>
+                    <th>Actions</th>
+                  </tr>
+                </thead>
+                <tbody id="eventsBody"></tbody>
+              </table>
+              <div id="eventsEmpty" class="empty-state" style="display: none;">No events found.</div>
+            </div>
+          </div>
+
+          <!-- Data Tab -->
+          <div class="tab-content" id="dataTab">
+            <div class="stats-grid" id="statsGrid">
+              <div class="stat-card">
+                <h3>Total Surveys</h3>
+                <div class="value" id="statTotalSurveys">-</div>
+              </div>
+              <div class="stat-card">
+                <h3>Total Pledges</h3>
+                <div class="value" id="statTotalPledges">-</div>
+              </div>
+              <div class="stat-card">
+                <h3>Pledge Rate</h3>
+                <div class="value" id="statPledgeRate">-</div>
+              </div>
+              <div class="stat-card">
+                <h3>Total Photos</h3>
+                <div class="value" id="statTotalPhotos">-</div>
+              </div>
+            </div>
+
+            <div class="card">
+              <h2>Survey Responses</h2>
+              <div class="filter-row">
+                <div class="form-group">
+                  <label for="dataTeamFilter">Team</label>
+                  <select id="dataTeamFilter" onchange="loadSurveyResponses()">
+                    <option value="">All Teams</option>
+                  </select>
+                </div>
+                <div class="form-group">
+                  <label for="dataEventFilter">Event</label>
+                  <select id="dataEventFilter" onchange="loadSurveyResponses()">
+                    <option value="">All Events</option>
+                  </select>
+                </div>
+                <div class="form-group">
+                  <label for="dataSurveyTypeFilter">Survey Type</label>
+                  <select id="dataSurveyTypeFilter" onchange="loadSurveyResponses()">
+                    <option value="">All Types</option>
+                    <option value="marijuana">Marijuana</option>
+                    <option value="alcohol">Alcohol</option>
+                    <option value="distracted">Distracted Driving</option>
+                    <option value="impaired">Impaired Driving</option>
+                    <option value="combo">Combo</option>
+                  </select>
+                </div>
+                <div class="form-group">
+                  <button class="btn btn-secondary btn-sm" onclick="exportData()" style="margin-top: 24px;">Export CSV</button>
+                </div>
+              </div>
+              <div id="responsesLoading" class="loading">Loading responses...</div>
+              <table id="responsesTable" style="display: none;">
+                <thead>
+                  <tr>
+                    <th>Date</th>
+                    <th>Team</th>
+                    <th>Event</th>
+                    <th>Survey Type</th>
+                    <th>Age Range</th>
+                    <th>Duration</th>
+                  </tr>
+                </thead>
+                <tbody id="responsesBody"></tbody>
+              </table>
+              <div id="responsesEmpty" class="empty-state" style="display: none;">No survey responses found.</div>
+            </div>
+
+            <div class="card">
+              <h2>Surveys by Type</h2>
+              <div id="surveysByType"></div>
+            </div>
+          </div>
+        </main>
+      </div>
+
+      <!-- Team Modal -->
+      <div class="modal" id="teamModal">
+        <div class="modal-content">
+          <div class="modal-header">
+            <h2 id="teamModalTitle">Add Team</h2>
+            <button class="modal-close" onclick="closeTeamModal()">&times;</button>
+          </div>
+          <form id="teamForm">
+            <input type="hidden" id="teamId">
+            <div class="form-group">
+              <label for="teamName">Team Name</label>
+              <input type="text" id="teamName" placeholder="e.g., Team Alpha" required>
+            </div>
+            <div class="form-group">
+              <label for="teamCode">Team Code (2-10 characters)</label>
+              <input type="text" id="teamCode" placeholder="e.g., ALPHA" maxlength="10" required>
+            </div>
+            <div class="modal-footer">
+              <button type="button" class="btn btn-secondary" onclick="closeTeamModal()">Cancel</button>
+              <button type="submit" class="btn btn-primary">Save Team</button>
+            </div>
+          </form>
+        </div>
+      </div>
+
+      <!-- Event Modal -->
+      <div class="modal" id="eventModal">
+        <div class="modal-content">
+          <div class="modal-header">
+            <h2 id="eventModalTitle">Add Event</h2>
+            <button class="modal-close" onclick="closeEventModal()">&times;</button>
+          </div>
+          <form id="eventForm">
+            <input type="hidden" id="eventId">
+            <div class="form-group">
+              <label for="eventTeam">Team</label>
+              <select id="eventTeam" required>
+                <option value="">Select a team</option>
+              </select>
+            </div>
+            <div class="form-group">
+              <label for="eventVenueName">Venue Name</label>
+              <input type="text" id="eventVenueName" placeholder="e.g., Central High School" required>
+            </div>
+            <div class="form-group">
+              <label for="eventVenueCity">City</label>
+              <input type="text" id="eventVenueCity" placeholder="e.g., Austin" required>
+            </div>
+            <div class="form-group">
+              <label for="eventVenueState">State</label>
+              <input type="text" id="eventVenueState" placeholder="e.g., TX" required>
+            </div>
+            <div class="form-group">
+              <label for="eventDate">Event Date</label>
+              <input type="datetime-local" id="eventDate" required>
+            </div>
+            <div class="form-group">
+              <label>Survey Types</label>
+              <div class="checkbox-group">
+                <label class="checkbox-item">
+                  <input type="checkbox" name="surveyTypes" value="marijuana">
+                  Marijuana
+                </label>
+                <label class="checkbox-item">
+                  <input type="checkbox" name="surveyTypes" value="alcohol">
+                  Alcohol
+                </label>
+                <label class="checkbox-item">
+                  <input type="checkbox" name="surveyTypes" value="distracted">
+                  Distracted
+                </label>
+                <label class="checkbox-item">
+                  <input type="checkbox" name="surveyTypes" value="impaired">
+                  Impaired
+                </label>
+                <label class="checkbox-item">
+                  <input type="checkbox" name="surveyTypes" value="combo">
+                  Combo
+                </label>
+              </div>
+            </div>
+            <div class="form-group">
+              <label for="eventOverlay">Photo Overlay Type</label>
+              <select id="eventOverlay" required>
+                <option value="">Select overlay</option>
+                <option value="standard">Standard</option>
+                <option value="prom">Prom</option>
+                <option value="graduation">Graduation</option>
+                <option value="homecoming">Homecoming</option>
+                <option value="custom">Custom</option>
+              </select>
+            </div>
+            <div class="form-group" id="eventStatusGroup" style="display: none;">
+              <label for="eventStatus">Status</label>
+              <select id="eventStatus">
+                <option value="active">Active</option>
+                <option value="completed">Completed</option>
+              </select>
+            </div>
+            <div class="modal-footer">
+              <button type="button" class="btn btn-secondary" onclick="closeEventModal()">Cancel</button>
+              <button type="submit" class="btn btn-primary">Save Event</button>
+            </div>
+          </form>
+        </div>
+      </div>
+
+      <script>
+        // State
+        let teams = [];
+        let events = [];
+        let analytics = null;
+
+        // API Base URL
+        const API_BASE = '/api';
+
+        // Check if logged in on page load
+        document.addEventListener('DOMContentLoaded', () => {
+          if (localStorage.getItem('adminLoggedIn') === 'true') {
+            showDashboard();
+          }
+
+          // Tab switching
+          document.querySelectorAll('.tab').forEach(tab => {
+            tab.addEventListener('click', () => {
+              document.querySelectorAll('.tab').forEach(t => t.classList.remove('active'));
+              document.querySelectorAll('.tab-content').forEach(c => c.classList.remove('active'));
+              tab.classList.add('active');
+              document.getElementById(tab.dataset.tab + 'Tab').classList.add('active');
+
+              // Load data for the tab
+              if (tab.dataset.tab === 'teams') loadTeams();
+              if (tab.dataset.tab === 'events') loadEvents();
+              if (tab.dataset.tab === 'data') {
+                loadAnalytics();
+                loadSurveyResponses();
+              }
+            });
+          });
+
+          // Form submissions
+          document.getElementById('loginForm').addEventListener('submit', handleLogin);
+          document.getElementById('teamForm').addEventListener('submit', handleTeamSubmit);
+          document.getElementById('eventForm').addEventListener('submit', handleEventSubmit);
+        });
+
+        // Login handler
+        async function handleLogin(e) {
+          e.preventDefault();
+          const password = document.getElementById('password').value;
+          const errorEl = document.getElementById('loginError');
+
+          try {
+            const res = await fetch('/admin/verify-password', {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({ password })
+            });
+
+            const data = await res.json();
+
+            if (data.success) {
+              localStorage.setItem('adminLoggedIn', 'true');
+              showDashboard();
+            } else {
+              errorEl.textContent = 'Invalid password';
+              errorEl.style.display = 'block';
+            }
+          } catch (err) {
+            errorEl.textContent = 'Connection error';
+            errorEl.style.display = 'block';
+          }
+        }
+
+        function logout() {
+          localStorage.removeItem('adminLoggedIn');
+          document.getElementById('loginScreen').style.display = 'flex';
+          document.getElementById('dashboard').style.display = 'none';
+          document.getElementById('password').value = '';
+        }
+
+        function showDashboard() {
+          document.getElementById('loginScreen').style.display = 'none';
+          document.getElementById('dashboard').style.display = 'block';
+          loadTeams();
+        }
+
+        // Teams
+        async function loadTeams() {
+          document.getElementById('teamsLoading').style.display = 'block';
+          document.getElementById('teamsTable').style.display = 'none';
+          document.getElementById('teamsEmpty').style.display = 'none';
+
+          try {
+            const res = await fetch(API_BASE + '/teams');
+            const data = await res.json();
+            teams = data.data || [];
+
+            if (teams.length === 0) {
+              document.getElementById('teamsLoading').style.display = 'none';
+              document.getElementById('teamsEmpty').style.display = 'block';
+              return;
+            }
+
+            const tbody = document.getElementById('teamsBody');
+            tbody.innerHTML = teams.map(team => \`
+              <tr>
+                <td>\${escapeHtml(team.name)}</td>
+                <td><span class="badge badge-info">\${escapeHtml(team.code)}</span></td>
+                <td>\${new Date(team.createdAt).toLocaleDateString()}</td>
+                <td class="actions">
+                  <button class="btn btn-secondary btn-sm" onclick="editTeam('\${team.id}')">Edit</button>
+                </td>
+              </tr>
+            \`).join('');
+
+            document.getElementById('teamsLoading').style.display = 'none';
+            document.getElementById('teamsTable').style.display = 'table';
+
+            // Update team dropdowns
+            updateTeamDropdowns();
+          } catch (err) {
+            document.getElementById('teamsLoading').textContent = 'Error loading teams';
+          }
+        }
+
+        function updateTeamDropdowns() {
+          const dropdowns = ['eventTeamFilter', 'dataTeamFilter', 'eventTeam'];
+          dropdowns.forEach(id => {
+            const select = document.getElementById(id);
+            const currentValue = select.value;
+            const firstOption = select.options[0];
+            select.innerHTML = '';
+            select.appendChild(firstOption);
+            teams.forEach(team => {
+              const option = document.createElement('option');
+              option.value = team.id;
+              option.textContent = team.name + ' (' + team.code + ')';
+              select.appendChild(option);
+            });
+            select.value = currentValue;
+          });
+        }
+
+        function openTeamModal(teamId = null) {
+          document.getElementById('teamId').value = '';
+          document.getElementById('teamName').value = '';
+          document.getElementById('teamCode').value = '';
+          document.getElementById('teamModalTitle').textContent = 'Add Team';
+
+          if (teamId) {
+            const team = teams.find(t => t.id === teamId);
+            if (team) {
+              document.getElementById('teamId').value = team.id;
+              document.getElementById('teamName').value = team.name;
+              document.getElementById('teamCode').value = team.code;
+              document.getElementById('teamModalTitle').textContent = 'Edit Team';
+            }
+          }
+
+          document.getElementById('teamModal').classList.add('active');
+        }
+
+        function closeTeamModal() {
+          document.getElementById('teamModal').classList.remove('active');
+        }
+
+        function editTeam(teamId) {
+          openTeamModal(teamId);
+        }
+
+        async function handleTeamSubmit(e) {
+          e.preventDefault();
+          const id = document.getElementById('teamId').value;
+          const name = document.getElementById('teamName').value;
+          const code = document.getElementById('teamCode').value;
+
+          try {
+            const url = id ? API_BASE + '/teams/' + id : API_BASE + '/teams';
+            const method = id ? 'PUT' : 'POST';
+
+            const res = await fetch(url, {
+              method,
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({ name, code })
+            });
+
+            const data = await res.json();
+
+            if (data.error) {
+              alert(data.error.message);
+              return;
+            }
+
+            closeTeamModal();
+            loadTeams();
+          } catch (err) {
+            alert('Error saving team');
+          }
+        }
+
+        // Events
+        async function loadEvents() {
+          document.getElementById('eventsLoading').style.display = 'block';
+          document.getElementById('eventsTable').style.display = 'none';
+          document.getElementById('eventsEmpty').style.display = 'none';
+
+          const teamId = document.getElementById('eventTeamFilter').value;
+          const status = document.getElementById('eventStatusFilter').value;
+
+          let url = API_BASE + '/events?';
+          if (teamId) url += 'teamId=' + teamId + '&';
+          if (status) url += 'status=' + status + '&';
+
+          try {
+            const res = await fetch(url);
+            const data = await res.json();
+            events = data.data || [];
+
+            // Update event dropdown in data tab
+            const eventSelect = document.getElementById('dataEventFilter');
+            const currentValue = eventSelect.value;
+            eventSelect.innerHTML = '<option value="">All Events</option>';
+            events.forEach(event => {
+              const option = document.createElement('option');
+              option.value = event.id;
+              option.textContent = event.venueName + ' - ' + new Date(event.eventDate).toLocaleDateString();
+              eventSelect.appendChild(option);
+            });
+            eventSelect.value = currentValue;
+
+            if (events.length === 0) {
+              document.getElementById('eventsLoading').style.display = 'none';
+              document.getElementById('eventsEmpty').style.display = 'block';
+              return;
+            }
+
+            const tbody = document.getElementById('eventsBody');
+            tbody.innerHTML = events.map(event => \`
+              <tr>
+                <td>\${escapeHtml(event.venueName)}</td>
+                <td>\${escapeHtml(event.venueCity)}, \${escapeHtml(event.venueState)}</td>
+                <td>\${new Date(event.eventDate).toLocaleDateString()}</td>
+                <td>\${event.team ? escapeHtml(event.team.name) : '-'}</td>
+                <td>
+                  <span class="badge \${event.status === 'active' ? 'badge-success' : 'badge-warning'}">
+                    \${event.status}
+                  </span>
+                </td>
+                <td>\${event._count?.surveyResponses || 0}</td>
+                <td class="actions">
+                  <button class="btn btn-secondary btn-sm" onclick="editEvent('\${event.id}')">Edit</button>
+                  \${event.status === 'active' ? \`<button class="btn btn-warning btn-sm" onclick="completeEvent('\${event.id}')">Complete</button>\` : ''}
+                </td>
+              </tr>
+            \`).join('');
+
+            document.getElementById('eventsLoading').style.display = 'none';
+            document.getElementById('eventsTable').style.display = 'table';
+          } catch (err) {
+            document.getElementById('eventsLoading').textContent = 'Error loading events';
+          }
+        }
+
+        function openEventModal(eventId = null) {
+          document.getElementById('eventId').value = '';
+          document.getElementById('eventTeam').value = '';
+          document.getElementById('eventVenueName').value = '';
+          document.getElementById('eventVenueCity').value = '';
+          document.getElementById('eventVenueState').value = '';
+          document.getElementById('eventDate').value = '';
+          document.getElementById('eventOverlay').value = '';
+          document.getElementById('eventStatus').value = 'active';
+          document.getElementById('eventStatusGroup').style.display = 'none';
+          document.querySelectorAll('input[name="surveyTypes"]').forEach(cb => cb.checked = false);
+          document.getElementById('eventModalTitle').textContent = 'Add Event';
+
+          if (eventId) {
+            const event = events.find(e => e.id === eventId);
+            if (event) {
+              document.getElementById('eventId').value = event.id;
+              document.getElementById('eventTeam').value = event.teamId;
+              document.getElementById('eventVenueName').value = event.venueName;
+              document.getElementById('eventVenueCity').value = event.venueCity;
+              document.getElementById('eventVenueState').value = event.venueState;
+
+              // Format date for datetime-local input
+              const date = new Date(event.eventDate);
+              const localDate = new Date(date.getTime() - date.getTimezoneOffset() * 60000);
+              document.getElementById('eventDate').value = localDate.toISOString().slice(0, 16);
+
+              document.getElementById('eventOverlay').value = event.overlayType;
+              document.getElementById('eventStatus').value = event.status;
+              document.getElementById('eventStatusGroup').style.display = 'block';
+
+              // Set survey types checkboxes
+              const surveyTypes = event.surveyTypes || [];
+              document.querySelectorAll('input[name="surveyTypes"]').forEach(cb => {
+                cb.checked = surveyTypes.includes(cb.value);
+              });
+
+              document.getElementById('eventModalTitle').textContent = 'Edit Event';
+            }
+          }
+
+          document.getElementById('eventModal').classList.add('active');
+        }
+
+        function closeEventModal() {
+          document.getElementById('eventModal').classList.remove('active');
+        }
+
+        function editEvent(eventId) {
+          openEventModal(eventId);
+        }
+
+        async function completeEvent(eventId) {
+          if (!confirm('Are you sure you want to mark this event as completed?')) return;
+
+          try {
+            const res = await fetch(API_BASE + '/events/' + eventId + '/complete', {
+              method: 'PUT'
+            });
+
+            const data = await res.json();
+
+            if (data.error) {
+              alert(data.error.message);
+              return;
+            }
+
+            loadEvents();
+          } catch (err) {
+            alert('Error completing event');
+          }
+        }
+
+        async function handleEventSubmit(e) {
+          e.preventDefault();
+          const id = document.getElementById('eventId').value;
+          const teamId = document.getElementById('eventTeam').value;
+          const venueName = document.getElementById('eventVenueName').value;
+          const venueCity = document.getElementById('eventVenueCity').value;
+          const venueState = document.getElementById('eventVenueState').value;
+          const eventDate = document.getElementById('eventDate').value;
+          const overlayType = document.getElementById('eventOverlay').value;
+          const status = document.getElementById('eventStatus').value;
+
+          const surveyTypes = [];
+          document.querySelectorAll('input[name="surveyTypes"]:checked').forEach(cb => {
+            surveyTypes.push(cb.value);
+          });
+
+          if (surveyTypes.length === 0) {
+            alert('Please select at least one survey type');
+            return;
+          }
+
+          try {
+            const url = id ? API_BASE + '/events/' + id : API_BASE + '/events';
+            const method = id ? 'PUT' : 'POST';
+
+            const body = {
+              venueName,
+              venueCity,
+              venueState,
+              eventDate,
+              overlayType,
+              surveyTypes
+            };
+
+            if (!id) {
+              body.teamId = teamId;
+            }
+
+            if (id) {
+              body.status = status;
+            }
+
+            const res = await fetch(url, {
+              method,
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify(body)
+            });
+
+            const data = await res.json();
+
+            if (data.error) {
+              alert(data.error.message);
+              return;
+            }
+
+            closeEventModal();
+            loadEvents();
+          } catch (err) {
+            alert('Error saving event');
+          }
+        }
+
+        // Analytics & Data
+        async function loadAnalytics() {
+          const teamId = document.getElementById('dataTeamFilter').value;
+          const eventId = document.getElementById('dataEventFilter').value;
+
+          let url = API_BASE + '/admin/analytics?';
+          if (teamId) url += 'teamId=' + teamId + '&';
+          if (eventId) url += 'eventId=' + eventId + '&';
+
+          try {
+            const res = await fetch(url);
+            const data = await res.json();
+            analytics = data.data;
+
+            document.getElementById('statTotalSurveys').textContent = analytics.totalSurveys;
+            document.getElementById('statTotalPledges').textContent = analytics.totalPledges;
+            document.getElementById('statPledgeRate').textContent = analytics.pledgeRate + '%';
+            document.getElementById('statTotalPhotos').textContent = analytics.totalPhotos;
+
+            // Surveys by type
+            const typeDiv = document.getElementById('surveysByType');
+            if (analytics.surveysByType.length > 0) {
+              typeDiv.innerHTML = \`
+                <table>
+                  <thead>
+                    <tr>
+                      <th>Survey Type</th>
+                      <th>Count</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    \${analytics.surveysByType.map(t => \`
+                      <tr>
+                        <td>\${escapeHtml(t.surveyTypeSlug)}</td>
+                        <td>\${t.count}</td>
+                      </tr>
+                    \`).join('')}
+                  </tbody>
+                </table>
+              \`;
+            } else {
+              typeDiv.innerHTML = '<p class="text-muted">No data available</p>';
+            }
+          } catch (err) {
+            console.error('Error loading analytics:', err);
+          }
+        }
+
+        async function loadSurveyResponses() {
+          document.getElementById('responsesLoading').style.display = 'block';
+          document.getElementById('responsesTable').style.display = 'none';
+          document.getElementById('responsesEmpty').style.display = 'none';
+
+          const teamId = document.getElementById('dataTeamFilter').value;
+          const eventId = document.getElementById('dataEventFilter').value;
+          const surveyType = document.getElementById('dataSurveyTypeFilter').value;
+
+          let url = API_BASE + '/surveys/responses?';
+          if (teamId) url += 'teamId=' + teamId + '&';
+          if (eventId) url += 'eventId=' + eventId + '&';
+          if (surveyType) url += 'surveyTypeSlug=' + surveyType + '&';
+
+          try {
+            const res = await fetch(url);
+            const data = await res.json();
+            const responses = data.data || [];
+
+            if (responses.length === 0) {
+              document.getElementById('responsesLoading').style.display = 'none';
+              document.getElementById('responsesEmpty').style.display = 'block';
+              return;
+            }
+
+            const tbody = document.getElementById('responsesBody');
+            tbody.innerHTML = responses.slice(0, 100).map(r => \`
+              <tr>
+                <td>\${new Date(r.completedAt).toLocaleString()}</td>
+                <td>\${r.team ? escapeHtml(r.team.name) : '-'}</td>
+                <td>\${r.event ? escapeHtml(r.event.venueName) : '-'}</td>
+                <td><span class="badge badge-info">\${escapeHtml(r.surveyTypeSlug)}</span></td>
+                <td>\${r.ageRange || '-'}</td>
+                <td>\${r.durationSeconds ? r.durationSeconds + 's' : '-'}</td>
+              </tr>
+            \`).join('');
+
+            document.getElementById('responsesLoading').style.display = 'none';
+            document.getElementById('responsesTable').style.display = 'table';
+
+            // Also refresh analytics
+            loadAnalytics();
+          } catch (err) {
+            document.getElementById('responsesLoading').textContent = 'Error loading responses';
+          }
+        }
+
+        function exportData() {
+          const teamId = document.getElementById('dataTeamFilter').value;
+          const eventId = document.getElementById('dataEventFilter').value;
+
+          let url = API_BASE + '/admin/export/csv?';
+          if (teamId) url += 'teamId=' + teamId + '&';
+          if (eventId) url += 'eventId=' + eventId + '&';
+
+          window.open(url, '_blank');
+        }
+
+        // Utility
+        function escapeHtml(text) {
+          if (!text) return '';
+          const div = document.createElement('div');
+          div.textContent = text;
+          return div.innerHTML;
+        }
+      </script>
+    </body>
+    </html>
+  `);
+});
+
+export { adminPortalRouter };

@@ -14,6 +14,7 @@ import { photosRouter } from "./routes/photos";
 import { syncRouter } from "./routes/sync";
 import { adminRouter } from "./routes/admin";
 import { emailRouter } from "./routes/email";
+import { adminPortalRouter } from "./routes/admin-portal";
 import { logger } from "hono/logger";
 
 // Type the Hono app with user/session variables
@@ -78,6 +79,7 @@ app.route("/api/photos", photosRouter);
 app.route("/api/sync", syncRouter);
 app.route("/api/admin", adminRouter);
 app.route("/api/email", emailRouter);
+app.route("/admin", adminPortalRouter);
 
 const port = Number(process.env.PORT) || 3000;
 
