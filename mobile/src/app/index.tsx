@@ -2,7 +2,7 @@ import { useState } from 'react';
 import { View, Text, Pressable, TextInput, Modal } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { router, Redirect } from 'expo-router';
-import { Play, LayoutDashboard, RefreshCw, Camera, Tablet } from 'lucide-react-native';
+import { Play, RefreshCw, Camera, Tablet } from 'lucide-react-native';
 import { useDeviceStore, useDeviceType, useTeamId } from '@/lib/state/device-store';
 import { cn } from '@/lib/cn';
 
@@ -24,10 +24,6 @@ export default function HomeScreen() {
 
   const handleOpenPhotoHub = () => {
     router.push('/photo-hub' as any);
-  };
-
-  const handleAdminDashboard = () => {
-    router.push('/(tabs)' as any);
   };
 
   const handleResetDevice = () => {
@@ -71,51 +67,38 @@ export default function HomeScreen() {
           </View>
         </View>
 
-        {/* Action Buttons */}
+        {/* Main Action Button */}
         <View className="gap-4">
           {deviceType === 'tablet' ? (
             <Pressable
               onPress={handleStartKiosk}
-              className="flex-row items-center w-full h-20 px-6 bg-white rounded-2xl active:bg-zinc-200"
+              className="flex-row items-center w-full h-24 px-6 bg-white rounded-2xl active:bg-zinc-200"
             >
-              <View className="w-14 h-14 rounded-full bg-black items-center justify-center mr-4">
-                <Play size={28} color="#fff" fill="#fff" />
+              <View className="w-16 h-16 rounded-full bg-black items-center justify-center mr-4">
+                <Play size={32} color="#fff" fill="#fff" />
               </View>
               <View className="flex-1">
-                <Text className="text-xl font-bold text-black">Start Kiosk</Text>
-                <Text className="text-sm text-zinc-500">Begin survey collection</Text>
+                <Text className="text-2xl font-bold text-black">Start Kiosk</Text>
+                <Text className="text-base text-zinc-500">Begin survey collection</Text>
               </View>
             </Pressable>
           ) : (
             <Pressable
               onPress={handleOpenPhotoHub}
-              className="flex-row items-center w-full h-20 px-6 bg-white rounded-2xl active:bg-zinc-200"
+              className="flex-row items-center w-full h-24 px-6 bg-white rounded-2xl active:bg-zinc-200"
             >
-              <View className="w-14 h-14 rounded-full bg-black items-center justify-center mr-4">
-                <Camera size={28} color="#fff" />
+              <View className="w-16 h-16 rounded-full bg-black items-center justify-center mr-4">
+                <Camera size={32} color="#fff" />
               </View>
               <View className="flex-1">
-                <Text className="text-xl font-bold text-black">Open Photo Hub</Text>
-                <Text className="text-sm text-zinc-500">Take pledge photos</Text>
+                <Text className="text-2xl font-bold text-black">Open Photo Hub</Text>
+                <Text className="text-base text-zinc-500">Take pledge photos</Text>
               </View>
             </Pressable>
           )}
-
-          <Pressable
-            onPress={handleAdminDashboard}
-            className="flex-row items-center w-full h-20 px-6 bg-zinc-900 border-2 border-zinc-700 rounded-2xl active:bg-zinc-800"
-          >
-            <View className="w-14 h-14 rounded-full bg-zinc-800 items-center justify-center mr-4">
-              <LayoutDashboard size={28} color="#a1a1aa" />
-            </View>
-            <View className="flex-1">
-              <Text className="text-xl font-bold text-white">Admin Dashboard</Text>
-              <Text className="text-sm text-zinc-500">View stats & settings</Text>
-            </View>
-          </Pressable>
         </View>
 
-        {/* Reset Button */}
+        {/* Reset Button - small at bottom */}
         <View className="flex-1 justify-end pb-8">
           <Pressable
             onPress={handleResetDevice}
