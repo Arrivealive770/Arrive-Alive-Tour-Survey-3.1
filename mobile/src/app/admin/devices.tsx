@@ -11,9 +11,10 @@ const MOCK_DEVICES: (Device & { pendingCount: number; isOnline: boolean })[] = [
   {
     id: 'device-1',
     teamId: 'team-1',
-    name: 'Tablet 1',
-    type: 'tablet',
-    lastSeenAt: new Date(Date.now() - 2 * 60 * 1000).toISOString(), // 2 minutes ago
+    deviceName: 'Tablet 1',
+    deviceType: 'tablet',
+    isActive: true,
+    lastSyncAt: new Date(Date.now() - 2 * 60 * 1000).toISOString(), // 2 minutes ago
     createdAt: new Date().toISOString(),
     pendingCount: 0,
     isOnline: true,
@@ -21,9 +22,10 @@ const MOCK_DEVICES: (Device & { pendingCount: number; isOnline: boolean })[] = [
   {
     id: 'device-2',
     teamId: 'team-1',
-    name: 'Tablet 2',
-    type: 'tablet',
-    lastSeenAt: new Date(Date.now() - 15 * 60 * 1000).toISOString(), // 15 minutes ago
+    deviceName: 'Tablet 2',
+    deviceType: 'tablet',
+    isActive: true,
+    lastSyncAt: new Date(Date.now() - 15 * 60 * 1000).toISOString(), // 15 minutes ago
     createdAt: new Date().toISOString(),
     pendingCount: 5,
     isOnline: true,
@@ -31,9 +33,10 @@ const MOCK_DEVICES: (Device & { pendingCount: number; isOnline: boolean })[] = [
   {
     id: 'device-3',
     teamId: 'team-1',
-    name: 'Photo Hub',
-    type: 'phone',
-    lastSeenAt: new Date(Date.now() - 5 * 60 * 1000).toISOString(), // 5 minutes ago
+    deviceName: 'Photo Hub',
+    deviceType: 'phone',
+    isActive: true,
+    lastSyncAt: new Date(Date.now() - 5 * 60 * 1000).toISOString(), // 5 minutes ago
     createdAt: new Date().toISOString(),
     pendingCount: 3,
     isOnline: true,
@@ -41,9 +44,10 @@ const MOCK_DEVICES: (Device & { pendingCount: number; isOnline: boolean })[] = [
   {
     id: 'device-4',
     teamId: 'team-1',
-    name: 'Tablet 3',
-    type: 'tablet',
-    lastSeenAt: new Date(Date.now() - 2 * 60 * 60 * 1000).toISOString(), // 2 hours ago
+    deviceName: 'Tablet 3',
+    deviceType: 'tablet',
+    isActive: true,
+    lastSyncAt: new Date(Date.now() - 2 * 60 * 60 * 1000).toISOString(), // 2 hours ago
     createdAt: new Date().toISOString(),
     pendingCount: 12,
     isOnline: false,
@@ -66,7 +70,7 @@ export default function DevicesScreen() {
     setDevices((prev) =>
       prev.map((device) => ({
         ...device,
-        lastSeenAt: device.isOnline ? new Date().toISOString() : device.lastSeenAt,
+        lastSyncAt: device.isOnline ? new Date().toISOString() : device.lastSyncAt,
       }))
     );
 
@@ -175,9 +179,9 @@ export default function DevicesScreen() {
             <DeviceStatusCard
               key={device.id}
               id={device.id}
-              name={device.name}
-              type={device.type}
-              lastSyncTime={device.lastSeenAt}
+              name={device.deviceName}
+              type={device.deviceType}
+              lastSyncTime={device.lastSyncAt}
               pendingCount={device.pendingCount}
               isOnline={device.isOnline}
             />
@@ -195,9 +199,9 @@ export default function DevicesScreen() {
             <DeviceStatusCard
               key={device.id}
               id={device.id}
-              name={device.name}
-              type={device.type}
-              lastSyncTime={device.lastSeenAt}
+              name={device.deviceName}
+              type={device.deviceType}
+              lastSyncTime={device.lastSyncAt}
               pendingCount={device.pendingCount}
               isOnline={device.isOnline}
             />

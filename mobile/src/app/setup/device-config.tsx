@@ -17,10 +17,10 @@ export default function DeviceConfigScreen() {
 
   const registerDeviceMutation = useMutation({
     mutationFn: async (deviceType: DeviceType) => {
-      const request: RegisterDeviceRequest = {
+      const request = {
         teamId: teamId!,
-        name: `${deviceType === 'tablet' ? 'Tablet' : 'Phone'} ${Date.now()}`,
-        type: deviceType,
+        deviceName: `${deviceType === 'tablet' ? 'Tablet' : 'Phone'} ${Date.now()}`,
+        deviceType: deviceType,
       };
       const device = await api.post<Device>('/api/devices', request);
       return device;
@@ -29,8 +29,8 @@ export default function DeviceConfigScreen() {
       // Store device info
       setDeviceConfig({
         deviceId: device.id,
-        deviceName: device.name,
-        deviceType: device.type,
+        deviceName: device.deviceName,
+        deviceType: device.deviceType,
       });
       // Navigate to event setup
       router.push('/setup/event-setup' as any);

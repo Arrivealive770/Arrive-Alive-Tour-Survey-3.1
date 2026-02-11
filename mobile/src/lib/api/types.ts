@@ -29,16 +29,17 @@ export interface Team {
 export interface Device {
   id: string;
   teamId: string;
-  name: string;
-  type: 'tablet' | 'phone';
-  lastSeenAt: string;
+  deviceName: string;
+  deviceType: 'tablet' | 'phone';
+  isActive: boolean;
+  lastSyncAt: string | null;
   createdAt: string;
 }
 
 export interface RegisterDeviceRequest {
   teamId: string;
-  name: string;
-  type: 'tablet' | 'phone';
+  deviceName: string;
+  deviceType: 'tablet' | 'phone';
 }
 
 // Event
