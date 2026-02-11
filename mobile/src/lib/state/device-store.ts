@@ -17,6 +17,10 @@ interface DeviceState {
   // Event context
   currentEventId: string | null;
 
+  // Picture pledge settings for current event
+  picturePledgeEnabled: boolean;
+  currentEventOverlayId: string | null;
+
   // Kiosk mode
   isKioskMode: boolean;
   adminPin: string;
@@ -37,6 +41,8 @@ const initialState: DeviceState = {
   teamId: null,
   teamCode: null,
   currentEventId: null,
+  picturePledgeEnabled: false,
+  currentEventOverlayId: null,
   isKioskMode: false,
   adminPin: '1234',
 };
@@ -98,3 +104,5 @@ export const useTeamId = () => useDeviceStore((s) => s.teamId);
 export const useTeamCode = () => useDeviceStore((s) => s.teamCode);
 export const useCurrentEventId = () => useDeviceStore((s) => s.currentEventId);
 export const useIsKioskMode = () => useDeviceStore((s) => s.isKioskMode);
+export const usePicturePledgeEnabled = () => useDeviceStore((s) => s.picturePledgeEnabled);
+export const useCurrentEventOverlayId = () => useDeviceStore((s) => s.currentEventOverlayId);

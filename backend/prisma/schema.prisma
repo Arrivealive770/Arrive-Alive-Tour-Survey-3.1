@@ -102,16 +102,17 @@ model Device {
 }
 
 model Event {
-  id          String   @id @default(cuid())
-  teamId      String
-  venueName   String
-  venueCity   String
-  venueState  String
-  eventDate   DateTime
-  surveyTypes String   // JSON string array of survey type slugs enabled for this event
-  overlayType String   // Photo overlay type for this event
-  status      String   @default("active") // "active" | "completed"
-  createdAt   DateTime @default(now())
+  id                   String   @id @default(cuid())
+  teamId               String
+  venueName            String
+  venueCity            String
+  venueState           String
+  eventDate            DateTime
+  surveyTypes          String   // JSON string array of survey type slugs enabled for this event
+  overlayType          String   // Photo overlay type for this event
+  picturePledgeEnabled Boolean  @default(false) // Whether picture pledge feature is enabled
+  status               String   @default("active") // "active" | "completed"
+  createdAt            DateTime @default(now())
 
   // Relations
   team            Team             @relation(fields: [teamId], references: [id], onDelete: Cascade)

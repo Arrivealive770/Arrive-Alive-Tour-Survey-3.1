@@ -9,10 +9,11 @@ import Animated, {
   FadeIn,
 } from 'react-native-reanimated';
 import * as Haptics from 'expo-haptics';
-import { CheckCircle, Shield } from 'lucide-react-native';
+import { CheckCircle, Shield, Camera, Mail } from 'lucide-react-native';
 import { IdleResetTimer } from '@/components/kiosk';
 import { useSurveyStore } from '@/lib/state/survey-store';
 import { usePledgeStore } from '@/lib/state/pledge-store';
+import { useDeviceStore } from '@/lib/state/device-store';
 
 const AnimatedPressable = Animated.createAnimatedComponent(Pressable);
 
@@ -99,14 +100,22 @@ export default function PledgePromptScreen() {
   const { width } = useWindowDimensions();
   const reset = useSurveyStore((s) => s.reset);
   const startPledge = usePledgeStore((s) => s.startPledge);
+  const picturePledgeEnabled = useDeviceStore((s) => s.picturePledgeEnabled);
 
   const isTablet = width > 600;
 
   const handleTakePledge = useCallback(() => {
     // Start pledge flow with the current survey's local ID (if available)
     startPledge('');
-    router.push('/kiosk/pledge' as any);
-  }, [startPledge, router]);
+
+    if (picturePledgeEnabled) {
+      // Picture pledge enabled - go to photo selection
+      router.push('/kiosk/pledge' as any);
+    } else {
+      // Picture pledge disabled - skip directly to email
+      router.push('/kiosk/pledge/email' as any);
+    }
+  }, [startPledge, router, picturePledgeEnabled]);
 
   const handleDecline = useCallback(() => {
     // Reset and go back to survey type selection for next participant
@@ -182,8 +191,8 @@ export default function PledgePromptScreen() {
             className="gap-4"
           >
             <ActionButton
-              label="Take the Pledge"
-              sublabel="Get your photo taken"
+              label={picturePledgeEnabled ? "Take Picture Pledge" : "Take the Pledge"}
+              sublabel={picturePledgeEnabled ? "Select a photo and we'll send it to your email" : "Enter your email to receive your pledge"}
               variant="primary"
               onPress={handleTakePledge}
             />

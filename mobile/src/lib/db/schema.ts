@@ -116,6 +116,7 @@ export interface PledgeQueueItem {
   eventId: string;
   email: string | null;
   photoLocalId: string | null;
+  compositedPhotoUrl: string | null;
   createdAt: string;
   syncStatus: 'pending' | 'syncing' | 'synced' | 'failed';
   syncAttempts: number;

@@ -709,6 +709,13 @@ adminPortalRouter.get("/", (c) => {
                 <!-- Options will be populated from database -->
               </select>
             </div>
+            <div class="form-group">
+              <label class="checkbox-item" style="margin-top: 8px;">
+                <input type="checkbox" id="eventPicturePledge">
+                Enable Picture Pledge
+              </label>
+              <p style="font-size: 12px; color: #888; margin-top: 8px;">When enabled, users can take photos with overlays and receive them via email.</p>
+            </div>
             <div class="form-group" id="eventStatusGroup" style="display: none;">
               <label for="eventStatus">Status</label>
               <select id="eventStatus">
@@ -1012,7 +1019,10 @@ adminPortalRouter.get("/", (c) => {
             const tbody = document.getElementById('eventsBody');
             tbody.innerHTML = events.map(event => \`
               <tr>
-                <td>\${escapeHtml(event.venueName)}</td>
+                <td>
+                  \${escapeHtml(event.venueName)}
+                  \${event.picturePledgeEnabled ? '<span class="badge badge-info" style="margin-left: 8px;">Picture Pledge</span>' : ''}
+                </td>
                 <td>\${escapeHtml(event.venueCity)}, \${escapeHtml(event.venueState)}</td>
                 <td>\${new Date(event.eventDate).toLocaleDateString()}</td>
                 <td>\${event.team ? escapeHtml(event.team.name) : '-'}</td>
@@ -1046,6 +1056,7 @@ adminPortalRouter.get("/", (c) => {
           document.getElementById('eventOverlay').value = '';
           document.getElementById('eventStatus').value = 'active';
           document.getElementById('eventStatusGroup').style.display = 'none';
+          document.getElementById('eventPicturePledge').checked = false;
           document.querySelectorAll('input[name="surveyTypes"]').forEach(cb => cb.checked = false);
           document.getElementById('eventModalTitle').textContent = 'Add Event';
 
@@ -1066,6 +1077,7 @@ adminPortalRouter.get("/", (c) => {
               document.getElementById('eventOverlay').value = event.overlayType;
               document.getElementById('eventStatus').value = event.status;
               document.getElementById('eventStatusGroup').style.display = 'block';
+              document.getElementById('eventPicturePledge').checked = event.picturePledgeEnabled || false;
 
               // Set survey types checkboxes
               const surveyTypes = event.surveyTypes || [];
@@ -1119,6 +1131,7 @@ adminPortalRouter.get("/", (c) => {
           const eventDate = document.getElementById('eventDate').value;
           const overlayType = document.getElementById('eventOverlay').value;
           const status = document.getElementById('eventStatus').value;
+          const picturePledgeEnabled = document.getElementById('eventPicturePledge').checked;
 
           const surveyTypes = [];
           document.querySelectorAll('input[name="surveyTypes"]:checked').forEach(cb => {
@@ -1140,7 +1153,8 @@ adminPortalRouter.get("/", (c) => {
               venueState,
               eventDate,
               overlayType,
-              surveyTypes
+              surveyTypes,
+              picturePledgeEnabled
             };
 
             if (!id) {

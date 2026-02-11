@@ -1,5 +1,5 @@
-import { useCallback } from 'react';
-import { View, Text, Pressable, useWindowDimensions } from 'react-native';
+import { useCallback, useState, useEffect, useMemo } from 'react';
+import { View, Text, Pressable, useWindowDimensions, ScrollView } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useRouter } from 'expo-router';
 import Animated, {
@@ -10,11 +10,14 @@ import Animated, {
 } from 'react-native-reanimated';
 import * as Haptics from 'expo-haptics';
 import { ImageIcon, ArrowRight, SkipForward } from 'lucide-react-native';
-import { PhotoGrid } from '@/components/pledge';
+import { PhotoGrid, OverlayPreview } from '@/components/pledge';
 import { IdleResetTimer } from '@/components/kiosk';
 import { usePledgeStore } from '@/lib/state/pledge-store';
 import { usePhotoCacheStore } from '@/lib/state/photo-cache-store';
 import { useSurveyStore } from '@/lib/state/survey-store';
+import { useDeviceStore } from '@/lib/state/device-store';
+import { api } from '@/lib/api/api';
+import type { Overlay } from '@/lib/api/types';
 
 const AnimatedPressable = Animated.createAnimatedComponent(Pressable);
 
@@ -33,6 +36,34 @@ export default function PhotoSelectionScreen() {
   const cachedPhotos = usePhotoCacheStore((s) => s.cachedPhotos);
   const availablePhotos = cachedPhotos.filter((p) => p.status === 'available');
   const hasAvailablePhotos = availablePhotos.length > 0;
+
+  // Get current event's overlay ID from device store
+  const currentEventOverlayId = useDeviceStore((s) => s.currentEventOverlayId);
+  const [overlayUrl, setOverlayUrl] = useState<string | null>(null);
+
+  // Fetch overlay data when component mounts
+  useEffect(() => {
+    async function fetchOverlay() {
+      if (!currentEventOverlayId) return;
+
+      try {
+        const overlay = await api.get<Overlay>(`/api/overlays/${currentEventOverlayId}`);
+        if (overlay?.imageUrl) {
+          setOverlayUrl(overlay.imageUrl);
+        }
+      } catch (error) {
+        console.error('[PhotoSelectionScreen] Failed to fetch overlay:', error);
+      }
+    }
+
+    fetchOverlay();
+  }, [currentEventOverlayId]);
+
+  // Get the selected photo's local path for preview
+  const selectedPhoto = useMemo(() => {
+    if (!selectedPhotoLocalId) return null;
+    return cachedPhotos.find((p) => p.localId === selectedPhotoLocalId) ?? null;
+  }, [selectedPhotoLocalId, cachedPhotos]);
 
   const handleSelectPhoto = useCallback(
     (localId: string) => {
@@ -111,12 +142,54 @@ export default function PhotoSelectionScreen() {
             </Text>
           </Animated.View>
 
-          {/* Photo Grid or Empty State */}
+          {/* Photo Grid or Preview with Overlay */}
           <View style={{ flex: 1 }}>
-            <PhotoGrid
-              selectedPhotoId={selectedPhotoLocalId}
-              onSelectPhoto={handleSelectPhoto}
-            />
+            {selectedPhoto ? (
+              // Show preview with overlay when a photo is selected
+              <ScrollView
+                contentContainerStyle={{
+                  flexGrow: 1,
+                  justifyContent: 'center',
+                  alignItems: 'center',
+                  padding: 24,
+                }}
+              >
+                <Text
+                  style={{
+                    color: '#22c55e',
+                    fontSize: isTablet ? 20 : 16,
+                    fontWeight: '600',
+                    marginBottom: 16,
+                  }}
+                >
+                  Preview with Overlay
+                </Text>
+                <View style={{ width: isTablet ? 400 : 280 }}>
+                  <OverlayPreview
+                    photoUri={selectedPhoto.localPath}
+                    overlayUrl={overlayUrl}
+                  />
+                </View>
+                <Pressable
+                  onPress={() => setPhoto(null)}
+                  style={{
+                    marginTop: 16,
+                    paddingVertical: 8,
+                    paddingHorizontal: 16,
+                  }}
+                >
+                  <Text style={{ color: '#a1a1aa', fontSize: 14 }}>
+                    Tap to choose a different photo
+                  </Text>
+                </Pressable>
+              </ScrollView>
+            ) : (
+              // Show photo grid when no photo is selected
+              <PhotoGrid
+                selectedPhotoId={selectedPhotoLocalId}
+                onSelectPhoto={handleSelectPhoto}
+              />
+            )}
           </View>
 
           {/* Footer Buttons */}

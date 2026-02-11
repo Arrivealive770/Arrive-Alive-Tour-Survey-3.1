@@ -1,4 +1,4 @@
-import { useState, useCallback } from 'react';
+import { useState, useCallback, useMemo } from 'react';
 import { View, Text, TextInput, Pressable, Keyboard, useWindowDimensions } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useRouter } from 'expo-router';
@@ -17,6 +17,8 @@ import { usePhotoCacheStore } from '@/lib/state/photo-cache-store';
 import { useSyncStore } from '@/lib/state/sync-store';
 import { useDeviceStore } from '@/lib/state/device-store';
 import { useDatabase } from '@/providers/DatabaseProvider';
+import { api } from '@/lib/api/api';
+import type { CompositePhotoResponse } from '@/lib/api/types';
 
 const AnimatedPressable = Animated.createAnimatedComponent(Pressable);
 
@@ -45,10 +47,22 @@ export default function EmailScreen() {
   const resetSurvey = useSurveyStore((s) => s.reset);
 
   const markPhotoUsed = usePhotoCacheStore((s) => s.markPhotoUsed);
+  const cachedPhotos = usePhotoCacheStore((s) => s.cachedPhotos);
   const updateCounts = useSyncStore((s) => s.updateCounts);
   const pendingPledges = useSyncStore((s) => s.pendingPledges);
   const teamId = useDeviceStore((s) => s.teamId);
   const currentEventId = useDeviceStore((s) => s.currentEventId);
+  const currentEventOverlayId = useDeviceStore((s) => s.currentEventOverlayId);
+  const picturePledgeEnabled = useDeviceStore((s) => s.picturePledgeEnabled);
+
+  // Get the selected photo's remote URL for compositing
+  const selectedPhotoUrl = useMemo(() => {
+    if (!selectedPhotoLocalId) return null;
+    const photo = cachedPhotos.find((p) => p.localId === selectedPhotoLocalId);
+    // The photo's localPath may be a local file or a remote URL
+    // For compositing, we need the remote URL
+    return photo?.localPath ?? null;
+  }, [selectedPhotoLocalId, cachedPhotos]);
 
   const handleEmailChange = useCallback((text: string) => {
     setEmail(text.toLowerCase());
@@ -63,6 +77,25 @@ export default function EmailScreen() {
     Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
 
     try {
+      let compositedPhotoUrl: string | null = null;
+
+      // If picture pledge is enabled and we have a photo selected, composite it
+      if (picturePledgeEnabled && selectedPhotoUrl && currentEventOverlayId) {
+        try {
+          const compositeResult = await api.post<CompositePhotoResponse>(
+            '/api/photos/composite',
+            {
+              photoUrl: selectedPhotoUrl,
+              overlayId: currentEventOverlayId,
+            }
+          );
+          compositedPhotoUrl = compositeResult?.url ?? null;
+        } catch (compositeError) {
+          console.error('[EmailScreen] Failed to composite photo:', compositeError);
+          // Continue without composited photo - the pledge can still be saved
+        }
+      }
+
       setPledgeEmail(email);
       const pledgeData = completePledge();
 
@@ -75,6 +108,7 @@ export default function EmailScreen() {
           eventId: currentEventId,
           email: pledgeData.email,
           photoLocalId: pledgeData.photoLocalId,
+          compositedPhotoUrl, // Include the composited photo URL
           createdAt: pledgeData.createdAt,
         });
 
@@ -93,7 +127,7 @@ export default function EmailScreen() {
       console.error('[EmailScreen] Error submitting pledge:', error);
       setIsSubmitting(false);
     }
-  }, [isValid, isSubmitting, email, setPledgeEmail, completePledge, db, teamId, currentEventId, selectedPhotoLocalId, markPhotoUsed, updateCounts, pendingPledges, router]);
+  }, [isValid, isSubmitting, email, setPledgeEmail, completePledge, db, teamId, currentEventId, selectedPhotoLocalId, selectedPhotoUrl, currentEventOverlayId, picturePledgeEnabled, markPhotoUsed, updateCounts, pendingPledges, router]);
 
   const handleSkipEmail = useCallback(async () => {
     setIsSubmitting(true);
@@ -113,6 +147,7 @@ export default function EmailScreen() {
           eventId: currentEventId,
           email: null,
           photoLocalId: pledgeData.photoLocalId,
+          compositedPhotoUrl: null, // No compositing when skipping email
           createdAt: pledgeData.createdAt,
         });
 

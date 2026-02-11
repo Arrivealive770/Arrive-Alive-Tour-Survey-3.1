@@ -104,6 +104,7 @@ const createEventSchema = z.object({
   eventDate: z.string().transform((str) => new Date(str)),
   surveyTypes: z.array(z.string()).min(1, "At least one survey type is required"),
   overlayType: z.string().min(1, "Overlay type is required"),
+  picturePledgeEnabled: z.boolean().optional().default(false),
 });
 
 eventsRouter.post(
@@ -130,6 +131,7 @@ eventsRouter.post(
         eventDate: data.eventDate,
         surveyTypes: JSON.stringify(data.surveyTypes),
         overlayType: data.overlayType,
+        picturePledgeEnabled: data.picturePledgeEnabled,
         status: "active",
       },
       include: {
@@ -151,6 +153,7 @@ const updateEventSchema = z.object({
   eventDate: z.string().transform((str) => new Date(str)).optional(),
   surveyTypes: z.array(z.string()).optional(),
   overlayType: z.string().min(1).optional(),
+  picturePledgeEnabled: z.boolean().optional(),
   status: z.enum(["active", "completed"]).optional(),
 });
 
@@ -178,6 +181,7 @@ eventsRouter.put(
         ...(data.eventDate && { eventDate: data.eventDate }),
         ...(data.surveyTypes && { surveyTypes: JSON.stringify(data.surveyTypes) }),
         ...(data.overlayType && { overlayType: data.overlayType }),
+        ...(data.picturePledgeEnabled !== undefined && { picturePledgeEnabled: data.picturePledgeEnabled }),
         ...(data.status && { status: data.status }),
       },
       include: {

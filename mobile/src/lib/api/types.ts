@@ -51,7 +51,8 @@ export interface Event {
   venueState: string;
   eventDate: string;
   surveyTypes: SurveyTypeSlug[];
-  overlayType: SurveyTypeSlug;
+  overlayType: string; // Now an overlay ID
+  picturePledgeEnabled?: boolean;
   status: 'active' | 'completed';
   createdAt: string;
 }
@@ -63,7 +64,26 @@ export interface CreateEventRequest {
   venueState: string;
   eventDate: string;
   surveyTypes: SurveyTypeSlug[];
-  overlayType: SurveyTypeSlug;
+  overlayType: string; // Now an overlay ID
+  picturePledgeEnabled?: boolean;
+}
+
+// Overlay
+export interface Overlay {
+  id: string;
+  name: string;
+  imageUrl: string;
+  createdAt: string;
+}
+
+// Photo composite endpoint
+export interface CompositePhotoRequest {
+  photoUrl: string;
+  overlayId: string;
+}
+
+export interface CompositePhotoResponse {
+  url: string;
 }
 
 // US States for dropdown
