@@ -9,6 +9,7 @@ const syncRouter = new Hono();
 // POST /api/sync/surveys - Batch upload survey responses (array of surveys, deviceId)
 const batchSurveySchema = z.object({
   deviceId: z.string().min(1, "Device ID is required"),
+  teamId: z.string().optional(), // Optional, included by mobile app
   surveys: z.array(
     z.object({
       localId: z.string(),
@@ -16,9 +17,10 @@ const batchSurveySchema = z.object({
       eventId: z.string(),
       surveyTypeSlug: z.string(),
       responses: z.record(z.string(), z.any()),
-      ageRange: z.string().optional(),
+      ageRange: z.string().optional().nullable(),
+      deviceId: z.string().optional(), // Mobile may include this
       completedAt: z.string().optional(),
-      durationSeconds: z.number().int().positive().optional(),
+      durationSeconds: z.number().int().positive().optional().nullable(),
     })
   ),
 });
@@ -105,14 +107,18 @@ syncRouter.post(
 // POST /api/sync/pledges - Batch upload pledges (array of pledges, deviceId)
 const batchPledgesSchema = z.object({
   deviceId: z.string().min(1, "Device ID is required"),
+  teamId: z.string().optional(), // Optional, included by mobile app
   pledges: z.array(
     z.object({
       localId: z.string(),
       teamId: z.string(),
       eventId: z.string(),
-      email: z.string().email(),
-      surveyResponseId: z.string().optional(),
-      photoId: z.string().optional(),
+      email: z.string().email().optional().nullable(),
+      surveyLocalId: z.string().optional().nullable(), // Mobile sends surveyLocalId, not surveyResponseId
+      surveyResponseId: z.string().optional().nullable(),
+      photoLocalId: z.string().optional().nullable(), // Mobile sends photoLocalId, not photoId
+      photoId: z.string().optional().nullable(),
+      compositedPhotoUrl: z.string().optional().nullable(), // New field for composited photo
       createdAt: z.string().optional(),
     })
   ),
@@ -156,10 +162,10 @@ syncRouter.post(
             localId: pledge.localId,
             teamId: pledge.teamId,
             eventId: pledge.eventId,
-            email: pledge.email,
-            surveyResponseId: pledge.surveyResponseId,
-            photoId: pledge.photoId,
-            emailStatus: "pending",
+            email: pledge.email || "",
+            surveyResponseId: pledge.surveyResponseId || undefined,
+            photoId: pledge.photoId || undefined,
+            emailStatus: pledge.email ? "pending" : "skipped",
             createdAt: pledge.createdAt ? new Date(pledge.createdAt) : new Date(),
             syncedAt: new Date(),
           },
@@ -167,9 +173,10 @@ syncRouter.post(
 
         // Queue email for sending if pledge has an email address
         if (pledge.email) {
-          // Get photo URL if a photo is attached
-          let photoUrl: string | undefined;
-          if (pledge.photoId) {
+          // Get photo URL - prefer composited photo, fallback to regular photo
+          let photoUrl: string | undefined = pledge.compositedPhotoUrl || undefined;
+
+          if (!photoUrl && pledge.photoId) {
             const photo = await prisma.photo.findUnique({
               where: { id: pledge.photoId },
               select: { storageUrl: true },
