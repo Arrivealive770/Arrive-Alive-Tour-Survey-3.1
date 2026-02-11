@@ -1,4 +1,4 @@
-import { useState, useCallback } from 'react';
+import { useState } from 'react';
 import {
   View,
   Text,
@@ -8,112 +8,90 @@ import {
   Modal,
   TextInput,
   Alert,
+  ActivityIndicator,
 } from 'react-native';
-import { Plus, X, MapPin, Check } from 'lucide-react-native';
+import { Plus, X, MapPin, Check, Calendar } from 'lucide-react-native';
+import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { EventCard } from '@/components/admin/EventCard';
 import { useDeviceStore } from '@/lib/state/device-store';
-import { SURVEY_TYPES, US_STATES, type SurveyTypeSlug, type Event } from '@/lib/api/types';
+import { api } from '@/lib/api/api';
+import { SURVEY_TYPES, US_STATES, type SurveyTypeSlug, type Event, type CreateEventRequest } from '@/lib/api/types';
 import { cn } from '@/lib/cn';
 
-// Mock events for demonstration
-const MOCK_EVENTS: Event[] = [
-  {
-    id: '1',
-    teamId: 'team-1',
-    venueName: 'Central High School',
-    venueCity: 'Austin',
-    venueState: 'TX',
-    eventDate: new Date().toISOString(),
-    surveyTypes: ['marijuana', 'alcohol', 'distracted'],
-    overlayType: 'marijuana',
-    status: 'active',
-    createdAt: new Date().toISOString(),
-  },
-  {
-    id: '2',
-    teamId: 'team-1',
-    venueName: 'Westside Community Center',
-    venueCity: 'Houston',
-    venueState: 'TX',
-    eventDate: new Date(Date.now() - 7 * 24 * 60 * 60 * 1000).toISOString(),
-    surveyTypes: ['alcohol', 'impaired'],
-    overlayType: 'alcohol',
-    status: 'completed',
-    createdAt: new Date(Date.now() - 7 * 24 * 60 * 60 * 1000).toISOString(),
-  },
-  {
-    id: '3',
-    teamId: 'team-1',
-    venueName: 'Lincoln Academy',
-    venueCity: 'Dallas',
-    venueState: 'TX',
-    eventDate: new Date(Date.now() - 14 * 24 * 60 * 60 * 1000).toISOString(),
-    surveyTypes: ['distracted', 'combo'],
-    overlayType: 'distracted',
-    status: 'completed',
-    createdAt: new Date(Date.now() - 14 * 24 * 60 * 60 * 1000).toISOString(),
-  },
-];
-
-// Mock survey counts
-const MOCK_SURVEY_COUNTS: Record<string, number> = {
-  '1': 47,
-  '2': 123,
-  '3': 89,
-};
-
-const MOCK_PLEDGE_COUNTS: Record<string, number> = {
-  '1': 32,
-  '2': 98,
-  '3': 67,
-};
+interface EventWithCounts extends Event {
+  _count?: {
+    surveyResponses: number;
+    pledges: number;
+    photos: number;
+  };
+}
 
 export default function EventsScreen() {
-  const [events, setEvents] = useState<Event[]>(MOCK_EVENTS);
-  const [isRefreshing, setIsRefreshing] = useState(false);
   const [showNewEventModal, setShowNewEventModal] = useState(false);
-  const [selectedEvent, setSelectedEvent] = useState<Event | null>(null);
+  const [selectedEvent, setSelectedEvent] = useState<EventWithCounts | null>(null);
 
   // New event form state
   const [newVenueName, setNewVenueName] = useState('');
   const [newCity, setNewCity] = useState('');
   const [newState, setNewState] = useState('');
+  const [newEventDate, setNewEventDate] = useState('');
   const [newSurveyTypes, setNewSurveyTypes] = useState<SurveyTypeSlug[]>([]);
   const [newOverlayType, setNewOverlayType] = useState<SurveyTypeSlug | ''>('');
 
   const teamId = useDeviceStore((s) => s.teamId);
+  const queryClient = useQueryClient();
 
-  const handleRefresh = useCallback(async () => {
-    setIsRefreshing(true);
-    // In real app, would fetch events from API
-    await new Promise((resolve) => setTimeout(resolve, 1000));
-    setIsRefreshing(false);
-  }, []);
+  // Fetch events from API
+  const { data: events, isLoading, refetch, isRefetching } = useQuery({
+    queryKey: ['admin-events', teamId],
+    queryFn: () => api.get<EventWithCounts[]>(`/api/events?teamId=${teamId}`),
+    enabled: !!teamId,
+  });
 
-  const handleEventPress = (event: Event) => {
+  // Create event mutation
+  const createEventMutation = useMutation({
+    mutationFn: async (data: CreateEventRequest) => {
+      return api.post<Event>('/api/events', data);
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['admin-events'] });
+      resetNewEventForm();
+      setShowNewEventModal(false);
+      Alert.alert('Success', 'Event created! Field workers can now select this event.');
+    },
+    onError: (error: Error) => {
+      Alert.alert('Error', error.message || 'Failed to create event');
+    },
+  });
+
+  // End event mutation
+  const endEventMutation = useMutation({
+    mutationFn: async (eventId: string) => {
+      return api.put<Event>(`/api/events/${eventId}/complete`, {});
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['admin-events'] });
+      setSelectedEvent(null);
+    },
+    onError: (error: Error) => {
+      Alert.alert('Error', error.message || 'Failed to end event');
+    },
+  });
+
+  const handleEventPress = (event: EventWithCounts) => {
     setSelectedEvent(event);
   };
 
   const handleEndEvent = (eventId: string) => {
     Alert.alert(
       'End Event',
-      'Are you sure you want to end this event? This will mark it as completed and purge local data.',
+      'Are you sure you want to end this event? Field workers will no longer be able to select it.',
       [
         { text: 'Cancel', style: 'cancel' },
         {
           text: 'End Event',
           style: 'destructive',
-          onPress: () => {
-            // In real app, would call API
-            setEvents((prev) =>
-              prev.map((e) =>
-                e.id === eventId
-                  ? { ...e, status: 'completed' as const }
-                  : e
-              )
-            );
-            setSelectedEvent(null);
-          },
+          onPress: () => endEventMutation.mutate(eventId),
         },
       ]
     );
@@ -125,28 +103,29 @@ export default function EventsScreen() {
       return;
     }
 
-    const newEvent: Event = {
-      id: `event-${Date.now()}`,
-      teamId: teamId || 'team-1',
+    if (!teamId) {
+      Alert.alert('Error', 'No team selected. Please set up the device first.');
+      return;
+    }
+
+    const eventDate = newEventDate ? new Date(newEventDate).toISOString() : new Date().toISOString();
+
+    createEventMutation.mutate({
+      teamId,
       venueName: newVenueName,
       venueCity: newCity,
       venueState: newState,
-      eventDate: new Date().toISOString(),
+      eventDate,
       surveyTypes: newSurveyTypes,
       overlayType: newOverlayType,
-      status: 'active',
-      createdAt: new Date().toISOString(),
-    };
-
-    setEvents((prev) => [newEvent, ...prev]);
-    resetNewEventForm();
-    setShowNewEventModal(false);
+    });
   };
 
   const resetNewEventForm = () => {
     setNewVenueName('');
     setNewCity('');
     setNewState('');
+    setNewEventDate('');
     setNewSurveyTypes([]);
     setNewOverlayType('');
   };
@@ -157,8 +136,8 @@ export default function EventsScreen() {
     );
   };
 
-  const activeEvents = events.filter((e) => e.status === 'active');
-  const completedEvents = events.filter((e) => e.status === 'completed');
+  const activeEvents = events?.filter((e) => e.status === 'active') || [];
+  const completedEvents = events?.filter((e) => e.status === 'completed') || [];
 
   return (
     <View className="flex-1 bg-black">
@@ -167,60 +146,69 @@ export default function EventsScreen() {
         contentContainerStyle={{ padding: 16 }}
         refreshControl={
           <RefreshControl
-            refreshing={isRefreshing}
-            onRefresh={handleRefresh}
+            refreshing={isRefetching}
+            onRefresh={() => refetch()}
             tintColor="#3b82f6"
           />
         }
       >
-        {/* Active Events */}
-        <View className="mb-6">
-          <Text className="text-white text-lg font-semibold mb-3">Active Events</Text>
-          {activeEvents.length > 0 ? (
-            activeEvents.map((event) => (
-              <EventCard
-                key={event.id}
-                id={event.id}
-                venueName={event.venueName}
-                city={event.venueCity}
-                state={event.venueState}
-                date={event.eventDate}
-                surveyCount={MOCK_SURVEY_COUNTS[event.id] || 0}
-                pledgeCount={MOCK_PLEDGE_COUNTS[event.id] || 0}
-                status={event.status}
-                onPress={() => handleEventPress(event)}
-              />
-            ))
-          ) : (
-            <View className="bg-zinc-900 rounded-2xl p-6 items-center">
-              <Text className="text-zinc-500">No active events</Text>
-              <Text className="text-zinc-600 text-sm mt-1">
-                Create a new event to get started
-              </Text>
-            </View>
-          )}
-        </View>
-
-        {/* Completed Events */}
-        {completedEvents.length > 0 ? (
-          <View className="mb-6">
-            <Text className="text-white text-lg font-semibold mb-3">Completed Events</Text>
-            {completedEvents.map((event) => (
-              <EventCard
-                key={event.id}
-                id={event.id}
-                venueName={event.venueName}
-                city={event.venueCity}
-                state={event.venueState}
-                date={event.eventDate}
-                surveyCount={MOCK_SURVEY_COUNTS[event.id] || 0}
-                pledgeCount={MOCK_PLEDGE_COUNTS[event.id] || 0}
-                status={event.status}
-                onPress={() => handleEventPress(event)}
-              />
-            ))}
+        {isLoading ? (
+          <View className="items-center py-12">
+            <ActivityIndicator size="large" color="#fff" />
+            <Text className="text-zinc-400 mt-4">Loading events...</Text>
           </View>
-        ) : null}
+        ) : (
+          <>
+            {/* Active Events */}
+            <View className="mb-6">
+              <Text className="text-white text-lg font-semibold mb-3">Active Events</Text>
+              {activeEvents.length > 0 ? (
+                activeEvents.map((event) => (
+                  <EventCard
+                    key={event.id}
+                    id={event.id}
+                    venueName={event.venueName}
+                    city={event.venueCity}
+                    state={event.venueState}
+                    date={event.eventDate}
+                    surveyCount={event._count?.surveyResponses || 0}
+                    pledgeCount={event._count?.pledges || 0}
+                    status={event.status}
+                    onPress={() => handleEventPress(event)}
+                  />
+                ))
+              ) : (
+                <View className="bg-zinc-900 rounded-2xl p-6 items-center">
+                  <Text className="text-zinc-500">No active events</Text>
+                  <Text className="text-zinc-600 text-sm mt-1">
+                    Create a new event for your field team
+                  </Text>
+                </View>
+              )}
+            </View>
+
+            {/* Completed Events */}
+            {completedEvents.length > 0 ? (
+              <View className="mb-6">
+                <Text className="text-white text-lg font-semibold mb-3">Completed Events</Text>
+                {completedEvents.map((event) => (
+                  <EventCard
+                    key={event.id}
+                    id={event.id}
+                    venueName={event.venueName}
+                    city={event.venueCity}
+                    state={event.venueState}
+                    date={event.eventDate}
+                    surveyCount={event._count?.surveyResponses || 0}
+                    pledgeCount={event._count?.pledges || 0}
+                    status={event.status}
+                    onPress={() => handleEventPress(event)}
+                  />
+                ))}
+              </View>
+            ) : null}
+          </>
+        )}
       </ScrollView>
 
       {/* New Event Button */}
@@ -256,10 +244,16 @@ export default function EventsScreen() {
                 <Text className="text-white text-2xl font-bold mb-2">
                   {selectedEvent.venueName}
                 </Text>
-                <View className="flex-row items-center mb-4">
+                <View className="flex-row items-center mb-2">
                   <MapPin size={16} color="#71717a" />
                   <Text className="text-zinc-400 ml-1">
                     {selectedEvent.venueCity}, {selectedEvent.venueState}
+                  </Text>
+                </View>
+                <View className="flex-row items-center mb-4">
+                  <Calendar size={16} color="#71717a" />
+                  <Text className="text-zinc-400 ml-1">
+                    {new Date(selectedEvent.eventDate).toLocaleDateString()}
                   </Text>
                 </View>
 
@@ -278,22 +272,13 @@ export default function EventsScreen() {
                   <View className="flex-1 bg-zinc-800 rounded-xl p-4">
                     <Text className="text-zinc-400 text-sm">Surveys</Text>
                     <Text className="text-white text-2xl font-bold">
-                      {MOCK_SURVEY_COUNTS[selectedEvent.id] || 0}
+                      {selectedEvent._count?.surveyResponses || 0}
                     </Text>
                   </View>
                   <View className="flex-1 bg-zinc-800 rounded-xl p-4">
                     <Text className="text-zinc-400 text-sm">Pledges</Text>
                     <Text className="text-white text-2xl font-bold">
-                      {MOCK_PLEDGE_COUNTS[selectedEvent.id] || 0}
-                    </Text>
-                  </View>
-                </View>
-
-                <View className="bg-zinc-800 rounded-xl p-4 mb-6">
-                  <View className="flex-row justify-between mb-2">
-                    <Text className="text-zinc-400 text-sm">Event Date</Text>
-                    <Text className="text-white text-sm">
-                      {new Date(selectedEvent.eventDate).toLocaleString()}
+                      {selectedEvent._count?.pledges || 0}
                     </Text>
                   </View>
                 </View>
@@ -301,11 +286,20 @@ export default function EventsScreen() {
                 {selectedEvent.status === 'active' ? (
                   <Pressable
                     onPress={() => handleEndEvent(selectedEvent.id)}
+                    disabled={endEventMutation.isPending}
                     className="bg-red-600 py-4 rounded-xl items-center mb-6 active:bg-red-700"
                   >
-                    <Text className="text-white font-semibold">End Event</Text>
+                    {endEventMutation.isPending ? (
+                      <ActivityIndicator color="#fff" />
+                    ) : (
+                      <Text className="text-white font-semibold">End Event</Text>
+                    )}
                   </Pressable>
-                ) : null}
+                ) : (
+                  <View className="bg-zinc-800 py-4 rounded-xl items-center mb-6">
+                    <Text className="text-zinc-500 font-semibold">Event Completed</Text>
+                  </View>
+                )}
               </ScrollView>
             ) : null}
           </View>
@@ -369,7 +363,7 @@ export default function EventsScreen() {
                   style={{ flexGrow: 0 }}
                 >
                   <View className="flex-row gap-2">
-                    {US_STATES.slice(0, 15).map((state) => (
+                    {US_STATES.map((state) => (
                       <Pressable
                         key={state.code}
                         onPress={() => setNewState(state.code)}
@@ -392,9 +386,24 @@ export default function EventsScreen() {
                 </ScrollView>
               </View>
 
+              {/* Event Date */}
+              <View className="mb-4">
+                <Text className="text-zinc-400 text-sm mb-2">Event Date (optional)</Text>
+                <TextInput
+                  value={newEventDate}
+                  onChangeText={setNewEventDate}
+                  placeholder="YYYY-MM-DD (leave blank for today)"
+                  placeholderTextColor="#52525b"
+                  className="bg-zinc-800 rounded-xl px-4 py-3 text-white"
+                />
+              </View>
+
               {/* Survey Types */}
               <View className="mb-4">
                 <Text className="text-zinc-400 text-sm mb-2">Survey Types *</Text>
+                <Text className="text-zinc-600 text-xs mb-3">
+                  Select which surveys field workers will collect at this event
+                </Text>
                 <View className="flex-row flex-wrap gap-2">
                   {SURVEY_TYPES.map((type) => (
                     <Pressable
@@ -452,9 +461,14 @@ export default function EventsScreen() {
               {/* Create Button */}
               <Pressable
                 onPress={handleCreateEvent}
+                disabled={createEventMutation.isPending}
                 className="bg-blue-600 py-4 rounded-xl items-center mb-8 active:bg-blue-700"
               >
-                <Text className="text-white font-semibold">Create Event</Text>
+                {createEventMutation.isPending ? (
+                  <ActivityIndicator color="#fff" />
+                ) : (
+                  <Text className="text-white font-semibold">Create Event</Text>
+                )}
               </Pressable>
             </ScrollView>
           </View>
