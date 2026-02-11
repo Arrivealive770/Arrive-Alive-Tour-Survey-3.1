@@ -104,15 +104,21 @@ export default function PledgePromptScreen() {
 
   const isTablet = width > 600;
 
+  // Log for debugging
+  console.log('[PledgePrompt] picturePledgeEnabled:', picturePledgeEnabled);
+
   const handleTakePledge = useCallback(() => {
+    console.log('[PledgePrompt] handleTakePledge called, picturePledgeEnabled:', picturePledgeEnabled);
     // Start pledge flow with the current survey's local ID (if available)
     startPledge('');
 
     if (picturePledgeEnabled) {
       // Picture pledge enabled - go to photo selection
+      console.log('[PledgePrompt] Navigating to /kiosk/pledge (photo selection)');
       router.push('/kiosk/pledge' as any);
     } else {
       // Picture pledge disabled - skip directly to email
+      console.log('[PledgePrompt] Navigating to /kiosk/pledge/email (skip photo)');
       router.push('/kiosk/pledge/email' as any);
     }
   }, [startPledge, router, picturePledgeEnabled]);
