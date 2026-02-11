@@ -20,16 +20,28 @@ const batchSurveySchema = z.object({
       ageRange: z.string().optional().nullable(),
       deviceId: z.string().optional(), // Mobile may include this
       completedAt: z.string().optional(),
-      durationSeconds: z.number().int().positive().optional().nullable(),
+      durationSeconds: z.number().int().optional().nullable(), // Allow 0 or null
     })
   ),
 });
 
 syncRouter.post(
   "/surveys",
-  zValidator("json", batchSurveySchema),
   async (c) => {
-    const { deviceId, surveys } = c.req.valid("json");
+    let body;
+    try {
+      body = await c.req.json();
+    } catch (e) {
+      return c.json({ error: { message: "Invalid JSON body" } }, 400);
+    }
+
+    const parseResult = batchSurveySchema.safeParse(body);
+    if (!parseResult.success) {
+      console.error("[Sync] Survey validation error:", JSON.stringify(parseResult.error.issues, null, 2));
+      return c.json({ error: { message: "Validation failed", details: parseResult.error.issues } }, 400);
+    }
+
+    const { deviceId, surveys } = parseResult.data;
 
     // Verify device exists
     const device = await prisma.device.findUnique({
