@@ -4,7 +4,7 @@ import { html } from "hono/html";
 const adminPortalRouter = new Hono();
 
 // Admin password (in production, this should be hashed and stored securely)
-const ADMIN_PASSWORD = "admin123";
+const ADMIN_PASSWORD = "1234";
 
 // POST /admin/verify-password - Verify admin password
 adminPortalRouter.post("/verify-password", async (c) => {
