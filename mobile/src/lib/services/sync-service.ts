@@ -274,7 +274,7 @@ class SyncService {
       }
 
       // Handle failures
-      for (const failure of data.failed) {
+      for (const failure of data.errors) {
         await db.markSurveyFailed(failure.localId, failure.error);
         totalFailed++;
 
@@ -289,7 +289,7 @@ class SyncService {
       // Schedule retry for failed items if under max attempts
       if (totalFailed > 0) {
         const failedSurvey = pendingSurveys.find(
-          (s) => data.failed.some((f) => f.localId === s.localId)
+          (s) => data.errors.some((f) => f.localId === s.localId)
         );
         if (failedSurvey && failedSurvey.syncAttempts < DEFAULT_RETRY_CONFIG.maxAttempts) {
           const delay = this.calculateRetryDelay(failedSurvey.syncAttempts);
@@ -374,7 +374,7 @@ class SyncService {
       }
 
       // Handle failures
-      for (const failure of data.failed) {
+      for (const failure of data.errors) {
         await db.markPledgeFailed(failure.localId, failure.error);
         totalFailed++;
 
@@ -389,7 +389,7 @@ class SyncService {
       // Schedule retry for failed items
       if (totalFailed > 0) {
         const failedPledge = pendingPledges.find(
-          (p) => data.failed.some((f) => f.localId === p.localId)
+          (p) => data.errors.some((f) => f.localId === p.localId)
         );
         if (failedPledge && failedPledge.syncAttempts < DEFAULT_RETRY_CONFIG.maxAttempts) {
           const delay = this.calculateRetryDelay(failedPledge.syncAttempts);

@@ -92,7 +92,8 @@ export interface PhotoListResponse {
  */
 export interface SyncBatchResponse {
   synced: string[]; // Array of localIds that were successfully synced
-  failed: Array<{
+  skipped: string[]; // Array of localIds that were already synced
+  errors: Array<{
     localId: string;
     error: string;
   }>;
