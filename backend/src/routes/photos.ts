@@ -123,8 +123,37 @@ photosRouter.post("/upload", async (c) => {
     const filename = `${randomUUID()}.${ext}`;
     const filePath = join(UPLOADS_DIR, filename);
 
-    // Save file
-    const buffer = await file.arrayBuffer();
+    // Save file - handle both standard File objects and Bun/Hono file objects
+    let buffer: ArrayBuffer;
+    if (typeof file.arrayBuffer === 'function') {
+      buffer = await file.arrayBuffer();
+    } else if (file instanceof Blob) {
+      buffer = await file.arrayBuffer();
+    } else {
+      // Fallback: try to read as stream or use the file directly
+      const fileAny = file as any;
+      if (fileAny.stream && typeof fileAny.stream === 'function') {
+        const chunks: Uint8Array[] = [];
+        const reader = fileAny.stream().getReader();
+        while (true) {
+          const { done, value } = await reader.read();
+          if (done) break;
+          chunks.push(value);
+        }
+        const totalLength = chunks.reduce((acc, chunk) => acc + chunk.length, 0);
+        const result = new Uint8Array(totalLength);
+        let offset = 0;
+        for (const chunk of chunks) {
+          result.set(chunk, offset);
+          offset += chunk.length;
+        }
+        buffer = result.buffer;
+      } else if (fileAny.buffer) {
+        buffer = fileAny.buffer;
+      } else {
+        throw new Error('Unable to read file data');
+      }
+    }
     await writeFile(filePath, Buffer.from(buffer));
 
     // Create photo record
