@@ -51,15 +51,15 @@ photosRouter.post("/upload", async (c) => {
     await ensureUploadsDir();
 
     const formData = await c.req.formData();
-    const file = formData.get("file") as File | null;
+    const fileData = formData.get("file");
     const teamId = formData.get("teamId") as string | null;
     const eventId = formData.get("eventId") as string | null;
     const overlayType = formData.get("overlayType") as string | null;
     const localId = formData.get("localId") as string | null;
 
-    console.log("[PhotoUpload] Received upload request:", { teamId, eventId, overlayType, localId, hasFile: !!file });
+    console.log("[PhotoUpload] Received upload request:", { teamId, eventId, overlayType, localId, hasFile: !!fileData });
 
-    if (!file) {
+    if (!fileData) {
       return c.json({ error: { message: "File is required", code: "FILE_REQUIRED" } }, 400);
     }
     if (!teamId) {
@@ -114,8 +114,8 @@ photosRouter.post("/upload", async (c) => {
 
     // Generate unique filename - handle cases where file.name might be undefined (React Native)
     let ext = "jpg";
-    if (file.name && typeof file.name === 'string') {
-      const parts = file.name.split(".");
+    if (typeof fileData !== 'string' && (fileData as File).name && typeof (fileData as File).name === 'string') {
+      const parts = (fileData as File).name.split(".");
       if (parts.length > 1) {
         ext = parts.pop() || "jpg";
       }
@@ -123,28 +123,57 @@ photosRouter.post("/upload", async (c) => {
     const filename = `${randomUUID()}.${ext}`;
     const filePath = join(UPLOADS_DIR, filename);
 
-    // Save file - Bun's File object from formData has arrayBuffer() method
-    console.log("[PhotoUpload] File type:", typeof file, "constructor:", file?.constructor?.name);
-    console.log("[PhotoUpload] File size:", (file as any)?.size);
-    console.log("[PhotoUpload] File name:", (file as any)?.name);
+    // Save file - handle multiple input formats
+    console.log("[PhotoUpload] File type:", typeof fileData, "constructor:", (fileData as any)?.constructor?.name);
+    console.log("[PhotoUpload] File size:", (fileData as any)?.size);
 
     let fileBuffer: Buffer;
     try {
-      // In Bun, formData files are Blob-like objects with arrayBuffer()
-      if (file && typeof (file as any).arrayBuffer === 'function') {
-        const arrayBuffer = await (file as any).arrayBuffer();
+      if (typeof fileData === 'string') {
+        // Handle string input - could be base64 data URI or file path
+        if (fileData.startsWith('data:')) {
+          // Base64 data URI (e.g., "data:image/jpeg;base64,/9j/4AAQ...")
+          const matches = fileData.match(/^data:([^;]+);base64,(.+)$/);
+          if (matches && matches[2]) {
+            console.log("[PhotoUpload] Detected base64 data URI");
+            fileBuffer = Buffer.from(matches[2], 'base64');
+          } else {
+            throw new Error('Invalid data URI format');
+          }
+        } else if (fileData.startsWith('file://') || fileData.startsWith('/')) {
+          // File path - this shouldn't happen from mobile but handle it
+          console.log("[PhotoUpload] Received file path instead of file data:", fileData.substring(0, 100));
+          throw new Error('File paths are not supported. Please send the file data directly.');
+        } else {
+          // Try to parse as base64 directly (without data URI prefix)
+          console.log("[PhotoUpload] Attempting to parse as raw base64");
+          fileBuffer = Buffer.from(fileData, 'base64');
+        }
+      } else if (fileData && typeof (fileData as any).arrayBuffer === 'function') {
+        // Standard File/Blob object with arrayBuffer method
+        const arrayBuffer = await (fileData as any).arrayBuffer();
         fileBuffer = Buffer.from(arrayBuffer);
-      } else if (file && typeof (file as any).text === 'function') {
+      } else if (fileData && typeof (fileData as any).text === 'function') {
         // Fallback: read as text and convert
-        const text = await (file as any).text();
-        fileBuffer = Buffer.from(text);
-      } else if (file && (file as any).size > 0) {
+        const text = await (fileData as any).text();
+        // Check if it's base64
+        if (text.startsWith('data:')) {
+          const matches = text.match(/^data:([^;]+);base64,(.+)$/);
+          if (matches && matches[2]) {
+            fileBuffer = Buffer.from(matches[2], 'base64');
+          } else {
+            fileBuffer = Buffer.from(text);
+          }
+        } else {
+          fileBuffer = Buffer.from(text);
+        }
+      } else if (fileData && (fileData as any).size > 0) {
         // Try using Bun's native file reading
-        const blob = file as Blob;
+        const blob = fileData as Blob;
         const arrayBuffer = await blob.arrayBuffer();
         fileBuffer = Buffer.from(arrayBuffer);
       } else {
-        throw new Error(`Unable to read file data. File type: ${typeof file}, size: ${(file as any)?.size}`);
+        throw new Error(`Unable to read file data. File type: ${typeof fileData}, size: ${(fileData as any)?.size}`);
       }
     } catch (readError) {
       console.error("[PhotoUpload] File read error:", readError);

@@ -29,6 +29,7 @@ An offline-first kiosk system for the Arrive Alive Tour, supporting multiple tou
 - CSV export functionality
 - Device status monitoring
 - Event management
+- Survey type management (create, edit, delete)
 - Email queue status
 
 ### Offline-First Architecture
@@ -135,6 +136,13 @@ At venues without internet:
 - `GET /api/admin/analytics` - Dashboard data
 - `GET /api/admin/export/csv` - Export survey data
 - `GET /api/admin/devices` - Device status
+
+### Survey Management Endpoints
+- `GET /api/surveys/types` - List all survey types
+- `GET /api/surveys/types/:slug` - Get single survey type
+- `POST /api/surveys/types` - Create new survey type
+- `PUT /api/surveys/types/:slug` - Update survey type
+- `DELETE /api/surveys/types/:slug` - Delete/deactivate survey type
 
 ### Email Endpoints
 - `POST /api/email/process` - Process email queue
