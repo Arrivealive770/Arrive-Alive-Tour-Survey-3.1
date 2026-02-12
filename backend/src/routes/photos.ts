@@ -123,38 +123,41 @@ photosRouter.post("/upload", async (c) => {
     const filename = `${randomUUID()}.${ext}`;
     const filePath = join(UPLOADS_DIR, filename);
 
-    // Save file - handle both standard File objects and Bun/Hono file objects
-    let buffer: ArrayBuffer;
-    if (typeof file.arrayBuffer === 'function') {
-      buffer = await file.arrayBuffer();
-    } else if (file instanceof Blob) {
-      buffer = await file.arrayBuffer();
-    } else {
-      // Fallback: try to read as stream or use the file directly
-      const fileAny = file as any;
-      if (fileAny.stream && typeof fileAny.stream === 'function') {
-        const chunks: Uint8Array[] = [];
-        const reader = fileAny.stream().getReader();
-        while (true) {
-          const { done, value } = await reader.read();
-          if (done) break;
-          chunks.push(value);
-        }
-        const totalLength = chunks.reduce((acc, chunk) => acc + chunk.length, 0);
-        const result = new Uint8Array(totalLength);
-        let offset = 0;
-        for (const chunk of chunks) {
-          result.set(chunk, offset);
-          offset += chunk.length;
-        }
-        buffer = result.buffer;
-      } else if (fileAny.buffer) {
-        buffer = fileAny.buffer;
+    // Save file - Bun's File object from formData has arrayBuffer() method
+    console.log("[PhotoUpload] File type:", typeof file, "constructor:", file?.constructor?.name);
+    console.log("[PhotoUpload] File size:", (file as any)?.size);
+    console.log("[PhotoUpload] File name:", (file as any)?.name);
+
+    let fileBuffer: Buffer;
+    try {
+      // In Bun, formData files are Blob-like objects with arrayBuffer()
+      if (file && typeof (file as any).arrayBuffer === 'function') {
+        const arrayBuffer = await (file as any).arrayBuffer();
+        fileBuffer = Buffer.from(arrayBuffer);
+      } else if (file && typeof (file as any).text === 'function') {
+        // Fallback: read as text and convert
+        const text = await (file as any).text();
+        fileBuffer = Buffer.from(text);
+      } else if (file && (file as any).size > 0) {
+        // Try using Bun's native file reading
+        const blob = file as Blob;
+        const arrayBuffer = await blob.arrayBuffer();
+        fileBuffer = Buffer.from(arrayBuffer);
       } else {
-        throw new Error('Unable to read file data');
+        throw new Error(`Unable to read file data. File type: ${typeof file}, size: ${(file as any)?.size}`);
       }
+    } catch (readError) {
+      console.error("[PhotoUpload] File read error:", readError);
+      throw readError;
     }
-    await writeFile(filePath, Buffer.from(buffer));
+
+    // Check if buffer is valid (at least a few bytes for a real image)
+    if (fileBuffer.length < 100) {
+      console.log("[PhotoUpload] Warning: Very small file received:", fileBuffer.length, "bytes");
+    }
+
+    console.log("[PhotoUpload] Buffer size:", fileBuffer.length);
+    await writeFile(filePath, fileBuffer);
 
     // Create photo record
     const photo = await prisma.photo.create({
