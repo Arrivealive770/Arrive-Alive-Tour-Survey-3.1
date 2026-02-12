@@ -35,23 +35,42 @@ teamsRouter.get("/:id", async (c) => {
 });
 
 // GET /api/teams/code/:code - Get team by short code (for device pairing)
+// Checks both tablet code and phone code
 teamsRouter.get("/code/:code", async (c) => {
-  const code = c.req.param("code");
-  const team = await prisma.team.findUnique({
+  const code = c.req.param("code").toUpperCase();
+
+  // First try to find by tablet code
+  let team = await prisma.team.findUnique({
     where: { code },
   });
+
+  // If not found, try phone code
+  if (!team) {
+    team = await prisma.team.findUnique({
+      where: { phoneCode: code },
+    });
+  }
 
   if (!team) {
     return c.json({ error: { message: "Team not found", code: "NOT_FOUND" } }, 404);
   }
 
-  return c.json({ data: team });
+  // Include which type of code was used
+  const isPhoneCode = team.phoneCode === code;
+
+  return c.json({
+    data: {
+      ...team,
+      codeType: isPhoneCode ? 'phone' : 'tablet',
+    }
+  });
 });
 
 // POST /api/teams - Create team
 const createTeamSchema = z.object({
   name: z.string().min(1, "Name is required"),
   code: z.string().min(2, "Code must be at least 2 characters").max(10, "Code must be at most 10 characters"),
+  phoneCode: z.string().min(2, "Phone code must be at least 2 characters").max(10, "Phone code must be at most 10 characters").optional(),
 });
 
 teamsRouter.post(
@@ -62,17 +81,37 @@ teamsRouter.post(
 
     // Check if code already exists
     const existingTeam = await prisma.team.findUnique({
-      where: { code: data.code },
+      where: { code: data.code.toUpperCase() },
     });
 
     if (existingTeam) {
       return c.json({ error: { message: "Team code already exists", code: "CODE_EXISTS" } }, 400);
     }
 
+    // Check if phone code already exists (if provided)
+    if (data.phoneCode) {
+      const existingPhoneCode = await prisma.team.findUnique({
+        where: { phoneCode: data.phoneCode.toUpperCase() },
+      });
+
+      if (existingPhoneCode) {
+        return c.json({ error: { message: "Phone code already exists", code: "PHONE_CODE_EXISTS" } }, 400);
+      }
+
+      // Also check phone code doesn't match any team code
+      const codeConflict = await prisma.team.findUnique({
+        where: { code: data.phoneCode.toUpperCase() },
+      });
+      if (codeConflict) {
+        return c.json({ error: { message: "Phone code conflicts with existing team code", code: "CODE_CONFLICT" } }, 400);
+      }
+    }
+
     const team = await prisma.team.create({
       data: {
         name: data.name,
         code: data.code.toUpperCase(),
+        phoneCode: data.phoneCode?.toUpperCase() || null,
       },
     });
 
@@ -84,6 +123,7 @@ teamsRouter.post(
 const updateTeamSchema = z.object({
   name: z.string().min(1).optional(),
   code: z.string().min(2).max(10).optional(),
+  phoneCode: z.string().min(2).max(10).optional().nullable(),
 });
 
 teamsRouter.put(
@@ -109,6 +149,35 @@ teamsRouter.put(
       if (codeConflict) {
         return c.json({ error: { message: "Team code already exists", code: "CODE_EXISTS" } }, 400);
       }
+      // Also check against phone codes
+      const phoneCodeConflict = await prisma.team.findFirst({
+        where: { phoneCode: data.code.toUpperCase() },
+      });
+      if (phoneCodeConflict) {
+        return c.json({ error: { message: "Code conflicts with existing phone code", code: "CODE_CONFLICT" } }, 400);
+      }
+    }
+
+    // If updating phone code, check for conflicts
+    if (data.phoneCode !== undefined) {
+      if (data.phoneCode !== null) {
+        const phoneCodeConflict = await prisma.team.findFirst({
+          where: {
+            phoneCode: data.phoneCode.toUpperCase(),
+            id: { not: id },
+          },
+        });
+        if (phoneCodeConflict) {
+          return c.json({ error: { message: "Phone code already exists", code: "PHONE_CODE_EXISTS" } }, 400);
+        }
+        // Also check against team codes
+        const codeConflict = await prisma.team.findUnique({
+          where: { code: data.phoneCode.toUpperCase() },
+        });
+        if (codeConflict) {
+          return c.json({ error: { message: "Phone code conflicts with existing team code", code: "CODE_CONFLICT" } }, 400);
+        }
+      }
     }
 
     const team = await prisma.team.update({
@@ -116,6 +185,7 @@ teamsRouter.put(
       data: {
         ...(data.name && { name: data.name }),
         ...(data.code && { code: data.code.toUpperCase() }),
+        ...(data.phoneCode !== undefined && { phoneCode: data.phoneCode?.toUpperCase() || null }),
       },
     });
 

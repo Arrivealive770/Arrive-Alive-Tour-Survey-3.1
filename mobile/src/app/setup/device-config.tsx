@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import { View, Text, ActivityIndicator } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { router } from 'expo-router';
@@ -13,6 +13,7 @@ export default function DeviceConfigScreen() {
   const [selectedRole, setSelectedRole] = useState<DeviceType | null>(null);
 
   const teamId = useDeviceStore((s) => s.teamId);
+  const codeType = useDeviceStore((s) => s.codeType);
   const setDeviceConfig = useDeviceStore((s) => s.setDeviceConfig);
 
   const registerDeviceMutation = useMutation({
@@ -40,12 +41,32 @@ export default function DeviceConfigScreen() {
     },
   });
 
+  // If phone code was used, auto-select phone and register immediately
+  useEffect(() => {
+    if (codeType === 'phone' && !selectedRole && !registerDeviceMutation.isPending) {
+      setSelectedRole('phone');
+      registerDeviceMutation.mutate('phone');
+    }
+  }, [codeType]);
+
   const handleSelectRole = (role: DeviceType) => {
     setSelectedRole(role);
     registerDeviceMutation.mutate(role);
   };
 
   const isLoading = registerDeviceMutation.isPending;
+
+  // If phone code, show loading while auto-registering
+  if (codeType === 'phone') {
+    return (
+      <SafeAreaView className="flex-1 bg-black">
+        <View className="flex-1 items-center justify-center">
+          <ActivityIndicator size="large" color="#fff" />
+          <Text className="text-white mt-4 text-lg">Setting up phone device...</Text>
+        </View>
+      </SafeAreaView>
+    );
+  }
 
   return (
     <SafeAreaView className="flex-1 bg-black">

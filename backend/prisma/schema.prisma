@@ -68,7 +68,8 @@ model Verification {
 model Team {
   id        String   @id @default(cuid())
   name      String
-  code      String   @unique // Unique short code for the team
+  code      String   @unique // Unique short code for the team (tablets)
+  phoneCode String?  @unique // Separate code for phone devices
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
@@ -81,6 +82,7 @@ model Team {
   syncLogs        SyncLog[]
 
   @@index([code])
+  @@index([phoneCode])
 }
 
 model Device {

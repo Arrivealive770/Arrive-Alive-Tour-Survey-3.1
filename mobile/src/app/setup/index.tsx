@@ -4,7 +4,7 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import { router } from 'expo-router';
 import { useMutation } from '@tanstack/react-query';
 import { TeamCodeInput } from '@/components/setup';
-import { useDeviceStore } from '@/lib/state/device-store';
+import { useDeviceStore, type CodeType } from '@/lib/state/device-store';
 import { api } from '@/lib/api/api';
 import type { Team } from '@/lib/api/types';
 
@@ -22,10 +22,11 @@ export default function TeamSelectionScreen() {
       return team;
     },
     onSuccess: (team) => {
-      // Store team info in device store
+      // Store team info in device store including codeType
       setDeviceConfig({
         teamId: team.id,
         teamCode: team.code,
+        codeType: (team.codeType || 'tablet') as CodeType,
       });
       // Navigate to device config
       router.push('/setup/device-config' as any);

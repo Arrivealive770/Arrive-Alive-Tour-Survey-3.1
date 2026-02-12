@@ -3,6 +3,7 @@ import { persist, createJSONStorage } from 'zustand/middleware';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 
 export type DeviceType = 'tablet' | 'phone';
+export type CodeType = 'tablet' | 'phone';
 
 interface DeviceState {
   // Device identity
@@ -13,6 +14,7 @@ interface DeviceState {
   // Team association
   teamId: string | null;
   teamCode: string | null;
+  codeType: CodeType | null; // Which type of code was used to join
 
   // Event context
   currentEventId: string | null;
@@ -40,6 +42,7 @@ const initialState: DeviceState = {
   deviceType: null,
   teamId: null,
   teamCode: null,
+  codeType: null,
   currentEventId: null,
   picturePledgeEnabled: false,
   currentEventOverlayId: null,
@@ -90,6 +93,7 @@ export const useDeviceStore = create<DeviceState & DeviceActions>()(
         deviceType: state.deviceType,
         teamId: state.teamId,
         teamCode: state.teamCode,
+        codeType: state.codeType,
         adminPin: state.adminPin,
         // Don't persist isKioskMode or currentEventId
       }),
@@ -102,6 +106,7 @@ export const useDeviceId = () => useDeviceStore((s) => s.deviceId);
 export const useDeviceType = () => useDeviceStore((s) => s.deviceType);
 export const useTeamId = () => useDeviceStore((s) => s.teamId);
 export const useTeamCode = () => useDeviceStore((s) => s.teamCode);
+export const useCodeType = () => useDeviceStore((s) => s.codeType);
 export const useCurrentEventId = () => useDeviceStore((s) => s.currentEventId);
 export const useIsKioskMode = () => useDeviceStore((s) => s.isKioskMode);
 export const usePicturePledgeEnabled = () => useDeviceStore((s) => s.picturePledgeEnabled);

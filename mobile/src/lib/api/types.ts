@@ -21,6 +21,8 @@ export interface Team {
   id: string;
   name: string;
   code: string;
+  phoneCode: string | null;
+  codeType?: 'tablet' | 'phone'; // Indicates which code was used to join
   createdAt: string;
   updatedAt: string;
 }
