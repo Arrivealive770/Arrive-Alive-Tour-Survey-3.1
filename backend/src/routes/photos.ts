@@ -112,8 +112,14 @@ photosRouter.post("/upload", async (c) => {
       return c.json({ error: { message: "Event not found", code: "EVENT_NOT_FOUND" } }, 404);
     }
 
-    // Generate unique filename
-    const ext = file.name.split(".").pop() || "jpg";
+    // Generate unique filename - handle cases where file.name might be undefined (React Native)
+    let ext = "jpg";
+    if (file.name && typeof file.name === 'string') {
+      const parts = file.name.split(".");
+      if (parts.length > 1) {
+        ext = parts.pop() || "jpg";
+      }
+    }
     const filename = `${randomUUID()}.${ext}`;
     const filePath = join(UPLOADS_DIR, filename);
 
