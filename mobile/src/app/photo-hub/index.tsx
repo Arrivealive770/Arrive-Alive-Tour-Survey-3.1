@@ -1,7 +1,7 @@
 import { useState, useCallback, useRef } from 'react';
 import { View, Text, Pressable, Modal, Image, ActivityIndicator, Alert } from 'react-native';
 import { router } from 'expo-router';
-import { Images, Layers, Check, X, AlertCircle } from 'lucide-react-native';
+import { Images, Layers, Check, X, AlertCircle, Wifi } from 'lucide-react-native';
 import { CameraCapture, OverlayPreview, type CameraCaptureRef } from '@/components/photo-hub';
 import { usePhotoStore, useSelectedOverlay, usePhotoQueueCount } from '@/lib/state/photo-store';
 import { useDeviceStore } from '@/lib/state/device-store';
@@ -12,11 +12,13 @@ import {
   getOverlayConfig,
 } from '@/lib/overlays/overlay-service';
 import { v4 as uuidv4 } from 'uuid';
+import { getLocalPhotoSenderService } from '@/lib/services/local-photo-sender';
 
 export default function PhotoHubCamera() {
   const { db, isReady } = useDatabase();
   const teamId = useDeviceStore((s) => s.teamId);
   const eventId = useDeviceStore((s) => s.currentEventId);
+  const localPhotoTransferEnabled = useDeviceStore((s) => s.localPhotoTransferEnabled);
   const selectedOverlay = useSelectedOverlay();
   const addPhoto = usePhotoStore((s) => s.addPhoto);
   const queueCount = usePhotoQueueCount();
@@ -84,13 +86,30 @@ export default function PhotoHubCamera() {
       // Add to in-memory store
       addPhoto(previewUri, currentOverlay);
 
+      // If local transfer is enabled, also send directly to tablet
+      if (localPhotoTransferEnabled) {
+        try {
+          const sender = getLocalPhotoSenderService();
+          await sender.sendPhotoFromPath(previewUri, {
+            localId,
+            teamId,
+            eventId,
+            overlayType: currentOverlay,
+          });
+          console.log('[PhotoHubCamera] Photo sent to tablet locally');
+        } catch (localError) {
+          console.log('[PhotoHubCamera] Local transfer failed, photo queued for later:', localError);
+          // Don't show error to user - photo is still queued locally
+        }
+      }
+
       // Close preview and return to camera
       setShowPreview(false);
       setPreviewUri(null);
     } catch (error) {
       console.error('[PhotoHubCamera] Error saving photo:', error);
     }
-  }, [previewUri, db, teamId, eventId, currentOverlay, addPhoto]);
+  }, [previewUri, db, teamId, eventId, currentOverlay, addPhoto, localPhotoTransferEnabled]);
 
   const handleDiscardPhoto = useCallback(() => {
     setShowPreview(false);
@@ -131,6 +150,30 @@ export default function PhotoHubCamera() {
             <AlertCircle size={20} color="#fff" />
             <Text style={{ color: '#fff', fontSize: 14, fontWeight: '600', flex: 1 }}>
               No event selected. Go to Admin Settings to select an event.
+            </Text>
+          </View>
+        ) : null}
+
+        {/* Local Mode indicator - shows when local transfer is enabled */}
+        {localPhotoTransferEnabled ? (
+          <View
+            style={{
+              position: 'absolute',
+              top: 70,
+              left: '50%',
+              transform: [{ translateX: -50 }],
+              flexDirection: 'row',
+              alignItems: 'center',
+              backgroundColor: 'rgba(34, 197, 94, 0.85)',
+              paddingHorizontal: 12,
+              paddingVertical: 6,
+              borderRadius: 16,
+              gap: 6,
+            }}
+          >
+            <Wifi size={14} color="#fff" />
+            <Text style={{ color: '#fff', fontSize: 12, fontWeight: '600' }}>
+              Local Mode
             </Text>
           </View>
         ) : null}

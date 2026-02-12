@@ -5,7 +5,16 @@ import {
   initializeSyncService,
   cleanupSyncService,
 } from '@/lib/services/sync-service';
+import {
+  initializeLocalPhotoReceiver,
+  cleanupLocalPhotoReceiver,
+} from '@/lib/services/local-photo-receiver';
+import {
+  initializeLocalPhotoSender,
+  cleanupLocalPhotoSender,
+} from '@/lib/services/local-photo-sender';
 import { useSyncStore } from '@/lib/state/sync-store';
+import { useDeviceStore } from '@/lib/state/device-store';
 import { useDatabaseReady } from '@/providers/DatabaseProvider';
 import type { SyncResult } from '@/lib/services/sync-types';
 
@@ -27,6 +36,10 @@ interface SyncProviderProps {
 export function SyncProvider({ children }: SyncProviderProps) {
   const isInitialized = useRef(false);
   const isDatabaseReady = useDatabaseReady();
+
+  // Subscribe to device store state
+  const deviceType = useDeviceStore((s) => s.deviceType);
+  const localPhotoTransferEnabled = useDeviceStore((s) => s.localPhotoTransferEnabled);
 
   // Subscribe to sync store state
   const isOnline = useSyncStore((s) => s.isOnline);
@@ -57,6 +70,32 @@ export function SyncProvider({ children }: SyncProviderProps) {
       isInitialized.current = false;
     };
   }, [isDatabaseReady]);
+
+  // Initialize local photo transfer services based on device type
+  useEffect(() => {
+    if (!isDatabaseReady || !localPhotoTransferEnabled) {
+      return;
+    }
+
+    console.log('[SyncProvider] Initializing local photo transfer services');
+
+    if (deviceType === 'tablet') {
+      // Tablet receives photos
+      initializeLocalPhotoReceiver();
+    } else if (deviceType === 'phone') {
+      // Phone sends photos
+      initializeLocalPhotoSender();
+    }
+
+    return () => {
+      console.log('[SyncProvider] Cleaning up local photo transfer services');
+      if (deviceType === 'tablet') {
+        cleanupLocalPhotoReceiver();
+      } else if (deviceType === 'phone') {
+        cleanupLocalPhotoSender();
+      }
+    };
+  }, [isDatabaseReady, localPhotoTransferEnabled, deviceType]);
 
   // Manual sync trigger
   const sync = useCallback(async (): Promise<SyncResult> => {

@@ -101,6 +101,29 @@ At venues without internet:
 4. Surveys and pledges are stored in local SQLite
 5. When connectivity returns, everything syncs automatically
 
+### Local Photo Transfer (Hotspot Mode)
+
+For completely offline environments where photos should stay on the tablet's local storage:
+
+**Setup (on Phone):**
+1. Access Admin Settings (PIN: 1234)
+2. Enable "Local Photo Transfer" toggle
+3. Enter the tablet's IP address (usually `192.168.43.1` when tablet runs hotspot)
+4. Set port (default: 8082)
+
+**Operation:**
+1. Tablet creates a WiFi hotspot
+2. Phone connects to the tablet's hotspot
+3. When photos are taken, they're sent directly to the tablet over the local network
+4. Photos are stored on the tablet's local filesystem (not uploaded to cloud)
+5. No internet connection required at any point
+
+**Benefits:**
+- Photos never leave the local devices
+- Works in completely offline environments
+- Direct device-to-device transfer over hotspot
+- Tablet stores photos on its hard drive
+
 ### Step 5: End of Event
 
 1. Access Admin Dashboard
