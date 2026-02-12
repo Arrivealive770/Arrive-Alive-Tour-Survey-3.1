@@ -444,6 +444,21 @@ class SyncService {
       // Process photos one at a time due to FormData requirements
       for (const photo of pendingPhotos) {
         try {
+          // Skip photos with invalid event IDs - mark as failed permanently
+          const photoEventId = photo.eventId || eventId;
+          if (!photoEventId || photoEventId === 'no-event' || photoEventId === 'unknown') {
+            console.log(`[SyncService] Skipping photo ${photo.localId} - no valid event ID`);
+            await db.markPhotoUploadFailed(photo.localId);
+            // Mark as permanently failed by setting attempts to max
+            totalFailed++;
+            useSyncStore.getState().addError({
+              type: 'photo',
+              localId: photo.localId,
+              message: 'No valid event ID - photo cannot be synced',
+            });
+            continue;
+          }
+
           // Mark as uploading
           await db.markPhotoUploading(photo.localId);
 
@@ -464,7 +479,7 @@ class SyncService {
           } as unknown as Blob);
           formData.append('localId', photo.localId);
           formData.append('teamId', photo.teamId || teamId);
-          formData.append('eventId', photo.eventId || eventId);
+          formData.append('eventId', photoEventId);
           formData.append('overlayType', photo.overlayType);
 
           // Upload to server
