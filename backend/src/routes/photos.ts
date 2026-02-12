@@ -101,7 +101,15 @@ photosRouter.post("/upload", async (c) => {
     });
 
     if (existingPhoto) {
-      return c.json({ data: existingPhoto });
+      // Return same format for idempotency
+      return c.json({
+        data: {
+          success: true,
+          localId: existingPhoto.localId,
+          remoteUrl: existingPhoto.storageUrl,
+          photo: existingPhoto,
+        },
+      });
     }
   }
 
@@ -154,7 +162,15 @@ photosRouter.post("/upload", async (c) => {
     },
   });
 
-  return c.json({ data: photo }, 201);
+  // Return response format expected by mobile sync service
+  return c.json({
+    data: {
+      success: true,
+      localId: photo.localId,
+      remoteUrl: photo.storageUrl,
+      photo, // Include full photo object for backwards compatibility
+    },
+  }, 201);
 });
 
 // PUT /api/photos/:id/claim - Mark photo as claimed
