@@ -1,7 +1,7 @@
 import { useState, useCallback, useRef } from 'react';
-import { View, Text, Pressable, Modal, Image, ActivityIndicator } from 'react-native';
+import { View, Text, Pressable, Modal, Image, ActivityIndicator, Alert } from 'react-native';
 import { router } from 'expo-router';
-import { Images, Layers, Check, X } from 'lucide-react-native';
+import { Images, Layers, Check, X, AlertCircle } from 'lucide-react-native';
 import { CameraCapture, OverlayPreview, type CameraCaptureRef } from '@/components/photo-hub';
 import { usePhotoStore, useSelectedOverlay, usePhotoQueueCount } from '@/lib/state/photo-store';
 import { useDeviceStore } from '@/lib/state/device-store';
@@ -30,9 +30,22 @@ export default function PhotoHubCamera() {
   const currentOverlay: OverlayType = (selectedOverlay as OverlayType) ?? 'default';
   const overlayConfig = getOverlayConfig(currentOverlay);
 
+  // Check if we have a valid event
+  const hasValidEvent = !!eventId && eventId !== 'no-event';
+
   const handleCapture = useCallback(
     async (uri: string) => {
       if (!isReady || !db) return;
+
+      // Don't allow capture without a valid event
+      if (!hasValidEvent) {
+        Alert.alert(
+          'No Event Selected',
+          'Please select an event before taking photos. Go to Admin Settings to select an event.',
+          [{ text: 'OK' }]
+        );
+        return;
+      }
 
       try {
         setIsProcessing(true);
@@ -49,11 +62,11 @@ export default function PhotoHubCamera() {
         setIsProcessing(false);
       }
     },
-    [isReady, db, currentOverlay]
+    [isReady, db, currentOverlay, hasValidEvent]
   );
 
   const handleConfirmPhoto = useCallback(async () => {
-    if (!previewUri || !db || !teamId) return;
+    if (!previewUri || !db || !teamId || !eventId) return;
 
     try {
       // Generate unique ID
@@ -63,7 +76,7 @@ export default function PhotoHubCamera() {
       await db.queuePhoto({
         localId,
         teamId,
-        eventId: eventId ?? 'no-event',
+        eventId,
         localPath: previewUri,
         overlayType: currentOverlay,
       });
@@ -97,6 +110,30 @@ export default function PhotoHubCamera() {
       <CameraCapture ref={cameraRef} onCapture={handleCapture}>
         {/* Overlay preview on camera */}
         <OverlayPreview overlayType={currentOverlay} />
+
+        {/* No event warning banner */}
+        {!hasValidEvent ? (
+          <View
+            style={{
+              position: 'absolute',
+              top: 120,
+              left: 16,
+              right: 16,
+              backgroundColor: 'rgba(239, 68, 68, 0.9)',
+              paddingHorizontal: 16,
+              paddingVertical: 12,
+              borderRadius: 12,
+              flexDirection: 'row',
+              alignItems: 'center',
+              gap: 10,
+            }}
+          >
+            <AlertCircle size={20} color="#fff" />
+            <Text style={{ color: '#fff', fontSize: 14, fontWeight: '600', flex: 1 }}>
+              No event selected. Go to Admin Settings to select an event.
+            </Text>
+          </View>
+        ) : null}
 
         {/* Queue badge button - top right */}
         <Pressable
