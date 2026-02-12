@@ -3,7 +3,7 @@
 
 import NetInfo, { NetInfoState } from '@react-native-community/netinfo';
 import * as FileSystem from 'expo-file-system';
-import { AppState, AppStateStatus } from 'react-native';
+import { AppState, AppStateStatus, Platform } from 'react-native';
 import { getDatabase, isDatabaseInitialized, getDatabaseSafe } from '@/lib/db/database';
 import { useSyncStore } from '@/lib/state/sync-store';
 import { useDeviceStore } from '@/lib/state/device-store';
@@ -447,10 +447,12 @@ class SyncService {
           // Mark as uploading
           await db.markPhotoUploading(photo.localId);
 
-          // Check if file exists
-          const fileInfo = await FileSystem.getInfoAsync(photo.localPath);
-          if (!fileInfo.exists) {
-            throw new Error('Photo file not found');
+          // Check if file exists (skip on web since FileSystem.getInfoAsync is not available)
+          if (Platform.OS !== 'web') {
+            const fileInfo = await FileSystem.getInfoAsync(photo.localPath);
+            if (!fileInfo.exists) {
+              throw new Error('Photo file not found');
+            }
           }
 
           // Create FormData for upload
@@ -519,6 +521,13 @@ class SyncService {
       console.log('[SyncService] Database not ready, skipping photo download');
       return 0;
     }
+
+    // Skip on web since FileSystem APIs are not available
+    if (Platform.OS === 'web') {
+      console.log('[SyncService] Photo download not supported on web');
+      return 0;
+    }
+
     let downloaded = 0;
 
     try {
