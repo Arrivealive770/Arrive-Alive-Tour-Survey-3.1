@@ -612,14 +612,8 @@ adminPortalRouter.get("/", (c) => {
               <div class="filter-row">
                 <div class="form-group">
                   <label for="dataTeamFilter">Team</label>
-                  <select id="dataTeamFilter" onchange="loadSurveyResponses()">
+                  <select id="dataTeamFilter" onchange="loadEventsForTeam(); loadSurveyResponses();">
                     <option value="">All Teams</option>
-                  </select>
-                </div>
-                <div class="form-group">
-                  <label for="dataEventFilter">Event</label>
-                  <select id="dataEventFilter" onchange="loadSurveyResponses()">
-                    <option value="">All Events</option>
                   </select>
                 </div>
                 <div class="form-group">
@@ -633,10 +627,26 @@ adminPortalRouter.get("/", (c) => {
                     <option value="combo">Combo</option>
                   </select>
                 </div>
-                <div class="form-group">
-                  <button class="btn btn-primary btn-sm" onclick="exportPieChartReport()" style="margin-top: 24px;">Export Pie Chart Report</button>
+              </div>
+
+              <!-- Multi-select Events Section -->
+              <div class="card" style="background: #252525; margin-bottom: 20px;">
+                <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 12px;">
+                  <h3 style="color: #fff; margin: 0;">Select Events for Report</h3>
+                  <div>
+                    <button class="btn btn-secondary btn-sm" onclick="selectAllEvents()" style="margin-right: 8px;">Select All</button>
+                    <button class="btn btn-secondary btn-sm" onclick="deselectAllEvents()">Clear All</button>
+                  </div>
+                </div>
+                <div id="eventsCheckboxList" style="max-height: 200px; overflow-y: auto; background: #1a1a1a; border-radius: 8px; padding: 12px;">
+                  <p class="text-muted">Loading events...</p>
+                </div>
+                <div style="margin-top: 12px; display: flex; align-items: center; gap: 16px;">
+                  <span id="selectedEventsCount" style="color: #888;">0 events selected</span>
+                  <button class="btn btn-primary btn-sm" onclick="exportPieChartReport()">Export Pie Chart Report</button>
                 </div>
               </div>
+
               <div id="responsesLoading" class="loading">Loading responses...</div>
               <table id="responsesTable" style="display: none;">
                 <thead>
@@ -899,6 +909,7 @@ adminPortalRouter.get("/", (c) => {
               if (tab.dataset.tab === 'overlays') loadOverlays();
               if (tab.dataset.tab === 'surveys') loadSurveyTypes();
               if (tab.dataset.tab === 'data') {
+                loadEventsForTeam();
                 loadAnalytics();
                 loadSurveyResponses();
               }
@@ -1500,13 +1511,15 @@ adminPortalRouter.get("/", (c) => {
         }
 
         // Analytics & Data
+        let allEventsForData = [];
+
         async function loadAnalytics() {
           const teamId = document.getElementById('dataTeamFilter').value;
-          const eventId = document.getElementById('dataEventFilter').value;
+          const selectedEvents = getSelectedEventIds();
 
           let url = API_BASE + '/admin/analytics?';
           if (teamId) url += 'teamId=' + teamId + '&';
-          if (eventId) url += 'eventId=' + eventId + '&';
+          if (selectedEvents.length === 1) url += 'eventId=' + selectedEvents[0] + '&';
 
           try {
             const res = await fetch(url);
@@ -1547,18 +1560,77 @@ adminPortalRouter.get("/", (c) => {
           }
         }
 
+        async function loadEventsForTeam() {
+          const teamId = document.getElementById('dataTeamFilter').value;
+
+          let url = API_BASE + '/events?';
+          if (teamId) url += 'teamId=' + teamId + '&';
+
+          try {
+            const res = await fetch(url);
+            const data = await res.json();
+            allEventsForData = data.data || [];
+            renderEventsCheckboxList();
+          } catch (err) {
+            console.error('Error loading events:', err);
+          }
+        }
+
+        function renderEventsCheckboxList() {
+          const container = document.getElementById('eventsCheckboxList');
+
+          if (allEventsForData.length === 0) {
+            container.innerHTML = '<p class="text-muted">No events found.</p>';
+            updateSelectedEventsCount();
+            return;
+          }
+
+          container.innerHTML = allEventsForData.map(event => \`
+            <label class="checkbox-item" style="display: flex; padding: 8px; border-bottom: 1px solid #333; cursor: pointer;">
+              <input type="checkbox" class="event-checkbox" value="\${event.id}" onchange="updateSelectedEventsCount()" style="margin-right: 12px;">
+              <div style="flex: 1;">
+                <div style="color: #fff;">\${escapeHtml(event.venueName)}</div>
+                <div style="color: #888; font-size: 12px;">\${escapeHtml(event.venueCity)}, \${escapeHtml(event.venueState)} - \${new Date(event.eventDate).toLocaleDateString()}</div>
+              </div>
+              <span class="badge \${event.status === 'active' ? 'badge-success' : 'badge-warning'}" style="align-self: center;">
+                \${event.status}
+              </span>
+            </label>
+          \`).join('');
+
+          updateSelectedEventsCount();
+        }
+
+        function getSelectedEventIds() {
+          const checkboxes = document.querySelectorAll('.event-checkbox:checked');
+          return Array.from(checkboxes).map(cb => cb.value);
+        }
+
+        function updateSelectedEventsCount() {
+          const count = getSelectedEventIds().length;
+          document.getElementById('selectedEventsCount').textContent = count + ' event' + (count !== 1 ? 's' : '') + ' selected';
+        }
+
+        function selectAllEvents() {
+          document.querySelectorAll('.event-checkbox').forEach(cb => cb.checked = true);
+          updateSelectedEventsCount();
+        }
+
+        function deselectAllEvents() {
+          document.querySelectorAll('.event-checkbox').forEach(cb => cb.checked = false);
+          updateSelectedEventsCount();
+        }
+
         async function loadSurveyResponses() {
           document.getElementById('responsesLoading').style.display = 'block';
           document.getElementById('responsesTable').style.display = 'none';
           document.getElementById('responsesEmpty').style.display = 'none';
 
           const teamId = document.getElementById('dataTeamFilter').value;
-          const eventId = document.getElementById('dataEventFilter').value;
           const surveyType = document.getElementById('dataSurveyTypeFilter').value;
 
           let url = API_BASE + '/surveys/responses?';
           if (teamId) url += 'teamId=' + teamId + '&';
-          if (eventId) url += 'eventId=' + eventId + '&';
           if (surveyType) url += 'surveyTypeSlug=' + surveyType + '&';
 
           try {
@@ -1596,8 +1668,20 @@ adminPortalRouter.get("/", (c) => {
 
         async function exportPieChartReport() {
           const teamId = document.getElementById('dataTeamFilter').value;
-          const eventId = document.getElementById('dataEventFilter').value;
+          const selectedEventIds = getSelectedEventIds();
           const surveyTypeSlug = document.getElementById('dataSurveyTypeFilter').value;
+
+          // Validate selection
+          if (selectedEventIds.length === 0) {
+            alert('Please select at least one event to generate the report.');
+            return;
+          }
+
+          // Get selected event names for the report
+          const selectedEventNames = selectedEventIds.map(id => {
+            const event = allEventsForData.find(e => e.id === id);
+            return event ? event.venueName + ' (' + new Date(event.eventDate).toLocaleDateString() + ')' : id;
+          });
 
           // Show loading state
           const btn = event.target;
@@ -1616,16 +1700,113 @@ adminPortalRouter.get("/", (c) => {
               ? allSurveyTypes.filter(st => st.slug === surveyTypeSlug)
               : allSurveyTypes.filter(st => st.isActive);
 
-            // Load results for each survey type
+            // Load results for each survey type, aggregating across all selected events
             const resultsPromises = typesToExport.map(async (st) => {
-              let url = API_BASE + '/surveys/results/' + st.slug + '?';
-              if (teamId) url += 'teamId=' + teamId + '&';
-              if (eventId) url += 'eventId=' + eventId + '&';
+              // Fetch results for each selected event and aggregate
+              const eventResultsPromises = selectedEventIds.map(async (eventId) => {
+                let url = API_BASE + '/surveys/results/' + st.slug + '?';
+                if (teamId) url += 'teamId=' + teamId + '&';
+                url += 'eventId=' + eventId + '&';
 
-              const res = await fetch(url);
-              const data = await res.json();
-              return data.data;
+                const res = await fetch(url);
+                const data = await res.json();
+                return data.data;
+              });
+
+              const eventResults = await Promise.all(eventResultsPromises);
+
+              // Aggregate results from all events
+              return aggregateSurveyResults(st, eventResults);
             });
+
+            const allResults = await Promise.all(resultsPromises);
+
+            // Generate HTML report with event names
+            const reportHtml = generatePieChartReportHtml(allResults, analytics, selectedEventNames);
+
+            // Open in new window for printing/saving
+            const printWindow = window.open('', '_blank');
+            printWindow.document.write(reportHtml);
+            printWindow.document.close();
+
+          } catch (err) {
+            alert('Error generating report');
+            console.error(err);
+          } finally {
+            btn.textContent = originalText;
+            btn.disabled = false;
+          }
+        }
+
+        // Aggregate survey results from multiple events
+        function aggregateSurveyResults(surveyType, eventResults) {
+          // Filter out null results
+          const validResults = eventResults.filter(r => r && r.questionResults);
+
+          if (validResults.length === 0) {
+            return {
+              surveyType: {
+                id: surveyType.id,
+                slug: surveyType.slug,
+                name: surveyType.name,
+                description: surveyType.description
+              },
+              totalResponses: 0,
+              questionResults: []
+            };
+          }
+
+          // Use the first result as a template
+          const template = validResults[0];
+          const totalResponses = validResults.reduce((sum, r) => sum + r.totalResponses, 0);
+
+          // Aggregate question results
+          const aggregatedQuestions = template.questionResults.map((templateQuestion, qIndex) => {
+            // Sum up counts for each option across all events
+            const aggregatedOptions = templateQuestion.options.map((templateOption, oIndex) => {
+              const totalCount = validResults.reduce((sum, result) => {
+                const question = result.questionResults[qIndex];
+                if (question && question.options[oIndex]) {
+                  return sum + question.options[oIndex].count;
+                }
+                return sum;
+              }, 0);
+
+              return {
+                label: templateOption.label,
+                count: totalCount,
+                percentage: 0 // Will calculate after
+              };
+            });
+
+            // Calculate total for percentages
+            const optionTotal = aggregatedOptions.reduce((sum, opt) => sum + opt.count, 0);
+
+            // Update percentages
+            aggregatedOptions.forEach(opt => {
+              opt.percentage = optionTotal > 0 ? Math.round((opt.count / optionTotal) * 100) : 0;
+            });
+
+            return {
+              questionId: templateQuestion.questionId,
+              orderIndex: templateQuestion.orderIndex,
+              questionText: templateQuestion.questionText,
+              totalResponses: optionTotal,
+              options: aggregatedOptions
+            };
+          });
+
+          return {
+            surveyType: {
+              id: surveyType.id,
+              slug: surveyType.slug,
+              name: surveyType.name,
+              description: surveyType.description
+            },
+            totalResponses: totalResponses,
+            questionResults: aggregatedQuestions
+          };
+        }
 
             const allResults = await Promise.all(resultsPromises);
 
@@ -1646,9 +1827,16 @@ adminPortalRouter.get("/", (c) => {
           }
         }
 
-        function generatePieChartReportHtml(allResults, analytics) {
+        function generatePieChartReportHtml(allResults, analytics, selectedEventNames) {
           const colors = ['#4a9eff', '#28a745', '#ffc107', '#dc3545', '#6f42c1', '#fd7e14', '#20c997', '#e83e8c', '#17a2b8', '#6c757d'];
           const date = new Date().toLocaleDateString();
+
+          // Build events list HTML
+          const eventsListHtml = selectedEventNames && selectedEventNames.length > 0
+            ? '<div style="margin-top: 16px; padding: 16px; background: #f0f7ff; border-radius: 8px;"><strong>Events Included:</strong><ul style="margin: 8px 0 0 20px; color: #666;">' +
+              selectedEventNames.map(name => '<li>' + escapeHtml(name) + '</li>').join('') +
+              '</ul></div>'
+            : '';
 
           let surveySections = '';
 
@@ -1777,6 +1965,7 @@ adminPortalRouter.get("/", (c) => {
                 <div class="header">
                   <h1>Survey Results Report</h1>
                   <p>Arrive Alive Tour - Generated on \${date}</p>
+                  \${eventsListHtml}
                 </div>
 
                 <div class="summary">

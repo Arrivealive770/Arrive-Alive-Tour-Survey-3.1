@@ -38,7 +38,8 @@ Access at `{BACKEND_URL}/admin` (password: 1234)
 - Full survey management (add, edit, delete surveys)
 - View survey results as pie charts
 - Teams, events, and overlays management
-- Data export and analytics
+- Data export with pie charts (select multiple events)
+- Analytics dashboard
 
 ### Mobile Admin (phones/tablets)
 - View-only for surveys (no editing)
