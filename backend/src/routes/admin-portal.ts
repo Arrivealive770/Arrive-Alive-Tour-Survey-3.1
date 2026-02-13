@@ -1958,25 +1958,6 @@ adminPortalRouter.get("/", (c) => {
           };
         }
 
-            const allResults = await Promise.all(resultsPromises);
-
-            // Generate HTML report
-            const reportHtml = generatePieChartReportHtml(allResults, analytics);
-
-            // Open in new window for printing/saving
-            const printWindow = window.open('', '_blank');
-            printWindow.document.write(reportHtml);
-            printWindow.document.close();
-
-          } catch (err) {
-            alert('Error generating report');
-            console.error(err);
-          } finally {
-            btn.textContent = originalText;
-            btn.disabled = false;
-          }
-        }
-
         function generatePieChartReportHtml(allResults, analytics, selectedEventNames) {
           const colors = ['#4a9eff', '#28a745', '#ffc107', '#dc3545', '#6f42c1', '#fd7e14', '#20c997', '#e83e8c', '#17a2b8', '#6c757d'];
           const date = new Date().toLocaleDateString();
