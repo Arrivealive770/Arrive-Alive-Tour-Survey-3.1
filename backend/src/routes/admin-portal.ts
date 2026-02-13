@@ -436,11 +436,18 @@ adminPortalRouter.get("/", (c) => {
           <p>Admin Portal</p>
           <form id="loginForm">
             <div class="form-group">
+              <label for="username">Username</label>
+              <input type="text" id="username" placeholder="Enter username" required>
+            </div>
+            <div class="form-group">
               <label for="password">Password</label>
-              <input type="password" id="password" placeholder="Enter admin password" required>
+              <input type="password" id="password" placeholder="Enter password" required>
             </div>
             <button type="submit" class="btn btn-primary">Sign In</button>
             <p class="error-message" id="loginError" style="display: none;"></p>
+            <p id="legacyHint" style="display: none; font-size: 12px; color: #888; margin-top: 12px; text-align: center;">
+              First time? Use username: admin, password: 1234
+            </p>
           </form>
         </div>
       </div>
@@ -461,6 +468,7 @@ adminPortalRouter.get("/", (c) => {
           <div class="tab" data-tab="overlays">Overlays</div>
           <div class="tab" data-tab="surveys">Surveys</div>
           <div class="tab" data-tab="data">Data</div>
+          <div class="tab" data-tab="settings">Settings</div>
         </nav>
 
         <main class="content">
@@ -667,6 +675,56 @@ adminPortalRouter.get("/", (c) => {
             <div class="card">
               <h2>Surveys by Type</h2>
               <div id="surveysByType"></div>
+            </div>
+          </div>
+
+          <!-- Settings Tab -->
+          <div class="tab-content" id="settingsTab">
+            <div class="card">
+              <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 20px;">
+                <h2>Admin Users</h2>
+                <button class="btn btn-primary btn-sm" onclick="openAdminUserModal()">Add Admin User</button>
+              </div>
+              <p style="color: #888; margin-bottom: 20px;">Manage who can access this admin portal. Each admin has their own username and password.</p>
+              <div id="adminUsersLoading" class="loading">Loading admin users...</div>
+              <table id="adminUsersTable" style="display: none;">
+                <thead>
+                  <tr>
+                    <th>Username</th>
+                    <th>Display Name</th>
+                    <th>Role</th>
+                    <th>Status</th>
+                    <th>Last Login</th>
+                    <th>Actions</th>
+                  </tr>
+                </thead>
+                <tbody id="adminUsersBody"></tbody>
+              </table>
+              <div id="adminUsersEmpty" class="empty-state" style="display: none;">
+                No admin users found. Create your first admin account!
+                <p style="margin-top: 8px; font-size: 13px;">Currently using legacy password (1234)</p>
+              </div>
+            </div>
+
+            <div class="card">
+              <h2>Change Your Password</h2>
+              <form id="changePasswordForm" style="max-width: 400px;">
+                <div class="form-group">
+                  <label for="currentPassword">Current Password</label>
+                  <input type="password" id="currentPassword" placeholder="Enter current password" required>
+                </div>
+                <div class="form-group">
+                  <label for="newPassword">New Password</label>
+                  <input type="password" id="newPassword" placeholder="Enter new password (min 4 chars)" minlength="4" required>
+                </div>
+                <div class="form-group">
+                  <label for="confirmPassword">Confirm New Password</label>
+                  <input type="password" id="confirmPassword" placeholder="Confirm new password" required>
+                </div>
+                <button type="submit" class="btn btn-primary">Change Password</button>
+                <p class="error-message" id="changePasswordError" style="display: none;"></p>
+                <p class="success-message" id="changePasswordSuccess" style="display: none; color: #28a745; margin-top: 12px;"></p>
+              </form>
             </div>
           </div>
         </main>
@@ -878,6 +936,50 @@ adminPortalRouter.get("/", (c) => {
         </div>
       </div>
 
+      <!-- Admin User Modal -->
+      <div class="modal" id="adminUserModal">
+        <div class="modal-content">
+          <div class="modal-header">
+            <h2 id="adminUserModalTitle">Add Admin User</h2>
+            <button class="modal-close" onclick="closeAdminUserModal()">&times;</button>
+          </div>
+          <form id="adminUserForm">
+            <input type="hidden" id="adminUserId">
+            <div class="form-group">
+              <label for="adminUsername">Username</label>
+              <input type="text" id="adminUsername" placeholder="e.g., johndoe" pattern="^[a-z0-9_]+$" title="Lowercase letters, numbers, and underscores only" required>
+              <p style="font-size: 12px; color: #888; margin-top: 4px;">Lowercase letters, numbers, and underscores only</p>
+            </div>
+            <div class="form-group">
+              <label for="adminDisplayName">Display Name</label>
+              <input type="text" id="adminDisplayName" placeholder="e.g., John Doe">
+            </div>
+            <div class="form-group" id="adminPasswordGroup">
+              <label for="adminPassword">Password</label>
+              <input type="password" id="adminPassword" placeholder="Min 4 characters" minlength="4">
+              <p style="font-size: 12px; color: #888; margin-top: 4px;" id="adminPasswordHint">Required for new users</p>
+            </div>
+            <div class="form-group">
+              <label for="adminRole">Role</label>
+              <select id="adminRole">
+                <option value="admin">Admin</option>
+                <option value="superadmin">Super Admin</option>
+              </select>
+            </div>
+            <div class="form-group" id="adminActiveGroup" style="display: none;">
+              <label class="checkbox-item">
+                <input type="checkbox" id="adminIsActive" checked>
+                Active
+              </label>
+            </div>
+            <div class="modal-footer">
+              <button type="button" class="btn btn-secondary" onclick="closeAdminUserModal()">Cancel</button>
+              <button type="submit" class="btn btn-primary">Save</button>
+            </div>
+          </form>
+        </div>
+      </div>
+
       <script>
         // State
         let teams = [];
@@ -913,6 +1015,7 @@ adminPortalRouter.get("/", (c) => {
                 loadAnalytics();
                 loadSurveyResponses();
               }
+              if (tab.dataset.tab === 'settings') loadAdminUsers();
             });
           });
 
@@ -922,31 +1025,59 @@ adminPortalRouter.get("/", (c) => {
           document.getElementById('eventForm').addEventListener('submit', handleEventSubmit);
           document.getElementById('overlayForm').addEventListener('submit', handleOverlaySubmit);
           document.getElementById('surveyForm').addEventListener('submit', handleSurveySubmit);
+          document.getElementById('adminUserForm').addEventListener('submit', handleAdminUserSubmit);
+          document.getElementById('changePasswordForm').addEventListener('submit', handleChangePassword);
 
           // Overlay file preview
           document.getElementById('overlayFile').addEventListener('change', handleOverlayFileChange);
+
+          // Check if admin users exist to show legacy hint
+          checkAdminUsersExist();
         });
+
+        // Current logged in user
+        let currentUser = null;
+
+        async function checkAdminUsersExist() {
+          try {
+            const res = await fetch(API_BASE + '/admin-users');
+            const data = await res.json();
+            if (data.data && data.data.length === 0) {
+              document.getElementById('legacyHint').style.display = 'block';
+            }
+          } catch (err) {
+            // Ignore error
+          }
+        }
 
         // Login handler
         async function handleLogin(e) {
           e.preventDefault();
+          const username = document.getElementById('username').value;
           const password = document.getElementById('password').value;
           const errorEl = document.getElementById('loginError');
 
           try {
-            const res = await fetch('/admin/verify-password', {
+            const res = await fetch(API_BASE + '/admin-users/login', {
               method: 'POST',
               headers: { 'Content-Type': 'application/json' },
-              body: JSON.stringify({ password })
+              body: JSON.stringify({ username, password })
             });
 
             const data = await res.json();
 
-            if (data.success) {
+            if (data.data && data.data.success) {
+              currentUser = data.data.user;
               localStorage.setItem('adminLoggedIn', 'true');
+              localStorage.setItem('adminUser', JSON.stringify(currentUser));
+
+              if (data.data.isLegacy) {
+                alert('You are using the legacy password. Please go to Settings to create an admin account with your own password.');
+              }
+
               showDashboard();
             } else {
-              errorEl.textContent = 'Invalid password';
+              errorEl.textContent = data.error?.message || 'Invalid credentials';
               errorEl.style.display = 'block';
             }
           } catch (err) {
@@ -957,12 +1088,21 @@ adminPortalRouter.get("/", (c) => {
 
         function logout() {
           localStorage.removeItem('adminLoggedIn');
+          localStorage.removeItem('adminUser');
+          currentUser = null;
           document.getElementById('loginScreen').style.display = 'flex';
           document.getElementById('dashboard').style.display = 'none';
+          document.getElementById('username').value = '';
           document.getElementById('password').value = '';
         }
 
         function showDashboard() {
+          // Restore current user from localStorage
+          const savedUser = localStorage.getItem('adminUser');
+          if (savedUser) {
+            currentUser = JSON.parse(savedUser);
+          }
+
           document.getElementById('loginScreen').style.display = 'none';
           document.getElementById('dashboard').style.display = 'block';
           loadTeams();
@@ -2374,6 +2514,211 @@ adminPortalRouter.get("/", (c) => {
 
           html += '</div>';
           return html;
+        }
+
+        // Admin Users Management
+        let adminUsers = [];
+
+        async function loadAdminUsers() {
+          document.getElementById('adminUsersLoading').style.display = 'block';
+          document.getElementById('adminUsersTable').style.display = 'none';
+          document.getElementById('adminUsersEmpty').style.display = 'none';
+
+          try {
+            const res = await fetch(API_BASE + '/admin-users');
+            const data = await res.json();
+            adminUsers = data.data || [];
+
+            if (adminUsers.length === 0) {
+              document.getElementById('adminUsersLoading').style.display = 'none';
+              document.getElementById('adminUsersEmpty').style.display = 'block';
+              return;
+            }
+
+            const tbody = document.getElementById('adminUsersBody');
+            tbody.innerHTML = adminUsers.map(user => \`
+              <tr>
+                <td>\${escapeHtml(user.username)}</td>
+                <td>\${escapeHtml(user.displayName || '-')}</td>
+                <td><span class="badge badge-info">\${escapeHtml(user.role)}</span></td>
+                <td>
+                  <span class="badge \${user.isActive ? 'badge-success' : 'badge-warning'}">
+                    \${user.isActive ? 'Active' : 'Inactive'}
+                  </span>
+                </td>
+                <td>\${user.lastLoginAt ? new Date(user.lastLoginAt).toLocaleString() : 'Never'}</td>
+                <td class="actions">
+                  <button class="btn btn-secondary btn-sm" onclick="editAdminUser('\${user.id}')">Edit</button>
+                  <button class="btn btn-danger btn-sm" onclick="deleteAdminUser('\${user.id}')" \${adminUsers.length === 1 ? 'disabled title="Cannot delete the only admin"' : ''}>Delete</button>
+                </td>
+              </tr>
+            \`).join('');
+
+            document.getElementById('adminUsersLoading').style.display = 'none';
+            document.getElementById('adminUsersTable').style.display = 'table';
+          } catch (err) {
+            document.getElementById('adminUsersLoading').textContent = 'Error loading admin users';
+            console.error('Error loading admin users:', err);
+          }
+        }
+
+        function openAdminUserModal(userId = null) {
+          document.getElementById('adminUserId').value = '';
+          document.getElementById('adminUsername').value = '';
+          document.getElementById('adminUsername').disabled = false;
+          document.getElementById('adminDisplayName').value = '';
+          document.getElementById('adminPassword').value = '';
+          document.getElementById('adminPassword').required = true;
+          document.getElementById('adminPasswordHint').textContent = 'Required for new users';
+          document.getElementById('adminRole').value = 'admin';
+          document.getElementById('adminIsActive').checked = true;
+          document.getElementById('adminActiveGroup').style.display = 'none';
+          document.getElementById('adminUserModalTitle').textContent = 'Add Admin User';
+
+          if (userId) {
+            const user = adminUsers.find(u => u.id === userId);
+            if (user) {
+              document.getElementById('adminUserId').value = user.id;
+              document.getElementById('adminUsername').value = user.username;
+              document.getElementById('adminUsername').disabled = true; // Cannot change username
+              document.getElementById('adminDisplayName').value = user.displayName || '';
+              document.getElementById('adminPassword').required = false;
+              document.getElementById('adminPasswordHint').textContent = 'Leave blank to keep current password';
+              document.getElementById('adminRole').value = user.role;
+              document.getElementById('adminIsActive').checked = user.isActive;
+              document.getElementById('adminActiveGroup').style.display = 'block';
+              document.getElementById('adminUserModalTitle').textContent = 'Edit Admin User';
+            }
+          }
+
+          document.getElementById('adminUserModal').classList.add('active');
+        }
+
+        function closeAdminUserModal() {
+          document.getElementById('adminUserModal').classList.remove('active');
+        }
+
+        function editAdminUser(userId) {
+          openAdminUserModal(userId);
+        }
+
+        async function handleAdminUserSubmit(e) {
+          e.preventDefault();
+
+          const id = document.getElementById('adminUserId').value;
+          const username = document.getElementById('adminUsername').value;
+          const displayName = document.getElementById('adminDisplayName').value || null;
+          const password = document.getElementById('adminPassword').value;
+          const role = document.getElementById('adminRole').value;
+          const isActive = document.getElementById('adminIsActive').checked;
+
+          try {
+            const isEdit = !!id;
+            const url = isEdit ? API_BASE + '/admin-users/' + id : API_BASE + '/admin-users';
+            const method = isEdit ? 'PUT' : 'POST';
+
+            const body = isEdit
+              ? { displayName, role, isActive, ...(password && { password }) }
+              : { username, displayName, password, role };
+
+            const res = await fetch(url, {
+              method,
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify(body)
+            });
+
+            const data = await res.json();
+
+            if (data.error) {
+              alert(data.error.message);
+              return;
+            }
+
+            closeAdminUserModal();
+            loadAdminUsers();
+
+            if (!isEdit) {
+              alert('Admin user created! They can now log in with username: ' + username);
+            }
+          } catch (err) {
+            alert('Error saving admin user');
+            console.error(err);
+          }
+        }
+
+        async function deleteAdminUser(userId) {
+          if (!confirm('Are you sure you want to delete this admin user?')) return;
+
+          try {
+            const res = await fetch(API_BASE + '/admin-users/' + userId, {
+              method: 'DELETE'
+            });
+
+            const data = await res.json();
+
+            if (data.error) {
+              alert(data.error.message);
+              return;
+            }
+
+            loadAdminUsers();
+          } catch (err) {
+            alert('Error deleting admin user');
+            console.error(err);
+          }
+        }
+
+        async function handleChangePassword(e) {
+          e.preventDefault();
+
+          const currentPassword = document.getElementById('currentPassword').value;
+          const newPassword = document.getElementById('newPassword').value;
+          const confirmPassword = document.getElementById('confirmPassword').value;
+          const errorEl = document.getElementById('changePasswordError');
+          const successEl = document.getElementById('changePasswordSuccess');
+
+          errorEl.style.display = 'none';
+          successEl.style.display = 'none';
+
+          if (newPassword !== confirmPassword) {
+            errorEl.textContent = 'New passwords do not match';
+            errorEl.style.display = 'block';
+            return;
+          }
+
+          if (!currentUser || currentUser.id === 'legacy') {
+            errorEl.textContent = 'Please create an admin account first to change passwords';
+            errorEl.style.display = 'block';
+            return;
+          }
+
+          try {
+            const res = await fetch(API_BASE + '/admin-users/change-password', {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({
+                username: currentUser.username,
+                currentPassword,
+                newPassword
+              })
+            });
+
+            const data = await res.json();
+
+            if (data.error) {
+              errorEl.textContent = data.error.message;
+              errorEl.style.display = 'block';
+              return;
+            }
+
+            successEl.textContent = 'Password changed successfully!';
+            successEl.style.display = 'block';
+            document.getElementById('changePasswordForm').reset();
+          } catch (err) {
+            errorEl.textContent = 'Error changing password';
+            errorEl.style.display = 'block';
+            console.error(err);
+          }
         }
 
         // Utility

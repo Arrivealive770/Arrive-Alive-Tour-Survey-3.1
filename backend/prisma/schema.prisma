@@ -326,3 +326,22 @@ model LocalPhoto {
   @@index([tabletDeviceId])
   @@index([syncedToTablet])
 }
+
+// ==========================================
+// Admin Users (for Web Portal Authentication)
+// ==========================================
+
+model AdminUser {
+  id           String   @id @default(cuid())
+  username     String   @unique
+  passwordHash String   // Hashed password
+  displayName  String?
+  role         String   @default("admin") // "admin" | "superadmin"
+  isActive     Boolean  @default(true)
+  lastLoginAt  DateTime?
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+
+  @@index([username])
+  @@index([isActive])
+}
