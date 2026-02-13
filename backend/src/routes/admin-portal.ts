@@ -634,7 +634,7 @@ adminPortalRouter.get("/", (c) => {
                   </select>
                 </div>
                 <div class="form-group">
-                  <button class="btn btn-secondary btn-sm" onclick="exportData()" style="margin-top: 24px;">Export CSV</button>
+                  <button class="btn btn-primary btn-sm" onclick="exportPieChartReport()" style="margin-top: 24px;">Export Pie Chart Report</button>
                 </div>
               </div>
               <div id="responsesLoading" class="loading">Loading responses...</div>
@@ -1594,15 +1594,217 @@ adminPortalRouter.get("/", (c) => {
           }
         }
 
-        function exportData() {
+        async function exportPieChartReport() {
           const teamId = document.getElementById('dataTeamFilter').value;
           const eventId = document.getElementById('dataEventFilter').value;
+          const surveyTypeSlug = document.getElementById('dataSurveyTypeFilter').value;
 
-          let url = API_BASE + '/admin/export/csv?';
-          if (teamId) url += 'teamId=' + teamId + '&';
-          if (eventId) url += 'eventId=' + eventId + '&';
+          // Show loading state
+          const btn = event.target;
+          const originalText = btn.textContent;
+          btn.textContent = 'Generating...';
+          btn.disabled = true;
 
-          window.open(url, '_blank');
+          try {
+            // Load all survey types with results
+            const surveyTypesRes = await fetch(API_BASE + '/surveys/types?includeInactive=true');
+            const surveyTypesData = await surveyTypesRes.json();
+            const allSurveyTypes = surveyTypesData.data || [];
+
+            // Filter to selected survey type if specified
+            const typesToExport = surveyTypeSlug
+              ? allSurveyTypes.filter(st => st.slug === surveyTypeSlug)
+              : allSurveyTypes.filter(st => st.isActive);
+
+            // Load results for each survey type
+            const resultsPromises = typesToExport.map(async (st) => {
+              let url = API_BASE + '/surveys/results/' + st.slug + '?';
+              if (teamId) url += 'teamId=' + teamId + '&';
+              if (eventId) url += 'eventId=' + eventId + '&';
+
+              const res = await fetch(url);
+              const data = await res.json();
+              return data.data;
+            });
+
+            const allResults = await Promise.all(resultsPromises);
+
+            // Generate HTML report
+            const reportHtml = generatePieChartReportHtml(allResults, analytics);
+
+            // Open in new window for printing/saving
+            const printWindow = window.open('', '_blank');
+            printWindow.document.write(reportHtml);
+            printWindow.document.close();
+
+          } catch (err) {
+            alert('Error generating report');
+            console.error(err);
+          } finally {
+            btn.textContent = originalText;
+            btn.disabled = false;
+          }
+        }
+
+        function generatePieChartReportHtml(allResults, analytics) {
+          const colors = ['#4a9eff', '#28a745', '#ffc107', '#dc3545', '#6f42c1', '#fd7e14', '#20c997', '#e83e8c', '#17a2b8', '#6c757d'];
+          const date = new Date().toLocaleDateString();
+
+          let surveySections = '';
+
+          allResults.forEach(result => {
+            if (!result || result.totalResponses === 0) return;
+
+            let questionsHtml = '';
+            result.questionResults.forEach((qr, qIndex) => {
+              const total = qr.options.reduce((sum, opt) => sum + opt.count, 0);
+              if (total === 0) return;
+
+              // Generate conic gradient for pie chart
+              let gradientParts = [];
+              let currentDeg = 0;
+              qr.options.forEach((opt, i) => {
+                const color = colors[i % colors.length];
+                const degrees = (opt.count / total) * 360;
+                gradientParts.push(color + ' ' + currentDeg + 'deg ' + (currentDeg + degrees) + 'deg');
+                currentDeg += degrees;
+              });
+              const gradient = 'conic-gradient(' + gradientParts.join(', ') + ')';
+
+              // Generate legend items
+              let legendHtml = qr.options.map((opt, i) => {
+                const color = colors[i % colors.length];
+                return '<div style="display: flex; align-items: center; margin-bottom: 8px;">' +
+                  '<div style="width: 16px; height: 16px; background: ' + color + '; border-radius: 3px; margin-right: 10px;"></div>' +
+                  '<span style="flex: 1;">' + escapeHtml(opt.label) + '</span>' +
+                  '<span style="font-weight: 600; margin-left: 10px;">' + opt.count + ' (' + opt.percentage + '%)</span>' +
+                '</div>';
+              }).join('');
+
+              questionsHtml += \`
+                <div style="background: #f8f9fa; border-radius: 12px; padding: 24px; margin-bottom: 20px; page-break-inside: avoid;">
+                  <h3 style="color: #333; margin: 0 0 20px 0; font-size: 16px;">Q\${qr.orderIndex}: \${escapeHtml(qr.questionText)}</h3>
+                  <div style="display: flex; gap: 40px; align-items: flex-start;">
+                    <div style="width: 150px; height: 150px; background: \${gradient}; border-radius: 50%; flex-shrink: 0;"></div>
+                    <div style="flex: 1;">
+                      \${legendHtml}
+                      <div style="margin-top: 12px; padding-top: 12px; border-top: 1px solid #ddd; color: #666; font-size: 13px;">
+                        Total responses: <strong>\${total}</strong>
+                      </div>
+                    </div>
+                  </div>
+                </div>
+              \`;
+            });
+
+            if (questionsHtml) {
+              surveySections += \`
+                <div style="margin-bottom: 40px; page-break-before: auto;">
+                  <h2 style="color: #333; border-bottom: 3px solid #4a9eff; padding-bottom: 10px; margin-bottom: 24px;">
+                    \${escapeHtml(result.surveyType.name)}
+                    <span style="font-weight: normal; font-size: 16px; color: #666; margin-left: 12px;">(\${result.totalResponses} responses)</span>
+                  </h2>
+                  \${questionsHtml}
+                </div>
+              \`;
+            }
+          });
+
+          if (!surveySections) {
+            surveySections = '<p style="text-align: center; color: #666; padding: 40px;">No survey data available for the selected filters.</p>';
+          }
+
+          return \`
+            <!DOCTYPE html>
+            <html lang="en">
+            <head>
+              <meta charset="UTF-8">
+              <meta name="viewport" content="width=device-width, initial-scale=1.0">
+              <title>Survey Results Report - \${date}</title>
+              <style>
+                * { margin: 0; padding: 0; box-sizing: border-box; }
+                body {
+                  font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+                  background: #fff;
+                  color: #333;
+                  line-height: 1.5;
+                }
+                .container { max-width: 900px; margin: 0 auto; padding: 40px 24px; }
+                .header {
+                  text-align: center;
+                  margin-bottom: 40px;
+                  padding-bottom: 24px;
+                  border-bottom: 2px solid #eee;
+                }
+                .header h1 { color: #333; font-size: 28px; margin-bottom: 8px; }
+                .header p { color: #666; font-size: 14px; }
+                .summary {
+                  display: flex;
+                  justify-content: center;
+                  gap: 24px;
+                  margin-bottom: 40px;
+                  flex-wrap: wrap;
+                }
+                .summary-card {
+                  background: #f0f7ff;
+                  border-radius: 12px;
+                  padding: 20px 32px;
+                  text-align: center;
+                }
+                .summary-card h3 { color: #666; font-size: 12px; text-transform: uppercase; letter-spacing: 1px; }
+                .summary-card .value { color: #4a9eff; font-size: 32px; font-weight: 700; margin-top: 8px; }
+                .print-btn {
+                  display: block;
+                  margin: 0 auto 40px;
+                  padding: 12px 32px;
+                  background: #4a9eff;
+                  color: white;
+                  border: none;
+                  border-radius: 8px;
+                  font-size: 16px;
+                  cursor: pointer;
+                }
+                .print-btn:hover { background: #3a8eef; }
+                @media print {
+                  .print-btn { display: none; }
+                  body { background: white; }
+                  .container { padding: 20px; }
+                }
+              </style>
+            </head>
+            <body>
+              <div class="container">
+                <div class="header">
+                  <h1>Survey Results Report</h1>
+                  <p>Arrive Alive Tour - Generated on \${date}</p>
+                </div>
+
+                <div class="summary">
+                  <div class="summary-card">
+                    <h3>Total Surveys</h3>
+                    <div class="value">\${analytics?.totalSurveys || 0}</div>
+                  </div>
+                  <div class="summary-card">
+                    <h3>Total Pledges</h3>
+                    <div class="value">\${analytics?.totalPledges || 0}</div>
+                  </div>
+                  <div class="summary-card">
+                    <h3>Pledge Rate</h3>
+                    <div class="value">\${analytics?.pledgeRate || 0}%</div>
+                  </div>
+                </div>
+
+                <button class="print-btn" onclick="window.print()">Print / Save as PDF</button>
+
+                \${surveySections}
+
+                <div style="text-align: center; margin-top: 40px; padding-top: 24px; border-top: 2px solid #eee; color: #999; font-size: 12px;">
+                  Generated by Arrive Alive Tour Admin Portal
+                </div>
+              </div>
+            </body>
+            </html>
+          \`;
         }
 
         // Survey Types Management
