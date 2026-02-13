@@ -139,6 +139,15 @@ adminPortalRouter.get("/", (c) => {
           background: #218838;
         }
 
+        .btn-info {
+          background: #17a2b8;
+          color: #fff;
+        }
+
+        .btn-info:hover {
+          background: #138496;
+        }
+
         .error-message {
           color: #ff6b6b;
           margin-top: 12px;
@@ -450,6 +459,7 @@ adminPortalRouter.get("/", (c) => {
           <div class="tab active" data-tab="teams">Teams</div>
           <div class="tab" data-tab="events">Events</div>
           <div class="tab" data-tab="overlays">Overlays</div>
+          <div class="tab" data-tab="surveys">Surveys</div>
           <div class="tab" data-tab="data">Data</div>
         </nav>
 
@@ -542,6 +552,37 @@ adminPortalRouter.get("/", (c) => {
                 <tbody id="overlaysBody"></tbody>
               </table>
               <div id="overlaysEmpty" class="empty-state" style="display: none;">No overlays found. Upload your first overlay!</div>
+            </div>
+          </div>
+
+          <!-- Surveys Tab -->
+          <div class="tab-content" id="surveysTab">
+            <div class="card">
+              <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 20px;">
+                <h2>Survey Types</h2>
+                <button class="btn btn-primary btn-sm" onclick="openSurveyModal()">Add Survey</button>
+              </div>
+              <div class="form-group" style="margin-bottom: 16px;">
+                <label class="checkbox-item">
+                  <input type="checkbox" id="showInactiveSurveys" onchange="loadSurveyTypes()">
+                  Show inactive surveys
+                </label>
+              </div>
+              <div id="surveyTypesLoading" class="loading">Loading survey types...</div>
+              <table id="surveyTypesTable" style="display: none;">
+                <thead>
+                  <tr>
+                    <th>Name</th>
+                    <th>Slug</th>
+                    <th>Questions</th>
+                    <th>Status</th>
+                    <th>Created</th>
+                    <th>Actions</th>
+                  </tr>
+                </thead>
+                <tbody id="surveyTypesBody"></tbody>
+              </table>
+              <div id="surveyTypesEmpty" class="empty-state" style="display: none;">No survey types found. Create your first survey!</div>
             </div>
           </div>
 
@@ -766,11 +807,73 @@ adminPortalRouter.get("/", (c) => {
         </div>
       </div>
 
+      <!-- Survey Modal -->
+      <div class="modal" id="surveyModal">
+        <div class="modal-content" style="max-width: 700px;">
+          <div class="modal-header">
+            <h2 id="surveyModalTitle">Add Survey</h2>
+            <button class="modal-close" onclick="closeSurveyModal()">&times;</button>
+          </div>
+          <form id="surveyForm">
+            <input type="hidden" id="surveySlugOriginal">
+            <div class="form-group">
+              <label for="surveyName">Survey Name</label>
+              <input type="text" id="surveyName" placeholder="e.g., Marijuana Awareness" required>
+            </div>
+            <div class="form-group">
+              <label for="surveySlug">Slug (URL-friendly identifier)</label>
+              <input type="text" id="surveySlug" placeholder="e.g., marijuana" pattern="^[a-z0-9-]+$" title="Lowercase letters, numbers, and hyphens only" required>
+              <p style="font-size: 12px; color: #888; margin-top: 4px;">Lowercase letters, numbers, and hyphens only</p>
+            </div>
+            <div class="form-group">
+              <label for="surveyDescription">Description (optional)</label>
+              <textarea id="surveyDescription" placeholder="Brief description of this survey" rows="2"></textarea>
+            </div>
+            <div class="form-group">
+              <label class="checkbox-item">
+                <input type="checkbox" id="surveyIsActive" checked>
+                Active
+              </label>
+            </div>
+
+            <div style="border-top: 1px solid #333; margin: 20px 0; padding-top: 20px;">
+              <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 16px;">
+                <h3 style="color: #fff; margin: 0;">Questions</h3>
+                <button type="button" class="btn btn-secondary btn-sm" onclick="addSurveyQuestion()">Add Question</button>
+              </div>
+              <div id="surveyQuestionsContainer"></div>
+            </div>
+
+            <div class="modal-footer">
+              <button type="button" class="btn btn-secondary" onclick="closeSurveyModal()">Cancel</button>
+              <button type="submit" class="btn btn-primary">Save Survey</button>
+            </div>
+          </form>
+        </div>
+      </div>
+
+      <!-- Survey Results Modal -->
+      <div class="modal" id="surveyResultsModal">
+        <div class="modal-content" style="max-width: 800px;">
+          <div class="modal-header">
+            <h2 id="surveyResultsTitle">Survey Results</h2>
+            <button class="modal-close" onclick="closeSurveyResultsModal()">&times;</button>
+          </div>
+          <div id="surveyResultsContent">
+            <div class="loading">Loading results...</div>
+          </div>
+          <div class="modal-footer">
+            <button type="button" class="btn btn-secondary" onclick="closeSurveyResultsModal()">Close</button>
+          </div>
+        </div>
+      </div>
+
       <script>
         // State
         let teams = [];
         let events = [];
         let overlays = [];
+        let surveyTypes = [];
         let analytics = null;
 
         // API Base URL
@@ -794,6 +897,7 @@ adminPortalRouter.get("/", (c) => {
               if (tab.dataset.tab === 'teams') loadTeams();
               if (tab.dataset.tab === 'events') loadEvents();
               if (tab.dataset.tab === 'overlays') loadOverlays();
+              if (tab.dataset.tab === 'surveys') loadSurveyTypes();
               if (tab.dataset.tab === 'data') {
                 loadAnalytics();
                 loadSurveyResponses();
@@ -806,6 +910,7 @@ adminPortalRouter.get("/", (c) => {
           document.getElementById('teamForm').addEventListener('submit', handleTeamSubmit);
           document.getElementById('eventForm').addEventListener('submit', handleEventSubmit);
           document.getElementById('overlayForm').addEventListener('submit', handleOverlaySubmit);
+          document.getElementById('surveyForm').addEventListener('submit', handleSurveySubmit);
 
           // Overlay file preview
           document.getElementById('overlayFile').addEventListener('change', handleOverlayFileChange);
@@ -1498,6 +1603,386 @@ adminPortalRouter.get("/", (c) => {
           if (eventId) url += 'eventId=' + eventId + '&';
 
           window.open(url, '_blank');
+        }
+
+        // Survey Types Management
+        async function loadSurveyTypes() {
+          document.getElementById('surveyTypesLoading').style.display = 'block';
+          document.getElementById('surveyTypesTable').style.display = 'none';
+          document.getElementById('surveyTypesEmpty').style.display = 'none';
+
+          const includeInactive = document.getElementById('showInactiveSurveys').checked;
+          const url = API_BASE + '/surveys/types' + (includeInactive ? '?includeInactive=true' : '');
+
+          try {
+            const res = await fetch(url);
+            const data = await res.json();
+            surveyTypes = data.data || [];
+
+            if (surveyTypes.length === 0) {
+              document.getElementById('surveyTypesLoading').style.display = 'none';
+              document.getElementById('surveyTypesEmpty').style.display = 'block';
+              return;
+            }
+
+            const tbody = document.getElementById('surveyTypesBody');
+            tbody.innerHTML = surveyTypes.map(st => \`
+              <tr>
+                <td>\${escapeHtml(st.name)}</td>
+                <td><span class="badge badge-info">\${escapeHtml(st.slug)}</span></td>
+                <td>\${st.questions ? st.questions.length : 0}</td>
+                <td>
+                  <span class="badge \${st.isActive ? 'badge-success' : 'badge-warning'}">
+                    \${st.isActive ? 'Active' : 'Inactive'}
+                  </span>
+                </td>
+                <td>\${new Date(st.createdAt).toLocaleDateString()}</td>
+                <td class="actions">
+                  <button class="btn btn-secondary btn-sm" onclick="editSurveyType('\${escapeHtml(st.slug)}')">Edit</button>
+                  <button class="btn btn-info btn-sm" onclick="viewSurveyResults('\${escapeHtml(st.slug)}')">Results</button>
+                  <button class="btn btn-danger btn-sm" onclick="deleteSurveyType('\${escapeHtml(st.slug)}')">Delete</button>
+                </td>
+              </tr>
+            \`).join('');
+
+            document.getElementById('surveyTypesLoading').style.display = 'none';
+            document.getElementById('surveyTypesTable').style.display = 'table';
+          } catch (err) {
+            document.getElementById('surveyTypesLoading').textContent = 'Error loading survey types';
+            console.error('Error loading survey types:', err);
+          }
+        }
+
+        function openSurveyModal(surveySlug = null) {
+          document.getElementById('surveySlugOriginal').value = '';
+          document.getElementById('surveyName').value = '';
+          document.getElementById('surveySlug').value = '';
+          document.getElementById('surveySlug').disabled = false;
+          document.getElementById('surveyDescription').value = '';
+          document.getElementById('surveyIsActive').checked = true;
+          document.getElementById('surveyQuestionsContainer').innerHTML = '';
+          document.getElementById('surveyModalTitle').textContent = 'Add Survey';
+
+          if (surveySlug) {
+            const survey = surveyTypes.find(s => s.slug === surveySlug);
+            if (survey) {
+              document.getElementById('surveySlugOriginal').value = survey.slug;
+              document.getElementById('surveyName').value = survey.name;
+              document.getElementById('surveySlug').value = survey.slug;
+              document.getElementById('surveySlug').disabled = true; // Cannot change slug on edit
+              document.getElementById('surveyDescription').value = survey.description || '';
+              document.getElementById('surveyIsActive').checked = survey.isActive;
+              document.getElementById('surveyModalTitle').textContent = 'Edit Survey';
+
+              // Populate questions
+              if (survey.questions && survey.questions.length > 0) {
+                survey.questions.forEach((q, index) => {
+                  addSurveyQuestion(q);
+                });
+              }
+            }
+          }
+
+          document.getElementById('surveyModal').classList.add('active');
+        }
+
+        function closeSurveyModal() {
+          document.getElementById('surveyModal').classList.remove('active');
+        }
+
+        function editSurveyType(slug) {
+          openSurveyModal(slug);
+        }
+
+        let questionCounter = 0;
+        function addSurveyQuestion(existingQuestion = null) {
+          questionCounter++;
+          const container = document.getElementById('surveyQuestionsContainer');
+          const questionIndex = container.children.length + 1;
+
+          const questionDiv = document.createElement('div');
+          questionDiv.className = 'survey-question-item';
+          questionDiv.style.cssText = 'background: #252525; border: 1px solid #333; border-radius: 8px; padding: 16px; margin-bottom: 12px;';
+          questionDiv.dataset.questionId = questionCounter;
+
+          const questionText = existingQuestion ? existingQuestion.questionText : '';
+          const options = existingQuestion ? existingQuestion.options : ['', ''];
+          const isRequired = existingQuestion ? existingQuestion.isRequired : true;
+
+          questionDiv.innerHTML = \`
+            <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 12px;">
+              <span style="color: #888; font-weight: 500;">Question \${questionIndex}</span>
+              <button type="button" class="btn btn-danger btn-sm" onclick="removeSurveyQuestion(this)" style="padding: 4px 8px;">&times;</button>
+            </div>
+            <div class="form-group" style="margin-bottom: 12px;">
+              <label>Question Text</label>
+              <input type="text" class="question-text" value="\${escapeHtml(questionText)}" placeholder="Enter your question" required>
+            </div>
+            <div class="form-group" style="margin-bottom: 12px;">
+              <label>Options</label>
+              <div class="question-options">
+                \${options.map((opt, i) => \`
+                  <div style="display: flex; gap: 8px; margin-bottom: 8px;">
+                    <input type="text" class="option-input" value="\${escapeHtml(opt)}" placeholder="Option \${i + 1}" required style="flex: 1;">
+                    <button type="button" class="btn btn-danger btn-sm" onclick="removeQuestionOption(this)" style="padding: 4px 8px;">&times;</button>
+                  </div>
+                \`).join('')}
+              </div>
+              <button type="button" class="btn btn-secondary btn-sm" onclick="addQuestionOption(this)" style="margin-top: 4px;">Add Option</button>
+            </div>
+            <div class="form-group">
+              <label class="checkbox-item">
+                <input type="checkbox" class="question-required" \${isRequired ? 'checked' : ''}>
+                Required
+              </label>
+            </div>
+          \`;
+
+          container.appendChild(questionDiv);
+          updateQuestionNumbers();
+        }
+
+        function removeSurveyQuestion(button) {
+          const questionDiv = button.closest('.survey-question-item');
+          questionDiv.remove();
+          updateQuestionNumbers();
+        }
+
+        function updateQuestionNumbers() {
+          const questions = document.querySelectorAll('.survey-question-item');
+          questions.forEach((q, index) => {
+            const label = q.querySelector('span');
+            if (label) label.textContent = 'Question ' + (index + 1);
+          });
+        }
+
+        function addQuestionOption(button) {
+          const optionsContainer = button.previousElementSibling;
+          const optionCount = optionsContainer.children.length + 1;
+          const optionDiv = document.createElement('div');
+          optionDiv.style.cssText = 'display: flex; gap: 8px; margin-bottom: 8px;';
+          optionDiv.innerHTML = \`
+            <input type="text" class="option-input" value="" placeholder="Option \${optionCount}" required style="flex: 1;">
+            <button type="button" class="btn btn-danger btn-sm" onclick="removeQuestionOption(this)" style="padding: 4px 8px;">&times;</button>
+          \`;
+          optionsContainer.appendChild(optionDiv);
+        }
+
+        function removeQuestionOption(button) {
+          const optionDiv = button.parentElement;
+          const optionsContainer = optionDiv.parentElement;
+          if (optionsContainer.children.length > 2) {
+            optionDiv.remove();
+          } else {
+            alert('A question must have at least 2 options');
+          }
+        }
+
+        async function handleSurveySubmit(e) {
+          e.preventDefault();
+
+          const originalSlug = document.getElementById('surveySlugOriginal').value;
+          const name = document.getElementById('surveyName').value;
+          const slug = document.getElementById('surveySlug').value;
+          const description = document.getElementById('surveyDescription').value || null;
+          const isActive = document.getElementById('surveyIsActive').checked;
+
+          // Gather questions
+          const questionElements = document.querySelectorAll('.survey-question-item');
+          const questions = [];
+
+          for (let i = 0; i < questionElements.length; i++) {
+            const qEl = questionElements[i];
+            const questionText = qEl.querySelector('.question-text').value;
+            const isRequired = qEl.querySelector('.question-required').checked;
+            const optionInputs = qEl.querySelectorAll('.option-input');
+            const options = Array.from(optionInputs).map(inp => inp.value).filter(v => v.trim() !== '');
+
+            if (options.length < 2) {
+              alert('Each question must have at least 2 options');
+              return;
+            }
+
+            questions.push({
+              orderIndex: i + 1,
+              questionText,
+              answerType: 'single_choice',
+              options,
+              isRequired
+            });
+          }
+
+          if (questions.length === 0) {
+            alert('Please add at least one question');
+            return;
+          }
+
+          try {
+            const isEdit = !!originalSlug;
+            const url = isEdit ? API_BASE + '/surveys/types/' + originalSlug : API_BASE + '/surveys/types';
+            const method = isEdit ? 'PUT' : 'POST';
+
+            const body = isEdit
+              ? { name, description, isActive, questions }
+              : { slug, name, description, questions };
+
+            const res = await fetch(url, {
+              method,
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify(body)
+            });
+
+            const data = await res.json();
+
+            if (data.error) {
+              alert(data.error.message);
+              return;
+            }
+
+            closeSurveyModal();
+            loadSurveyTypes();
+          } catch (err) {
+            alert('Error saving survey');
+            console.error(err);
+          }
+        }
+
+        async function deleteSurveyType(slug) {
+          if (!confirm('Are you sure you want to delete/deactivate this survey type?')) return;
+
+          try {
+            const res = await fetch(API_BASE + '/surveys/types/' + slug, {
+              method: 'DELETE'
+            });
+
+            const data = await res.json();
+
+            if (data.error) {
+              alert(data.error.message);
+              return;
+            }
+
+            if (data.data.deactivated) {
+              alert('Survey type deactivated (has ' + data.data.responseCount + ' existing responses)');
+            }
+
+            loadSurveyTypes();
+          } catch (err) {
+            alert('Error deleting survey type');
+            console.error(err);
+          }
+        }
+
+        // Survey Results (Pie Charts)
+        async function viewSurveyResults(slug) {
+          document.getElementById('surveyResultsModal').classList.add('active');
+          document.getElementById('surveyResultsContent').innerHTML = '<div class="loading">Loading results...</div>';
+
+          const survey = surveyTypes.find(s => s.slug === slug);
+          document.getElementById('surveyResultsTitle').textContent = survey ? survey.name + ' - Results' : 'Survey Results';
+
+          try {
+            const res = await fetch(API_BASE + '/surveys/results/' + slug);
+            const data = await res.json();
+
+            if (data.error) {
+              document.getElementById('surveyResultsContent').innerHTML = '<p class="text-muted">' + data.error.message + '</p>';
+              return;
+            }
+
+            const results = data.data;
+
+            if (results.totalResponses === 0) {
+              document.getElementById('surveyResultsContent').innerHTML = '<p class="text-muted">No responses yet for this survey.</p>';
+              return;
+            }
+
+            let html = \`
+              <div style="margin-bottom: 20px;">
+                <p style="color: #888;">Total Responses: <strong style="color: #fff;">\${results.totalResponses}</strong></p>
+              </div>
+            \`;
+
+            results.questionResults.forEach((qr, index) => {
+              html += \`
+                <div style="background: #252525; border: 1px solid #333; border-radius: 8px; padding: 16px; margin-bottom: 16px;">
+                  <h4 style="color: #fff; margin-bottom: 16px;">Q\${qr.orderIndex}: \${escapeHtml(qr.questionText)}</h4>
+                  <div style="display: flex; gap: 24px; flex-wrap: wrap;">
+                    <div style="flex: 0 0 180px;">
+                      \${renderPieChart(qr.options)}
+                    </div>
+                    <div style="flex: 1; min-width: 200px;">
+                      \${renderBarChart(qr.options)}
+                    </div>
+                  </div>
+                </div>
+              \`;
+            });
+
+            document.getElementById('surveyResultsContent').innerHTML = html;
+          } catch (err) {
+            document.getElementById('surveyResultsContent').innerHTML = '<p class="text-muted">Error loading results</p>';
+            console.error(err);
+          }
+        }
+
+        function closeSurveyResultsModal() {
+          document.getElementById('surveyResultsModal').classList.remove('active');
+        }
+
+        // CSS Pie Chart using conic-gradient
+        function renderPieChart(options) {
+          const colors = ['#4a9eff', '#28a745', '#ffc107', '#dc3545', '#6f42c1', '#fd7e14', '#20c997', '#e83e8c', '#17a2b8', '#6c757d'];
+          const total = options.reduce((sum, opt) => sum + opt.count, 0);
+
+          if (total === 0) {
+            return '<div style="width: 150px; height: 150px; background: #333; border-radius: 50%; display: flex; align-items: center; justify-content: center; color: #666;">No data</div>';
+          }
+
+          let gradientParts = [];
+          let currentDeg = 0;
+
+          options.forEach((opt, i) => {
+            const color = colors[i % colors.length];
+            const degrees = (opt.count / total) * 360;
+            gradientParts.push(\`\${color} \${currentDeg}deg \${currentDeg + degrees}deg\`);
+            currentDeg += degrees;
+          });
+
+          const gradient = \`conic-gradient(\${gradientParts.join(', ')})\`;
+
+          return \`<div style="width: 150px; height: 150px; background: \${gradient}; border-radius: 50%;"></div>\`;
+        }
+
+        // Bar Chart using CSS
+        function renderBarChart(options) {
+          const colors = ['#4a9eff', '#28a745', '#ffc107', '#dc3545', '#6f42c1', '#fd7e14', '#20c997', '#e83e8c', '#17a2b8', '#6c757d'];
+          const maxCount = Math.max(...options.map(o => o.count), 1);
+
+          let html = '<div style="display: flex; flex-direction: column; gap: 8px;">';
+
+          options.forEach((opt, i) => {
+            const color = colors[i % colors.length];
+            const widthPercent = (opt.count / maxCount) * 100;
+
+            html += \`
+              <div style="display: flex; align-items: center; gap: 8px;">
+                <div style="width: 12px; height: 12px; background: \${color}; border-radius: 2px; flex-shrink: 0;"></div>
+                <div style="flex: 1; min-width: 0;">
+                  <div style="display: flex; justify-content: space-between; margin-bottom: 4px;">
+                    <span style="color: #ccc; font-size: 13px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;" title="\${escapeHtml(opt.label)}">\${escapeHtml(opt.label)}</span>
+                    <span style="color: #888; font-size: 12px; flex-shrink: 0; margin-left: 8px;">\${opt.count} (\${opt.percentage}%)</span>
+                  </div>
+                  <div style="background: #333; border-radius: 4px; height: 8px; overflow: hidden;">
+                    <div style="background: \${color}; height: 100%; width: \${widthPercent}%; transition: width 0.3s;"></div>
+                  </div>
+                </div>
+              </div>
+            \`;
+          });
+
+          html += '</div>';
+          return html;
         }
 
         // Utility

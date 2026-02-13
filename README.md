@@ -29,8 +29,21 @@ An offline-first kiosk system for the Arrive Alive Tour, supporting multiple tou
 - CSV export functionality
 - Device status monitoring
 - Event management
-- Survey type management (create, edit, delete)
+- Survey type management (create, edit, delete) - **Web Admin Only**
+- Survey results with pie charts
 - Email queue status
+
+### Web Admin Portal
+Access at `{BACKEND_URL}/admin` (password: 1234)
+- Full survey management (add, edit, delete surveys)
+- View survey results as pie charts
+- Teams, events, and overlays management
+- Data export and analytics
+
+### Mobile Admin (phones/tablets)
+- View-only for surveys (no editing)
+- View survey results with pie charts
+- Manage events and devices
 
 ### Offline-First Architecture
 - SQLite local database on all devices
@@ -166,6 +179,7 @@ For completely offline environments where photos should stay on the tablet's loc
 - `POST /api/surveys/types` - Create new survey type
 - `PUT /api/surveys/types/:slug` - Update survey type
 - `DELETE /api/surveys/types/:slug` - Delete/deactivate survey type
+- `GET /api/surveys/results/:slug` - Get aggregated results with pie chart data
 
 ### Email Endpoints
 - `POST /api/email/process` - Process email queue
