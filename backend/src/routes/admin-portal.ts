@@ -1057,6 +1057,14 @@ adminPortalRouter.get("/", (c) => {
           const password = document.getElementById('password').value;
           const errorEl = document.getElementById('loginError');
 
+          errorEl.style.display = 'none';
+
+          if (!username || !password) {
+            errorEl.textContent = 'Please enter username and password';
+            errorEl.style.display = 'block';
+            return;
+          }
+
           try {
             const res = await fetch(API_BASE + '/admin-users/login', {
               method: 'POST',
@@ -1065,6 +1073,7 @@ adminPortalRouter.get("/", (c) => {
             });
 
             const data = await res.json();
+            console.log('Login response:', data);
 
             if (data.data && data.data.success) {
               currentUser = data.data.user;
@@ -1081,7 +1090,8 @@ adminPortalRouter.get("/", (c) => {
               errorEl.style.display = 'block';
             }
           } catch (err) {
-            errorEl.textContent = 'Connection error';
+            console.error('Login error:', err);
+            errorEl.textContent = 'Connection error: ' + err.message;
             errorEl.style.display = 'block';
           }
         }
