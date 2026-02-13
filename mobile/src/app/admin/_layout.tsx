@@ -100,6 +100,13 @@ export default function AdminLayout() {
           title: 'Analytics',
         }}
       />
+      <Tabs.Screen
+        name="survey-results"
+        options={{
+          href: null, // Hide from tab bar
+          title: 'Survey Results',
+        }}
+      />
     </Tabs>
   );
 }

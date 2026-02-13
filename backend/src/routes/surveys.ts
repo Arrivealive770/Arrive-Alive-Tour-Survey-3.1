@@ -402,4 +402,94 @@ surveysRouter.post(
   }
 );
 
+// GET /api/surveys/results/:slug - Get aggregated survey results for pie charts
+surveysRouter.get("/results/:slug", async (c) => {
+  const slug = c.req.param("slug");
+  const teamId = c.req.query("teamId");
+  const eventId = c.req.query("eventId");
+  const startDate = c.req.query("startDate");
+  const endDate = c.req.query("endDate");
+
+  // Get the survey type with questions
+  const surveyType = await prisma.surveyType.findUnique({
+    where: { slug },
+    include: {
+      questions: {
+        orderBy: { orderIndex: "asc" },
+      },
+    },
+  });
+
+  if (!surveyType) {
+    return c.json({ error: { message: "Survey type not found", code: "NOT_FOUND" } }, 404);
+  }
+
+  // Get all responses for this survey type
+  const responses = await prisma.surveyResponse.findMany({
+    where: {
+      surveyTypeSlug: slug,
+      ...(teamId && { teamId }),
+      ...(eventId && { eventId }),
+      ...(startDate || endDate
+        ? {
+            completedAt: {
+              ...(startDate && { gte: new Date(startDate) }),
+              ...(endDate && { lte: new Date(endDate) }),
+            },
+          }
+        : {}),
+    },
+  });
+
+  // Aggregate responses by question
+  const questionResults = surveyType.questions.map((question) => {
+    const options = JSON.parse(question.options) as string[];
+
+    // Count responses for each option
+    const optionCounts: Record<string, number> = {};
+    options.forEach((opt) => {
+      optionCounts[opt] = 0;
+    });
+
+    responses.forEach((response) => {
+      const answers = JSON.parse(response.responses) as Record<string, string>;
+      const questionKey = `q${question.orderIndex}`;
+      const answer = answers[questionKey];
+
+      if (answer && optionCounts[answer] !== undefined) {
+        optionCounts[answer]++;
+      }
+    });
+
+    const totalResponses = Object.values(optionCounts).reduce((sum, count) => sum + count, 0);
+
+    return {
+      questionId: question.id,
+      orderIndex: question.orderIndex,
+      questionText: question.questionText,
+      totalResponses,
+      options: options.map((opt, index) => ({
+        label: opt,
+        count: optionCounts[opt] || 0,
+        percentage: totalResponses > 0
+          ? Math.round((optionCounts[opt] || 0) / totalResponses * 100)
+          : 0,
+      })),
+    };
+  });
+
+  return c.json({
+    data: {
+      surveyType: {
+        id: surveyType.id,
+        slug: surveyType.slug,
+        name: surveyType.name,
+        description: surveyType.description,
+      },
+      totalResponses: responses.length,
+      questionResults,
+    },
+  });
+});
+
 export { surveysRouter };

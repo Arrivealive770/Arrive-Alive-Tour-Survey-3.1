@@ -20,10 +20,12 @@ import {
   ChevronUp,
   ClipboardList,
   GripVertical,
+  BarChart3,
 } from 'lucide-react-native';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { api } from '@/lib/api/api';
 import { cn } from '@/lib/cn';
+import { useRouter } from 'expo-router';
 
 // Types for survey management
 interface SurveyQuestion {
@@ -60,6 +62,7 @@ interface UpdateSurveyTypeRequest {
 }
 
 export default function SurveysScreen() {
+  const router = useRouter();
   const [showNewSurveyModal, setShowNewSurveyModal] = useState(false);
   const [showEditSurveyModal, setShowEditSurveyModal] = useState(false);
   const [selectedSurvey, setSelectedSurvey] = useState<SurveyType | null>(null);
@@ -434,7 +437,16 @@ export default function SurveysScreen() {
               </View>
             ))}
 
-            <View className="flex-row gap-2 mt-4">
+            {/* View Results Button */}
+            <Pressable
+              onPress={() => router.push(`/admin/survey-results?slug=${survey.slug}`)}
+              className="flex-row items-center justify-center bg-purple-500/20 py-3 rounded-xl mt-4"
+            >
+              <BarChart3 size={16} color="#a855f7" />
+              <Text className="text-purple-500 font-medium ml-2">View Results (Pie Charts)</Text>
+            </Pressable>
+
+            <View className="flex-row gap-2 mt-3">
               <Pressable
                 onPress={() => handleEditSurvey(survey)}
                 className="flex-1 flex-row items-center justify-center bg-zinc-800 py-3 rounded-xl"
