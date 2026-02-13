@@ -8,7 +8,6 @@ import { env } from "./env";
 export const auth = betterAuth({
   database: prismaAdapter(prisma, { provider: "sqlite" }),
   secret: env.BETTER_AUTH_SECRET,
-  baseURL: env.BACKEND_URL,
 
   // ============================================
   // REQUIRED: All trustedOrigins below are needed
@@ -21,7 +20,6 @@ export const auth = betterAuth({
     "https://*.dev.vibecode.run",
     "https://*.vibecode.run",
     "https://*.vibecodeapp.com",
-    env.BACKEND_URL, // Backend's own URL - REQUIRED
   ],
   plugins: [
     expo(),
