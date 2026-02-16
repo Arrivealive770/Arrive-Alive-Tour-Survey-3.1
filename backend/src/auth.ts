@@ -8,6 +8,7 @@ import { env } from "./env";
 export const auth = betterAuth({
   database: prismaAdapter(prisma, { provider: "sqlite" }),
   secret: env.BETTER_AUTH_SECRET,
+  baseURL: env.BACKEND_URL,
 
   // ============================================
   // REQUIRED: All trustedOrigins below are needed
@@ -57,6 +58,7 @@ export const auth = betterAuth({
   // Without this, sessions return null in mobile/iframe
   // ============================================
   advanced: {
+    trustedProxyHeaders: true,
     crossSubDomainCookies: {
       enabled: true,
     },
