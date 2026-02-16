@@ -1,8 +1,8 @@
 {
   "expo": {
-    "name": "vibecode",
-    "slug": "vibecode",
-    "scheme": "vibecode",
+    "name": "Arrive Alive Survey",
+    "slug": "arrive-alive-survey",
+    "scheme": "arrivealive",
     "version": "1.0.0",
     "orientation": "portrait",
     "userInterfaceStyle": "automatic",
@@ -13,6 +13,11 @@
     "android": {
       "edgeToEdgeEnabled": true,
       "package": "com.arrivealive.survey"
+    },
+    "web": {
+      "bundler": "metro",
+      "output": "single",
+      "favicon": "./assets/favicon.png"
     },
     "plugins": ["expo-router"],
     "experiments": {
