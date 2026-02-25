@@ -119,11 +119,12 @@ model Event {
   createdAt            DateTime @default(now())
 
   // Relations
-  team            Team             @relation(fields: [teamId], references: [id], onDelete: Cascade)
-  surveyResponses SurveyResponse[]
-  pledges         Pledge[]
-  photos          Photo[]
-  localPhotos     LocalPhoto[]
+  team                  Team                   @relation(fields: [teamId], references: [id], onDelete: Cascade)
+  surveyResponses       SurveyResponse[]
+  pledges               Pledge[]
+  photos                Photo[]
+  localPhotos           LocalPhoto[]
+  externalSurveyImports ExternalSurveyImport[]
 
   @@index([teamId])
   @@index([eventDate])
@@ -326,6 +327,40 @@ model LocalPhoto {
   @@index([deviceId])
   @@index([tabletDeviceId])
   @@index([syncedToTablet])
+}
+
+// ==========================================
+// External Survey Imports (Google Forms/Sheets)
+// ==========================================
+
+model ExternalSurveyImport {
+  id          String   @id @default(cuid())
+  eventId     String
+  surveyPhase String   // "pre" | "post"
+  fileName    String   // Original file/sheet name
+  rowCount    Int      @default(0)
+  headers     String   // JSON array of column headers
+  importedAt  DateTime @default(now())
+
+  // Relations
+  event Event @relation(fields: [eventId], references: [id], onDelete: Cascade)
+  rows  ExternalSurveyRow[]
+
+  @@index([eventId])
+  @@index([surveyPhase])
+  @@index([importedAt])
+}
+
+model ExternalSurveyRow {
+  id       String @id @default(cuid())
+  importId String
+  rowIndex Int
+  data     String // JSON object of column -> value
+
+  // Relations
+  import ExternalSurveyImport @relation(fields: [importId], references: [id], onDelete: Cascade)
+
+  @@index([importId])
 }
 
 // ==========================================

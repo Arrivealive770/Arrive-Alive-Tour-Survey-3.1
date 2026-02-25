@@ -18,6 +18,7 @@ import { adminPortalRouter } from "./routes/admin-portal";
 import { overlaysRouter } from "./routes/overlays";
 import { localPhotosRouter } from "./routes/local-photos";
 import { adminUsersRouter } from "./routes/admin-users";
+import { externalSurveysRouter } from "./routes/external-surveys";
 import { logger } from "hono/logger";
 
 // Type the Hono app with user/session variables
@@ -88,6 +89,7 @@ app.route("/api/email", emailRouter);
 app.route("/api/overlays", overlaysRouter);
 app.route("/api/local-photos", localPhotosRouter);
 app.route("/api/admin-users", adminUsersRouter);
+app.route("/api/external-surveys", externalSurveysRouter);
 app.route("/admin", adminPortalRouter);
 
 const port = Number(process.env.PORT) || 3000;

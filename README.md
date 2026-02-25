@@ -32,6 +32,7 @@ An offline-first kiosk system for the Arrive Alive Tour, supporting multiple tou
 - Survey type management (create, edit, delete) - **Web Admin Only**
 - Survey results with pie charts
 - Email queue status
+- **Google Forms/Sheets Survey Import** - import pre/post survey data and link it to events
 
 ### Web Admin Portal
 Access at `{BACKEND_URL}/admin` (password: 1234)
@@ -173,6 +174,12 @@ For completely offline environments where photos should stay on the tablet's loc
 - `GET /api/admin/analytics` - Dashboard data
 - `GET /api/admin/export/csv` - Export survey data
 - `GET /api/admin/devices` - Device status
+
+### Survey Import Endpoints
+- `POST /api/external-surveys/import` - Import Google Forms/Sheets CSV data linked to an event
+- `GET /api/external-surveys?eventId=xxx` - List imports (optionally filtered by event)
+- `GET /api/external-surveys/:id` - Get import with all row data
+- `DELETE /api/external-surveys/:id` - Delete an import
 
 ### Survey Management Endpoints
 - `GET /api/surveys/types` - List all survey types

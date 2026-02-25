@@ -1,15 +1,16 @@
-import { View, Text, Pressable, ScrollView } from 'react-native';
+import { View, Text, Pressable } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useState } from 'react';
 import { router } from 'expo-router';
-import { Calendar, BarChart3, LogOut } from 'lucide-react-native';
+import { Calendar, BarChart3, LogOut, FileText } from 'lucide-react-native';
 import { cn } from '@/lib/cn';
 
 // Import the actual screens as components
 import EventsScreen from './events';
 import AnalyticsScreen from './analytics';
+import SurveyImportsScreen from './survey-imports';
 
-type TabType = 'events' | 'stats';
+type TabType = 'events' | 'stats' | 'imports';
 
 export default function AdminDashboard() {
   const [activeTab, setActiveTab] = useState<TabType>('events');
@@ -69,11 +70,35 @@ export default function AdminDashboard() {
             Stats
           </Text>
         </Pressable>
+
+        <Pressable
+          onPress={() => setActiveTab('imports')}
+          className={cn(
+            'flex-1 flex-row items-center justify-center py-4',
+            activeTab === 'imports' ? 'border-b-2 border-white' : ''
+          )}
+        >
+          <FileText size={20} color={activeTab === 'imports' ? '#fff' : '#71717a'} />
+          <Text
+            className={cn(
+              'ml-2 font-medium',
+              activeTab === 'imports' ? 'text-white' : 'text-zinc-500'
+            )}
+          >
+            Imports
+          </Text>
+        </Pressable>
       </View>
 
       {/* Content */}
       <View className="flex-1">
-        {activeTab === 'events' ? <EventsScreen /> : <AnalyticsScreen />}
+        {activeTab === 'events' ? (
+          <EventsScreen />
+        ) : activeTab === 'stats' ? (
+          <AnalyticsScreen />
+        ) : (
+          <SurveyImportsScreen />
+        )}
       </View>
     </SafeAreaView>
   );
