@@ -2,7 +2,7 @@ import { useState } from 'react';
 import { View, Text, Pressable, ActivityIndicator } from 'react-native';
 import { Download, Check, AlertCircle } from 'lucide-react-native';
 import * as Sharing from 'expo-sharing';
-import * as FileSystem from 'expo-file-system';
+import * as FileSystem from 'expo-file-system/legacy';
 import { cn } from '@/lib/cn';
 
 interface ExportButtonProps {

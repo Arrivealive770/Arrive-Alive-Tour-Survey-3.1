@@ -1,5 +1,8 @@
+diff --git a/node_modules/react-native/.bun-tag-1fdfe896b252c4b3 b/.bun-tag-1fdfe896b252c4b3
+new file mode 100644
+index 0000000000000000000000000000000000000000..e69de29bb2d1d6434b8b29ae775ad8c2e48c5391
 diff --git a/Libraries/Core/ExceptionsManager.js b/Libraries/Core/ExceptionsManager.js
-index 05160ce36285bc27cb7776bff15faf0a20e86354..c1557ad62c64be6f9e62a0bd35b46739d66e14a6 100644
+index cbf854cdbaf25ea11b60b49e2a9a776a9806f897..285e2f1678ff20a5d5f764d4117b76cfab0c38fc 100644
 --- a/Libraries/Core/ExceptionsManager.js
 +++ b/Libraries/Core/ExceptionsManager.js
 @@ -12,6 +12,8 @@
@@ -97,7 +100,7 @@ index 05160ce36285bc27cb7776bff15faf0a20e86354..c1557ad62c64be6f9e62a0bd35b46739
  /**
   * Handles the developer-visible aspect of errors and exceptions
   */
-@@ -104,6 +185,11 @@ function reportException(
+@@ -101,6 +182,11 @@ function reportException(
      extraData,
    });
  
@@ -110,7 +113,7 @@ index 05160ce36285bc27cb7776bff15faf0a20e86354..c1557ad62c64be6f9e62a0bd35b46739
      // we feed back into console.error, to make sure any methods that are
      // monkey patched on top of console.error are called when coming from
 diff --git a/Libraries/LogBox/Data/LogBoxData.js b/Libraries/LogBox/Data/LogBoxData.js
-index 1c11fd4e0b46f5485fcc22cd1274fbbdec01ac19..2fb02a7f642d0789203accaec85e88930619a3ce 100644
+index 37fb35b9f5d3c922c51f1d27f318983fa166cea0..70bcd5c272b2d9af231b4ad1f7755a87daf2c8d7 100644
 --- a/Libraries/LogBox/Data/LogBoxData.js
 +++ b/Libraries/LogBox/Data/LogBoxData.js
 @@ -188,9 +188,10 @@ function appendNewLog(newLog: LogBoxLog) {
@@ -183,7 +186,7 @@ index be475215db88c9ffaa871a1e4ed3bfc64286b0e1..ba3a79d454cfa3d599d9b268b486f6fc
      if (
        this.symbolicated.status !== 'PENDING' &&
 diff --git a/Libraries/LogBox/LogBox.js b/Libraries/LogBox/LogBox.js
-index bc0eb4b3042c5f570be880dd11f94151ab41b199..2d7d57076259ac99fca2eebc7df4bcb70f534466 100644
+index a9bfdd760edc08b76d69730a14d6d1e27ebd8d35..e0fa8e3f6a5dd58b2ac245a9be70c41f6ff822e8 100644
 --- a/Libraries/LogBox/LogBox.js
 +++ b/Libraries/LogBox/LogBox.js
 @@ -34,7 +34,7 @@ interface ILogBox {
@@ -193,8 +196,8 @@ index bc0eb4b3042c5f570be880dd11f94151ab41b199..2d7d57076259ac99fca2eebc7df4bcb7
 -if (__DEV__) {
 +if (false) { // __DEV__
    const LogBoxData = require('./Data/LogBoxData');
-   const {parseLogBoxLog, parseInterpolation} = require('./Data/parseLogBoxLog');
- 
+   const {
+     parseLogBoxLog,
 diff --git a/Libraries/LogBox/UI/LogBoxInspector.js b/Libraries/LogBox/UI/LogBoxInspector.js
 index be889b06fd58e8a93f7e512e2874b2234c728c4f..3b93f5dcaeac90f6d5813b3258332e3cf66ef639 100644
 --- a/Libraries/LogBox/UI/LogBoxInspector.js
@@ -314,7 +317,7 @@ index 768982a9de592ab6296f4cf827f91df49cefea98..f1dbd0b370f65abe4ed59d5d50e0c3b3
   * This is the default RCTURLRequestHandler implementation for HTTP requests.
   */
 diff --git a/Libraries/Network/RCTHTTPRequestHandler.mm b/Libraries/Network/RCTHTTPRequestHandler.mm
-index 4a0353396d7eda980da9d4aef0ee36b557b4a911..a31d33c278b90cfe2d37b54b07ab3bc5dcadf18b 100644
+index 8f21bf3e2846821040586c89989dcab2da73daaa..f9c9a27603b6df1882de9032762dd6353d0cf83b 100644
 --- a/Libraries/Network/RCTHTTPRequestHandler.mm
 +++ b/Libraries/Network/RCTHTTPRequestHandler.mm
 @@ -20,11 +20,32 @@ @interface RCTHTTPRequestHandler () <NSURLSessionDataDelegate, RCTTurboModule>
@@ -393,7 +396,7 @@ index 4a0353396d7eda980da9d4aef0ee36b557b4a911..a31d33c278b90cfe2d37b54b07ab3bc5
    // Lazy setup
    if (!_session && [self isValid]) {
      // You can override default NSURLSession instance property allowsCellularAccess (default value YES)
-@@ -100,7 +157,7 @@ - (NSURLSessionDataTask *)sendRequest:(NSURLRequest *)request withDelegate:(id<R
+@@ -99,7 +156,7 @@ - (NSURLSessionDataTask *)sendRequest:(NSURLRequest *)request withDelegate:(id<R
                                             valueOptions:NSPointerFunctionsStrongMemory
                                                 capacity:0];
    }
@@ -578,7 +581,7 @@ index fb057b969214ee3d4d691a8530a49c4a8f727c34..0a20ae4ed3dd08fa6ecd5e5efaf98ff4
  
  - (void)redBoxController:(__unused RCTRedBoxController *)redBoxController
 diff --git a/ReactAndroid/src/main/java/com/facebook/react/devsupport/DefaultDevLoadingViewImplementation.kt b/ReactAndroid/src/main/java/com/facebook/react/devsupport/DefaultDevLoadingViewImplementation.kt
-index 0844b8b725d3bb3af321bd45d9e8789957863539..7668cc4a7a74d13f1bfa4ff4e438cd81bb143c92 100644
+index 9fbf1f8a77812c8eeef6b26c7aa0ebfe4e21ea24..f632d0a89a0613533bfb113868546e596ea7f10b 100644
 --- a/ReactAndroid/src/main/java/com/facebook/react/devsupport/DefaultDevLoadingViewImplementation.kt
 +++ b/ReactAndroid/src/main/java/com/facebook/react/devsupport/DefaultDevLoadingViewImplementation.kt
 @@ -11,10 +11,13 @@ import android.content.Context
@@ -689,53 +692,28 @@ index 0844b8b725d3bb3af321bd45d9e8789957863539..7668cc4a7a74d13f1bfa4ff4e438cd81
 +    currentActivity.hideMessage()
    }
  
-   private val context: Context?
-@@ -118,3 +86,4 @@ public class DefaultDevLoadingViewImplementation(
+   public companion object {
+@@ -115,3 +83,4 @@ public class DefaultDevLoadingViewImplementation(
      }
    }
  }
 +
-diff --git a/ReactAndroid/src/main/java/com/facebook/react/devsupport/DevServerHelper.java b/ReactAndroid/src/main/java/com/facebook/react/devsupport/DevServerHelper.java
-index 0a9fab60e39ce79c5a9d200dd2a37dc13600796d..a1c8013e5a139a6c42cfd9eb818cda82b17975bb 100644
---- a/ReactAndroid/src/main/java/com/facebook/react/devsupport/DevServerHelper.java
-+++ b/ReactAndroid/src/main/java/com/facebook/react/devsupport/DevServerHelper.java
-@@ -11,6 +11,8 @@ import android.content.Context;
- import android.net.Uri;
- import android.os.AsyncTask;
- import android.provider.Settings.Secure;
-+import android.util.Log;
-+
- import androidx.annotation.NonNull;
- import androidx.annotation.Nullable;
- import com.facebook.common.logging.FLog;
-@@ -383,9 +385,10 @@ public class DevServerHelper {
-       }
-       additionalOptionsBuilder.append("&" + entry.getKey() + "=" + Uri.encode(entry.getValue()));
+diff --git a/ReactAndroid/src/main/java/com/facebook/react/devsupport/DevServerHelper.kt b/ReactAndroid/src/main/java/com/facebook/react/devsupport/DevServerHelper.kt
+index 1e5084ef2a8a0be95a064c9e3d087697aeeb3d9a..9298748c50e5d3c75e1474c535432b2d91d0e45c 100644
+--- a/ReactAndroid/src/main/java/com/facebook/react/devsupport/DevServerHelper.kt
++++ b/ReactAndroid/src/main/java/com/facebook/react/devsupport/DevServerHelper.kt
+@@ -273,7 +273,8 @@ public open class DevServerHelper(
      }
--    return String.format(
-+    String url =  String.format(
-             Locale.US,
--            "http://%s/%s.%s?platform=android&dev=%s&lazy=%s&minify=%s&app=%s&modulesOnly=%s&runModule=%s",
-+            "%s://%s/%s.%s?platform=android&dev=%s&lazy=%s&minify=%s&app=%s&modulesOnly=%s&runModule=%s",
-+            mPackagerConnectionSettings.getDebugServerScheme(),
-             host,
-             mainModuleID,
-             type.typeID(),
-@@ -395,8 +398,10 @@ public class DevServerHelper {
-             mPackageName,
-             modulesOnly ? "true" : "false",
-             runModule ? "true" : "false")
--        + (InspectorFlags.getFuseboxEnabled() ? "&excludeSource=true&sourcePaths=url-server" : "")
--        + additionalOptionsBuilder.toString();
-+            + (InspectorFlags.getFuseboxEnabled() ? "&excludeSource=true&sourcePaths=url-server" : "")
-+            + additionalOptionsBuilder.toString();
-+    Log.e("MOJEEEE", url);
-+    return url;
-   }
- 
-   private String createBundleURL(String mainModuleID, BundleType type) {
+     return (String.format(
+         Locale.US,
+-        "http://%s/%s.%s?platform=android&dev=%s&lazy=%s&minify=%s&app=%s&modulesOnly=%s&runModule=%s",
++        "%s://%s/%s.%s?platform=android&dev=%s&lazy=%s&minify=%s&app=%s&modulesOnly=%s&runModule=%s",
++        packagerConnectionSettings.debugServerScheme,
+         host,
+         mainModuleID,
+         type.typeID,
 diff --git a/ReactAndroid/src/main/java/com/facebook/react/devsupport/PackagerStatusCheck.kt b/ReactAndroid/src/main/java/com/facebook/react/devsupport/PackagerStatusCheck.kt
-index 9f472e750d67b4de55d47a9fb545e9ffbd5a8672..3d1e37fa6b9e48108ee17d4eaf78151477a3e76a 100644
+index da82cd9d4c52c38ec44a2e264f11f2a26eb31d26..505c54987c0188cefe5b7623780ba1d1ade06e45 100644
 --- a/ReactAndroid/src/main/java/com/facebook/react/devsupport/PackagerStatusCheck.kt
 +++ b/ReactAndroid/src/main/java/com/facebook/react/devsupport/PackagerStatusCheck.kt
 @@ -88,7 +88,7 @@ internal class PackagerStatusCheck {
@@ -748,7 +726,7 @@ index 9f472e750d67b4de55d47a9fb545e9ffbd5a8672..3d1e37fa6b9e48108ee17d4eaf781514
      private fun createPackagerStatusURL(host: String): String =
          String.format(Locale.US, PACKAGER_STATUS_URL_TEMPLATE, host)
 diff --git a/ReactAndroid/src/main/java/com/facebook/react/packagerconnection/PackagerConnectionSettings.kt b/ReactAndroid/src/main/java/com/facebook/react/packagerconnection/PackagerConnectionSettings.kt
-index d31b85aa912d7b99e73d51bd4a7c0a896902e367..2b8cc31af979db005eb644fbd7729238e34258f3 100644
+index a9fa6794773496b0192dc92f8ab7370a66adb0e5..4e6c87adce6fce4fb14def04265bdfe61be6e253 100644
 --- a/ReactAndroid/src/main/java/com/facebook/react/packagerconnection/PackagerConnectionSettings.kt
 +++ b/ReactAndroid/src/main/java/com/facebook/react/packagerconnection/PackagerConnectionSettings.kt
 @@ -15,14 +15,29 @@ import android.preference.PreferenceManager
@@ -781,19 +759,19 @@ index d31b85aa912d7b99e73d51bd4a7c0a896902e367..2b8cc31af979db005eb644fbd7729238
        // Check host setting first. If empty try to detect emulator type and use default
        // hostname for those
        val hostFromSettings = preferences.getString(PREFS_DEBUG_SERVER_HOST_KEY, null)
-@@ -38,7 +53,9 @@ public open class PackagerConnectionSettings(private val appContext: Context) {
-       return host
-     }
-     set(host) {
--      preferences.edit().putString(PREFS_DEBUG_SERVER_HOST_KEY, host).apply()
-+      if(settings == null) {
-+        preferences.edit().putString(PREFS_DEBUG_SERVER_HOST_KEY, host).apply()
-+      }
+@@ -41,7 +56,9 @@ public open class PackagerConnectionSettings(private val appContext: Context) {
+       if (host.isEmpty()) {
+         preferences.edit().remove(PREFS_DEBUG_SERVER_HOST_KEY).apply()
+       } else {
+-        preferences.edit().putString(PREFS_DEBUG_SERVER_HOST_KEY, host).apply()
++        if(settings == null) {
++          preferences.edit().putString(PREFS_DEBUG_SERVER_HOST_KEY, host).apply()
++        }
+       }
      }
  
-   public fun setAdditionalOptionForPackager(key: String, value: String) {
 diff --git a/ReactCommon/react/runtime/platform/ios/ReactCommon/RCTInstance.h b/ReactCommon/react/runtime/platform/ios/ReactCommon/RCTInstance.h
-index 0593dccc87a0c6d7c5a739a661465735adc0a62b..db50e81bc53f13a8376f8dac4cf974185c722624 100644
+index 5d4ea87be9e9fb26a82e406510998653aa769f9b..a02fee2253b772acdfed0fa241f52b597df0ba9f 100644
 --- a/ReactCommon/react/runtime/platform/ios/ReactCommon/RCTInstance.h
 +++ b/ReactCommon/react/runtime/platform/ios/ReactCommon/RCTInstance.h
 @@ -25,6 +25,8 @@ NS_ASSUME_NONNULL_BEGIN
@@ -806,10 +784,10 @@ index 0593dccc87a0c6d7c5a739a661465735adc0a62b..db50e81bc53f13a8376f8dac4cf97418
  @class RCTInstance;
  @class RCTJSThreadManager;
 diff --git a/ReactCommon/react/runtime/platform/ios/ReactCommon/RCTInstance.mm b/ReactCommon/react/runtime/platform/ios/ReactCommon/RCTInstance.mm
-index 39285dcaaab25a9fa8b91c9f03c579c5a7477f9d..1d5be262664326da244a4418a7d52d9c411ed8a2 100644
+index 7d621ac6bf86c3ad457f4be4dc137f67865c5731..c534a6da46679376bb635e0af8d84c982e9fd047 100644
 --- a/ReactCommon/react/runtime/platform/ios/ReactCommon/RCTInstance.mm
 +++ b/ReactCommon/react/runtime/platform/ios/ReactCommon/RCTInstance.mm
-@@ -444,13 +444,19 @@ - (void)handleBundleLoadingError:(NSError *)error
+@@ -501,13 +501,19 @@ - (void)handleBundleLoadingError:(NSError *)error
  
  - (void)_loadJSBundle:(NSURL *)sourceURL
  {
@@ -836,7 +814,7 @@ index 39285dcaaab25a9fa8b91c9f03c579c5a7477f9d..1d5be262664326da244a4418a7d52d9c
  
    __weak __typeof(self) weakSelf = self;
    [_delegate loadBundleAtURL:sourceURL
-@@ -459,12 +465,30 @@ - (void)_loadJSBundle:(NSURL *)sourceURL
+@@ -516,12 +522,30 @@ - (void)_loadJSBundle:(NSURL *)sourceURL
          if (!strongSelf) {
            return;
          }
@@ -872,27 +850,19 @@ index 39285dcaaab25a9fa8b91c9f03c579c5a7477f9d..1d5be262664326da244a4418a7d52d9c
        }
        onComplete:^(NSError *error, RCTSource *source) {
          __typeof(self) strongSelf = weakSelf;
-diff --git a/src/private/inspector/Inspector.js b/src/private/inspector/Inspector.js
-index 304466bfd1e0524d60564f94805460f22866fa25..69400f8f28e132f464669cf9495e76053f70f08b 100644
---- a/src/private/inspector/Inspector.js
-+++ b/src/private/inspector/Inspector.js
-@@ -17,9 +17,9 @@ import type {
- } from '../../../Libraries/Renderer/shims/ReactNativeTypes';
- import type {ViewStyleProp} from '../../../Libraries/StyleSheet/StyleSheet';
- import type {ReactDevToolsAgent} from '../../../Libraries/Types/ReactDevToolsTypes';
--
- import SafeAreaView from '../components/SafeAreaView_INTERNAL_DO_NOT_USE';
- import React from 'react';
+diff --git a/src/private/devsupport/devmenu/elementinspector/Inspector.js b/src/private/devsupport/devmenu/elementinspector/Inspector.js
+index 98ba78f6b9406e8710031193d4362ee8dbaab2ac..897e8d5b8530115b27fcbee6d4b7603973ac8c33 100644
+--- a/src/private/devsupport/devmenu/elementinspector/Inspector.js
++++ b/src/private/devsupport/devmenu/elementinspector/Inspector.js
+@@ -20,6 +20,7 @@ import type {ReactDevToolsAgent} from '../../../../../Libraries/Types/ReactDevTo
+ 
+ import SafeAreaView from '../../../components/safeareaview/SafeAreaView_INTERNAL_DO_NOT_USE';
+ import * as React from 'react';
 +import { requireOptionalNativeModule } from 'expo-modules-core';
  
- const View = require('../../../Libraries/Components/View/View').default;
- const PressabilityDebug = require('../../../Libraries/Pressability/PressabilityDebug');
-@@ -66,10 +66,13 @@ function Inspector({
-   const [panelPosition, setPanelPosition] = useState<PanelPosition>('bottom');
-   const [inspectedElement, setInspectedElement] =
-     useState<?InspectedElement>(null);
-+
-   const [selectionIndex, setSelectionIndex] = useState<?number>(null);
+ const View = require('../../../../../Libraries/Components/View/View').default;
+ const PressabilityDebug = require('../../../../../Libraries/Pressability/PressabilityDebug');
+@@ -72,6 +73,8 @@ function Inspector({
    const [elementsHierarchy, setElementsHierarchy] =
      useState<?ElementsHierarchy>(null);
  
@@ -901,7 +871,7 @@ index 304466bfd1e0524d60564f94805460f22866fa25..69400f8f28e132f464669cf9495e7605
    const setSelection = (i: number) => {
      const hierarchyItem = elementsHierarchy?.[i];
      if (hierarchyItem == null) {
-@@ -102,6 +105,16 @@ function Inspector({
+@@ -104,6 +107,16 @@ function Inspector({
          closestInstance,
        } = viewData;
  
@@ -918,7 +888,7 @@ index 304466bfd1e0524d60564f94805460f22866fa25..69400f8f28e132f464669cf9495e7605
        // Sync the touched view with React DevTools.
        // Note: This is Paper only. To support Fabric,
        // DevTools needs to be updated to not rely on view tags.
-@@ -169,7 +182,7 @@ function Inspector({
+@@ -171,7 +184,7 @@ function Inspector({
          />
        )}
  
@@ -927,7 +897,7 @@ index 304466bfd1e0524d60564f94805460f22866fa25..69400f8f28e132f464669cf9495e7605
          <InspectorPanel
            devtoolsIsOpen={!!reactDevToolsAgent}
            inspecting={selectedTab === 'elements-inspector'}
-@@ -185,7 +198,7 @@ function Inspector({
+@@ -187,7 +200,7 @@ function Inspector({
            networking={selectedTab === 'network-profiling'}
            setNetworking={setNetworking}
          />

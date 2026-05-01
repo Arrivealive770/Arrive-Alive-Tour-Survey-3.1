@@ -6,6 +6,7 @@ import Animated, {
   withTiming,
   Easing,
   runOnJS,
+  type SharedValue,
 } from 'react-native-reanimated';
 
 interface CountdownTimerProps {
@@ -110,7 +111,7 @@ export function CountdownTimer({
 }
 
 interface CountdownTextProps {
-  displaySeconds: Animated.SharedValue<number>;
+  displaySeconds: SharedValue<number>;
   prefix: string;
   suffix: string;
   isTablet: boolean;

@@ -2,7 +2,7 @@
 // Handles automatic syncing when connectivity is restored
 
 import NetInfo, { NetInfoState } from '@react-native-community/netinfo';
-import * as FileSystem from 'expo-file-system';
+import * as FileSystem from 'expo-file-system/legacy';
 import { AppState, AppStateStatus, Platform } from 'react-native';
 import { getDatabase, isDatabaseInitialized, getDatabaseSafe } from '@/lib/db/database';
 import { useSyncStore } from '@/lib/state/sync-store';

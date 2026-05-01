@@ -3,7 +3,7 @@
 // Since React Native cannot run a true HTTP server, this service uses a polling approach
 // and provides methods to process incoming photo data
 
-import * as FileSystem from 'expo-file-system';
+import * as FileSystem from 'expo-file-system/legacy';
 import { Platform } from 'react-native';
 import { getDatabaseSafe } from '@/lib/db/database';
 import { useDeviceStore } from '@/lib/state/device-store';

@@ -2,7 +2,7 @@
 // Runs on PHONE devices to send photos directly to a tablet via local hotspot network
 // Handles offline/connection failures gracefully with queuing and retry logic
 
-import * as FileSystem from 'expo-file-system';
+import * as FileSystem from 'expo-file-system/legacy';
 import { Platform } from 'react-native';
 import { useDeviceStore } from '@/lib/state/device-store';
 import type { PhotoReceiverResponse } from './local-photo-receiver';
