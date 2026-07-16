@@ -15,7 +15,7 @@ const sharedFolder = path.resolve(__dirname, "../shared");
 const sharedFolderExists = fs.existsSync(sharedFolder);
 
 // DEBUG: Log metro.config.js version and shared folder status at startup
-console.log("[Metro Config] Version: 2025-02-03-v3-fix-dynamic-imports (source: workspace-mobile)");
+console.log("[Metro Config] Version: 2026-07-06-v4-zustand-cjs-on-web (source: workspace-mobile)");
 console.log(`[Metro Config] Shared folder: ${sharedFolder}`);
 console.log(`[Metro Config] Shared folder exists: ${sharedFolderExists}`);
 
@@ -118,6 +118,14 @@ config.resolver = {
           type: "empty",
         };
       }
+    }
+
+    // Zustand's ESM build (esm/*.mjs) contains import.meta, which cannot be
+    // parsed in classic-script bundles when a project's babel config lacks
+    // unstable_transformImportMeta. Resolve zustand with require semantics so
+    // its CJS build (the one native already uses) is picked on every platform.
+    if (moduleName === "zustand" || moduleName.startsWith("zustand/")) {
+      return context.resolveRequest({ ...context, isESMImport: false }, moduleName, platform);
     }
 
     // Fallback to default resolution
