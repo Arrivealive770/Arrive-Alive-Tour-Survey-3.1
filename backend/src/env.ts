@@ -16,7 +16,7 @@ const envSchema = z.object({
   // Email (use either Resend or SendGrid — an API key from one of them is required for email sending)
   RESEND_API_KEY: z.string().optional(),
   SENDGRID_API_KEY: z.string().optional(),
-  EMAIL_FROM_ADDRESS: z.string().email().default("noreply@arrivealive.org"),
+  EMAIL_FROM_ADDRESS: z.string().email().default("noreply@arrivealivetour.com"),
   EMAIL_FROM_NAME: z.string().default("Arrive Alive Tour"),
 });
 
