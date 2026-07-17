@@ -13,8 +13,9 @@ const envSchema = z.object({
   DATABASE_URL: z.string().default("file:./dev.db"),
   // Authentication
   BETTER_AUTH_SECRET: z.string().min(1, "BETTER_AUTH_SECRET is required"),
-  // SendGrid Email
-  SENDGRID_API_KEY: z.string().optional(), // Required for email sending
+  // Email (use either Resend or SendGrid — an API key from one of them is required for email sending)
+  RESEND_API_KEY: z.string().optional(),
+  SENDGRID_API_KEY: z.string().optional(),
   EMAIL_FROM_ADDRESS: z.string().email().default("noreply@arrivealive.org"),
   EMAIL_FROM_NAME: z.string().default("Arrive Alive Tour"),
 });

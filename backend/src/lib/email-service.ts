@@ -1,4 +1,3 @@
-import sgMail from "@sendgrid/mail";
 import { env } from "../env";
 
 export interface SendPledgeEmailParams {
@@ -12,32 +11,44 @@ export interface SendEmailResult {
   error?: string;
 }
 
+type Provider = "resend" | "sendgrid" | null;
+
 class EmailService {
+  private provider: Provider = null;
   private initialized = false;
 
   /**
-   * Initialize the SendGrid client with the API key
+   * Detect which email provider is configured.
+   * Prefers Resend, falls back to SendGrid. Either one works with just an API key.
    */
   initialize(): void {
     if (this.initialized) {
       return;
     }
-
-    if (!env.SENDGRID_API_KEY) {
-      console.warn("SENDGRID_API_KEY not configured - email sending disabled");
-      return;
-    }
-
-    sgMail.setApiKey(env.SENDGRID_API_KEY);
     this.initialized = true;
-    console.log("EmailService initialized with SendGrid");
+
+    if (env.RESEND_API_KEY) {
+      this.provider = "resend";
+      console.log("EmailService initialized with Resend");
+    } else if (env.SENDGRID_API_KEY) {
+      this.provider = "sendgrid";
+      console.log("EmailService initialized with SendGrid");
+    } else {
+      this.provider = null;
+      console.warn(
+        "No email API key configured (RESEND_API_KEY or SENDGRID_API_KEY) - email sending disabled"
+      );
+    }
   }
 
   /**
    * Check if email service is configured and ready
    */
   isConfigured(): boolean {
-    return this.initialized && !!env.SENDGRID_API_KEY;
+    if (!this.initialized) {
+      this.initialize();
+    }
+    return this.provider !== null;
   }
 
   /**
@@ -47,26 +58,22 @@ class EmailService {
     if (!this.isConfigured()) {
       return {
         success: false,
-        error: "Email service not configured - SENDGRID_API_KEY missing",
+        error: "Email service not configured - set RESEND_API_KEY or SENDGRID_API_KEY",
       };
     }
 
-    const { to, photoUrl, eventName } = params;
+    const { to, photoUrl } = params;
+    const subject = "Your S.A.F.E. Pledge Photo";
+    const html = this.generatePledgeEmailHtml({ photoUrl });
 
     try {
-      const htmlBody = this.generatePledgeEmailHtml({ photoUrl });
+      if (this.provider === "resend") {
+        await this.sendViaResend({ to, subject, html });
+      } else {
+        await this.sendViaSendGrid({ to, subject, html });
+      }
 
-      await sgMail.send({
-        to,
-        from: {
-          email: env.EMAIL_FROM_ADDRESS,
-          name: env.EMAIL_FROM_NAME,
-        },
-        subject: "Your S.A.F.E. Pledge Photo",
-        html: htmlBody,
-      });
-
-      console.log(`Pledge email sent successfully to ${to}`);
+      console.log(`Pledge email sent successfully to ${to} via ${this.provider}`);
       return { success: true };
     } catch (error) {
       const errorMessage = error instanceof Error ? error.message : "Unknown error";
@@ -75,6 +82,54 @@ class EmailService {
         success: false,
         error: errorMessage,
       };
+    }
+  }
+
+  /**
+   * Send via Resend REST API (https://resend.com)
+   */
+  private async sendViaResend(params: { to: string; subject: string; html: string }): Promise<void> {
+    const response = await fetch("https://api.resend.com/emails", {
+      method: "POST",
+      headers: {
+        Authorization: `Bearer ${env.RESEND_API_KEY}`,
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({
+        from: `${env.EMAIL_FROM_NAME} <${env.EMAIL_FROM_ADDRESS}>`,
+        to: [params.to],
+        subject: params.subject,
+        html: params.html,
+      }),
+    });
+
+    if (!response.ok) {
+      const detail = await response.text().catch(() => "");
+      throw new Error(`Resend API error (HTTP ${response.status}): ${detail}`);
+    }
+  }
+
+  /**
+   * Send via SendGrid REST API (https://sendgrid.com)
+   */
+  private async sendViaSendGrid(params: { to: string; subject: string; html: string }): Promise<void> {
+    const response = await fetch("https://api.sendgrid.com/v3/mail/send", {
+      method: "POST",
+      headers: {
+        Authorization: `Bearer ${env.SENDGRID_API_KEY}`,
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({
+        personalizations: [{ to: [{ email: params.to }] }],
+        from: { email: env.EMAIL_FROM_ADDRESS, name: env.EMAIL_FROM_NAME },
+        subject: params.subject,
+        content: [{ type: "text/html", value: params.html }],
+      }),
+    });
+
+    if (!response.ok) {
+      const detail = await response.text().catch(() => "");
+      throw new Error(`SendGrid API error (HTTP ${response.status}): ${detail}`);
     }
   }
 

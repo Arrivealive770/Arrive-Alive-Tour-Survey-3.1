@@ -4,6 +4,8 @@ import { cors } from "hono/cors";
 import { serveStatic } from "hono/bun";
 import "./env";
 import { auth } from "./auth";
+import { emailService } from "./lib/email-service";
+import { emailQueueProcessor } from "./lib/email-queue-processor";
 import { sampleRouter } from "./routes/sample";
 import { teamsRouter } from "./routes/teams";
 import { devicesRouter } from "./routes/devices";
@@ -91,6 +93,12 @@ app.route("/api/local-photos", localPhotosRouter);
 app.route("/api/admin-users", adminUsersRouter);
 app.route("/api/external-surveys", externalSurveysRouter);
 app.route("/admin", adminPortalRouter);
+
+// Start the background email queue processor.
+// If no email API key is set it logs a warning and stays idle; queued pledge
+// emails are drained automatically once a key is added and the server restarts.
+emailService.initialize();
+emailQueueProcessor.start();
 
 const port = Number(process.env.PORT) || 3000;
 
