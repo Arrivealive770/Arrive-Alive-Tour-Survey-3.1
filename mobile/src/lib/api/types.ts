@@ -103,6 +103,10 @@ export interface Photo {
   overlayType: string;
   status: PhotoStatus;
   selectedByDeviceId: string | null;
+  /** Phone device that captured this photo. */
+  captureDeviceId: string | null;
+  /** True once the capturing phone removed its local original. */
+  phoneOriginalDeleted: boolean;
   /** URL of the composited/overlaid finished photo. */
   finishedPhotoUrl: string | null;
   usedAt: string | null;
@@ -110,6 +114,18 @@ export interface Photo {
   deletedAt: string | null;
   createdAt: string;
   syncedAt: string | null;
+}
+
+/** An entry telling the capturing phone which local original it may delete now. */
+export interface PhoneCleanupEntry {
+  id: string;
+  localId: string;
+  storageKey: string | null;
+}
+
+/** GET /api/photos/phone-cleanup/:teamId/:eventId response value. */
+export interface PhoneCleanupResponse {
+  deletable: PhoneCleanupEntry[];
 }
 
 /** GET /api/sync/photos/:teamId/:eventId returns a subset of Photo fields. */

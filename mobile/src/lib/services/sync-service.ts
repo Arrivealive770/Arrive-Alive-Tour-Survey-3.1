@@ -174,6 +174,10 @@ class SyncService {
         this.syncDeletions(),
       ]);
 
+      // Phone-side cleanup runs after uploads so freshly-uploaded originals can
+      // be dropped once tablets have received them.
+      await this.syncPhoneCleanup();
+
       // Update sync timestamp
       useSyncStore.getState().setLastSyncAt(new Date().toISOString());
 
@@ -437,6 +441,7 @@ class SyncService {
     }
     const teamId = useDeviceStore.getState().teamId || 'unknown';
     const eventId = useDeviceStore.getState().currentEventId || 'unknown';
+    const deviceId = useDeviceStore.getState().deviceId; // capturing phone
 
     let totalSynced = 0;
     let totalFailed = 0;
@@ -492,6 +497,11 @@ class SyncService {
           formData.append('teamId', photo.teamId || teamId);
           formData.append('eventId', photoEventId);
           formData.append('overlayType', photo.overlayType);
+          // Tell the backend which phone captured this so it can gate
+          // phone-side original cleanup (captureDeviceId).
+          if (deviceId) {
+            formData.append('deviceId', deviceId);
+          }
 
           // Upload to server
           const response = await fetch(`${this.baseUrl}/api/photos/upload`, {
@@ -568,10 +578,38 @@ class SyncService {
         throw new Error(`Server error: ${response.status}`);
       }
 
-      const result = (await response.json()) as { data: PhotoListResponse };
-      const remotePhotos = result.data.photos;
+      // The backend returns full Photo fields (id, localId, storageUrl, ...).
+      // Support the legacy { photos: [{ remoteUrl }] } shape as a fallback.
+      const parsed = (await response.json()) as {
+        data:
+          | PhotoListResponse
+          | Array<{
+              id: string;
+              localId: string;
+              storageUrl: string | null;
+              overlayType: string;
+              createdAt: string;
+            }>;
+      };
+      const remotePhotos = Array.isArray(parsed.data)
+        ? parsed.data.map((p) => ({
+            id: p.id,
+            localId: p.localId,
+            remoteUrl: p.storageUrl ?? '',
+            overlayType: p.overlayType,
+            createdAt: p.createdAt,
+          }))
+        : parsed.data.photos.map((p) => ({
+            id: (p as RemotePhotoMetadata & { id?: string }).id ?? '',
+            localId: p.localId,
+            remoteUrl: p.remoteUrl,
+            overlayType: p.overlayType,
+            createdAt: p.createdAt,
+          }));
 
       console.log(`[SyncService] Found ${remotePhotos.length} remote photos`);
+
+      const tabletDeviceId = useDeviceStore.getState().deviceId;
 
       // Get existing cached photo IDs
       const existingPhotos = await db.getAvailablePhotos(teamId, eventId, 1000);
@@ -581,6 +619,9 @@ class SyncService {
       for (const remotePhoto of remotePhotos) {
         if (existingIds.has(remotePhoto.localId)) {
           continue; // Already cached
+        }
+        if (!remotePhoto.remoteUrl) {
+          continue; // No source url to download from
         }
 
         try {
@@ -620,6 +661,23 @@ class SyncService {
             usePhotoCacheStore.getState().addCachedPhoto(newCachedPhoto);
 
             downloaded++;
+
+            // Acknowledge receipt so the capturing phone can drop its original.
+            // Idempotent server-side; photo stays "available" for tablets.
+            if (remotePhoto.id && tabletDeviceId) {
+              try {
+                await fetch(`${this.baseUrl}/api/photos/${remotePhoto.id}/received`, {
+                  method: 'PUT',
+                  headers: { 'Content-Type': 'application/json' },
+                  body: JSON.stringify({ deviceId: tabletDeviceId }),
+                });
+              } catch (ackError) {
+                console.error(
+                  `[SyncService] Failed to ack receipt for ${remotePhoto.localId}:`,
+                  ackError
+                );
+              }
+            }
           }
         } catch (downloadError) {
           console.error(
@@ -646,16 +704,100 @@ class SyncService {
   private startDeletionPolling(): void {
     if (this.deletionPollTimer) return;
 
-    // Run once immediately, then on an interval.
-    this.syncDeletions().catch((e) =>
-      console.error('[SyncService] Initial deletion poll failed:', e)
-    );
-
-    this.deletionPollTimer = setInterval(() => {
+    const poll = () => {
+      // Full-removal propagation (sent / purge) for every device.
       this.syncDeletions().catch((e) =>
         console.error('[SyncService] Deletion poll failed:', e)
       );
-    }, DELETION_POLL_INTERVAL_MS);
+      // Phone-only: drop local originals already received by all tablets.
+      this.syncPhoneCleanup().catch((e) =>
+        console.error('[SyncService] Phone-cleanup poll failed:', e)
+      );
+    };
+
+    // Run once immediately, then on an interval.
+    poll();
+    this.deletionPollTimer = setInterval(poll, DELETION_POLL_INTERVAL_MS);
+  }
+
+  /**
+   * PHONE ONLY. Poll for this phone's captured originals that all active tablets
+   * have now received. For each, delete the local original file + its
+   * photo_queue row, then confirm via PUT /phone-deleted so it stops being
+   * returned. The backend Photo stays "available" (tablets keep showing it).
+   *
+   * This is SEPARATE from syncDeletions (which handles full removal after a
+   * send or a post-event purge). They operate on disjoint photo sets.
+   */
+  async syncPhoneCleanup(): Promise<number> {
+    const db = getDatabaseSafe();
+    if (!db) return 0;
+    if (Platform.OS === 'web') return 0;
+
+    const deviceType = useDeviceStore.getState().deviceType;
+    if (deviceType !== 'phone') return 0; // Only the capturing phone cleans up.
+
+    const teamId = useDeviceStore.getState().teamId;
+    const eventId = useDeviceStore.getState().currentEventId;
+    const deviceId = useDeviceStore.getState().deviceId;
+    if (!teamId || !eventId || !deviceId) return 0;
+
+    if (!useSyncStore.getState().isOnline) return 0;
+
+    let removed = 0;
+
+    try {
+      const response = await fetch(
+        `${this.baseUrl}/api/photos/phone-cleanup/${teamId}/${eventId}?deviceId=${encodeURIComponent(
+          deviceId
+        )}`
+      );
+      if (!response.ok) {
+        throw new Error(`Server error: ${response.status}`);
+      }
+
+      const result = (await response.json()) as {
+        data: { deletable: Array<{ id: string; localId: string; storageKey: string | null }> };
+      };
+      const deletable = result.data?.deletable ?? [];
+      if (deletable.length === 0) return 0;
+
+      const localIds = deletable.map((d) => d.localId);
+      const queued = await db.getPhotoQueueByLocalIds(localIds);
+      const queuedByLocalId = new Map(queued.map((q) => [q.localId, q]));
+
+      for (const entry of deletable) {
+        try {
+          // Delete the phone's local original file (best-effort).
+          const row = queuedByLocalId.get(entry.localId);
+          if (row) {
+            await this.deleteLocalFile(row.localPath);
+            await db.deletePhotoQueueByLocalIds([entry.localId]);
+          }
+
+          // Confirm so the backend stops returning it (phoneOriginalDeleted=true).
+          await fetch(`${this.baseUrl}/api/photos/${entry.id}/phone-deleted`, {
+            method: 'PUT',
+          });
+
+          removed++;
+        } catch (entryError) {
+          console.error(
+            `[SyncService] Phone-cleanup failed for ${entry.localId}:`,
+            entryError
+          );
+        }
+      }
+
+      if (removed > 0) {
+        console.log(`[SyncService] Phone-cleanup dropped ${removed} local originals`);
+        await this.updatePendingCounts();
+      }
+    } catch (error) {
+      console.error('[SyncService] Phone-cleanup error:', error);
+    }
+
+    return removed;
   }
 
   /**

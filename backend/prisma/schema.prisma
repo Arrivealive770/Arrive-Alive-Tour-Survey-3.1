@@ -100,6 +100,7 @@ model Device {
   team            Team             @relation(fields: [teamId], references: [id], onDelete: Cascade)
   surveyResponses SurveyResponse[]
   syncLogs        SyncLog[]
+  photoReceipts   PhotoReceipt[]
 
   @@index([teamId])
   @@index([deviceType])
@@ -239,18 +240,45 @@ model Photo {
   usedAt             DateTime? // Retained for backwards compat (set when sent)
   sentAt             DateTime? // When the finished photo was successfully delivered
   deletedAt          DateTime? // When the photo was marked deleted
+  // Phone-side original cleanup: set once the CAPTURING PHONE has confirmed it
+  // removed its local copy of the original. Does NOT affect `status` (the photo
+  // stays "available" for the tablets). Prevents re-returning it in the
+  // phone-cleanup list.
+  captureDeviceId      String?  // Phone device that captured this photo
+  phoneOriginalDeleted Boolean  @default(false)
   createdAt          DateTime  @default(now())
   syncedAt           DateTime?
 
   // Relations
-  team    Team     @relation(fields: [teamId], references: [id], onDelete: Cascade)
-  event   Event    @relation(fields: [eventId], references: [id], onDelete: Cascade)
-  pledges Pledge[]
+  team     Team           @relation(fields: [teamId], references: [id], onDelete: Cascade)
+  event    Event          @relation(fields: [eventId], references: [id], onDelete: Cascade)
+  pledges  Pledge[]
+  receipts PhotoReceipt[]
 
   @@index([localId])
   @@index([teamId])
   @@index([eventId])
   @@index([status])
+  @@index([captureDeviceId])
+}
+
+// Per-photo, per-tablet receipt. One row = one tablet device confirmed it has
+// cached the photo's file locally. Used to decide when it is safe to tell the
+// capturing phone to delete its local original (only after ALL active tablets
+// have a receipt).
+model PhotoReceipt {
+  id         String   @id @default(cuid())
+  photoId    String
+  deviceId   String   // Tablet device that received the photo
+  receivedAt DateTime @default(now())
+
+  // Relations
+  photo  Photo  @relation(fields: [photoId], references: [id], onDelete: Cascade)
+  device Device @relation(fields: [deviceId], references: [id], onDelete: Cascade)
+
+  @@unique([photoId, deviceId]) // Idempotent acknowledgement
+  @@index([photoId])
+  @@index([deviceId])
 }
 
 model EmailQueue {

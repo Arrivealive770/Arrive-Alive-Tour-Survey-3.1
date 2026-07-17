@@ -56,9 +56,48 @@ export interface Photo {
   usedAt: string | null;
   sentAt: string | null;
   deletedAt: string | null;
+  /** Phone device that captured this photo. */
+  captureDeviceId: string | null;
+  /** Set once the capturing phone confirmed it removed its local original. */
+  phoneOriginalDeleted: boolean;
   createdAt: string;
   syncedAt: string | null;
 }
+
+// ==========================================
+// Phone-side original cleanup (delete after received by all tablets)
+// ==========================================
+
+/** PUT /api/photos/:id/received — a tablet acknowledges it cached the file. */
+export interface PhotoReceivedRequest {
+  deviceId: string;
+}
+
+/** PUT /api/photos/:id/received response value. */
+export interface PhotoReceivedResponse {
+  photoId: string;
+  deviceId: string;
+  /** How many active tablets have acknowledged so far. */
+  receivedByCount: number;
+  /** Number of active tablets on the team. */
+  activeTabletCount: number;
+  /** True once every active tablet has acknowledged. */
+  receivedByAllTablets: boolean;
+}
+
+/** A phone's captured original that is now safe to delete locally. */
+export interface DeletablePhoneOriginal {
+  id: string;
+  localId: string;
+  storageKey: string | null;
+}
+
+/** GET /api/photos/phone-cleanup/:teamId/:eventId?deviceId=... response value. */
+export interface PhoneCleanupResponse {
+  deletable: DeletablePhoneOriginal[];
+}
+
+// PUT /api/photos/:id/phone-deleted takes no body; returns the updated Photo.
 
 // ==========================================
 // Photo transition endpoint request bodies

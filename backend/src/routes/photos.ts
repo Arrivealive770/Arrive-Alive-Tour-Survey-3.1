@@ -7,7 +7,7 @@ import { existsSync } from "fs";
 import { join } from "path";
 import { randomUUID } from "crypto";
 import sharp from "sharp";
-import type { PhotoStatus } from "../types";
+import { getDeletablePhoneOriginals } from "../lib/photo-cleanup";
 
 const photosRouter = new Hono();
 
@@ -73,8 +73,9 @@ photosRouter.post("/upload", async (c) => {
     const eventId = formData.get("eventId") as string | null;
     const overlayType = formData.get("overlayType") as string | null;
     const localId = formData.get("localId") as string | null;
+    const deviceId = formData.get("deviceId") as string | null; // capturing phone
 
-    console.log("[PhotoUpload] Received upload request:", { teamId, eventId, overlayType, localId, hasFile: !!fileData });
+    console.log("[PhotoUpload] Received upload request:", { teamId, eventId, overlayType, localId, deviceId, hasFile: !!fileData });
 
     if (!fileData) {
       return c.json({ error: { message: "File is required", code: "FILE_REQUIRED" } }, 400);
@@ -215,6 +216,7 @@ photosRouter.post("/upload", async (c) => {
         storageUrl: `/uploads/${filename}`,
         overlayType,
         status: "available",
+        ...(deviceId && { captureDeviceId: deviceId }),
         syncedAt: new Date(),
       },
       include: {
@@ -492,6 +494,32 @@ photosRouter.get("/deleted/:teamId/:eventId", async (c) => {
   return c.json({ data: { deleted } });
 });
 
+// GET /api/photos/phone-cleanup/:teamId/:eventId?deviceId=<phoneDeviceId>
+// Phone-facing: which of THIS phone's captured originals it can safely delete
+// locally now (received by ALL active tablets, not yet cleaned up). Deleting the
+// phone's local file does NOT change Photo.status — it stays "available".
+// IMPORTANT: must be defined BEFORE the /:id route.
+photosRouter.get("/phone-cleanup/:teamId/:eventId", async (c) => {
+  const teamId = c.req.param("teamId");
+  const eventId = c.req.param("eventId");
+  const deviceId = c.req.query("deviceId");
+
+  if (!deviceId) {
+    return c.json(
+      { error: { message: "deviceId query param is required", code: "DEVICE_ID_REQUIRED" } },
+      400
+    );
+  }
+
+  const deletable = await getDeletablePhoneOriginals({
+    teamId,
+    eventId,
+    phoneDeviceId: deviceId,
+  });
+
+  return c.json({ data: { deletable } });
+});
+
 // GET /api/photos/:id - Get single photo (must be after specific routes)
 photosRouter.get("/:id", async (c) => {
   const id = c.req.param("id");
@@ -519,10 +547,84 @@ photosRouter.get("/:id", async (c) => {
 });
 
 // ==========================================
-// Photo status state machine transitions
+// Tablet receipt acknowledgement (phone-cleanup safety)
 // ==========================================
 
 const CONFLICT = 409 as const;
+
+// PUT /api/photos/:id/received { deviceId } - a tablet confirms it has cached
+// this photo's file locally. Idempotent (unique [photoId, deviceId]). This is
+// the reliable signal that gates phone-side original cleanup.
+const receivedSchema = z.object({
+  deviceId: z.string().min(1, "deviceId is required"),
+});
+
+photosRouter.put("/:id/received", zValidator("json", receivedSchema), async (c) => {
+  const id = c.req.param("id");
+  const { deviceId } = c.req.valid("json");
+
+  const photo = await prisma.photo.findUnique({ where: { id } });
+  if (!photo) {
+    return c.json({ error: { message: "Photo not found", code: "NOT_FOUND" } }, 404);
+  }
+
+  const device = await prisma.device.findUnique({ where: { id: deviceId } });
+  if (!device) {
+    return c.json({ error: { message: "Device not found", code: "DEVICE_NOT_FOUND" } }, 404);
+  }
+
+  // Idempotent upsert of the receipt.
+  await prisma.photoReceipt.upsert({
+    where: { photoId_deviceId: { photoId: id, deviceId } },
+    create: { photoId: id, deviceId },
+    update: {},
+  });
+
+  // Report how many active tablets still need to acknowledge.
+  const activeTablets = await prisma.device.count({
+    where: { teamId: photo.teamId, deviceType: "tablet", isActive: true },
+  });
+  const receiptsFromActiveTablets = await prisma.photoReceipt.count({
+    where: {
+      photoId: id,
+      device: { teamId: photo.teamId, deviceType: "tablet", isActive: true },
+    },
+  });
+
+  return c.json({
+    data: {
+      photoId: id,
+      deviceId,
+      receivedByCount: receiptsFromActiveTablets,
+      activeTabletCount: activeTablets,
+      receivedByAllTablets:
+        activeTablets > 0 && receiptsFromActiveTablets >= activeTablets,
+    },
+  });
+});
+
+// PUT /api/photos/:id/phone-deleted - the capturing phone confirms it removed
+// its local original. Sets phoneOriginalDeleted so the photo stops appearing in
+// the phone-cleanup list. Does NOT change Photo.status (stays "available").
+photosRouter.put("/:id/phone-deleted", async (c) => {
+  const id = c.req.param("id");
+
+  const existing = await prisma.photo.findUnique({ where: { id } });
+  if (!existing) {
+    return c.json({ error: { message: "Photo not found", code: "NOT_FOUND" } }, 404);
+  }
+
+  const photo = await prisma.photo.update({
+    where: { id },
+    data: { phoneOriginalDeleted: true },
+  });
+
+  return c.json({ data: photo });
+});
+
+// ==========================================
+// Photo status state machine transitions
+// ==========================================
 
 // PUT /api/photos/:id/select { deviceId } : available -> selected
 // Atomic lock: only succeeds if the photo is currently "available", so two

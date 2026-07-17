@@ -6,6 +6,7 @@ import NetInfo from '@react-native-community/netinfo';
 import { PhotoQueueItemCard, QRCodeDisplay } from '@/components/photo-hub';
 import { useDatabase } from '@/providers/DatabaseProvider';
 import { useSyncStore } from '@/lib/state/sync-store';
+import { useDeviceStore } from '@/lib/state/device-store';
 import { deletePhoto, clearStoredPhotos } from '@/lib/overlays/overlay-service';
 import type { PhotoQueueItem } from '@/lib/db/schema';
 
@@ -13,6 +14,7 @@ export default function PhotoQueueScreen() {
   const { db, isReady } = useDatabase();
   const setOnlineStatus = useSyncStore((s) => s.setOnlineStatus);
   const isOnline = useSyncStore((s) => s.isOnline);
+  const deviceId = useDeviceStore((s) => s.deviceId);
 
   const [photos, setPhotos] = useState<PhotoQueueItem[]>([]);
   const [loading, setLoading] = useState(true);
@@ -107,6 +109,10 @@ export default function PhotoQueueScreen() {
           formData.append('teamId', photo.teamId);
           formData.append('eventId', photo.eventId);
           formData.append('overlayType', photo.overlayType);
+          // Capturing phone id — gates phone-side original cleanup.
+          if (deviceId) {
+            formData.append('deviceId', deviceId);
+          }
 
           // Upload to backend
           const response = await fetch(`${baseUrl}/api/photos/upload`, {
@@ -134,7 +140,7 @@ export default function PhotoQueueScreen() {
     } finally {
       setUploading(false);
     }
-  }, [db, isOnline, uploading, photos, loadPhotos]);
+  }, [db, isOnline, uploading, photos, loadPhotos, deviceId]);
 
   const handleClearQueue = useCallback(() => {
     Alert.alert(

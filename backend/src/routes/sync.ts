@@ -3,6 +3,7 @@ import { zValidator } from "@hono/zod-validator";
 import { z } from "zod";
 import { prisma } from "../prisma";
 import { queuePledgeEmail } from "../lib/email-queue-processor";
+import { getDeletablePhoneOriginals } from "../lib/photo-cleanup";
 
 const syncRouter = new Hono();
 
@@ -292,6 +293,7 @@ syncRouter.post(
             storageKey: photo.storageKey,
             storageUrl: photo.storageUrl,
             status: "available",
+            captureDeviceId: deviceId, // phone that captured/synced this photo
             createdAt: photo.createdAt ? new Date(photo.createdAt) : new Date(),
             syncedAt: new Date(),
           },
@@ -421,6 +423,18 @@ syncRouter.post(
         })
       : [];
 
+    // Phone-side cleanup: for a phone device, which of ITS captured originals
+    // are now safe to delete locally (received by ALL active tablets). Empty for
+    // tablets / when there is no active event.
+    const phoneCleanup =
+      activeEvent && device.deviceType === "phone"
+        ? await getDeletablePhoneOriginals({
+            teamId: device.teamId,
+            eventId: activeEvent.id,
+            phoneDeviceId: device.id,
+          })
+        : [];
+
     // Get recent sync logs
     const recentLogs = await prisma.syncLog.findMany({
       where: { deviceId: data.deviceId },
@@ -463,6 +477,7 @@ syncRouter.post(
           photosToDownload: pendingPhotosCount,
         },
         deletedPhotos,
+        phoneCleanup,
         recentLogs,
       },
     });
