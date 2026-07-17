@@ -14,11 +14,23 @@ interface PledgeState {
   surveyLocalId: string | null;
   selectedPhotoLocalId: string | null;
   email: string | null;
+
+  // Backend photo state machine (server-side Photo record)
+  selectedPhotoId: string | null; // Photo.id (server id, used for transitions)
+  selectedPhotoOriginalUrl: string | null; // Photo.storageUrl (original)
+  finishedPhotoUrl: string | null; // composited/overlaid url
 }
 
 interface PledgeActions {
   startPledge: (surveyLocalId: string) => void;
   setPhoto: (photoLocalId: string | null) => void;
+  setBackendPhoto: (params: {
+    photoId: string;
+    photoLocalId: string;
+    originalUrl: string | null;
+  }) => void;
+  setFinishedPhotoUrl: (url: string | null) => void;
+  clearBackendPhoto: () => void;
   setEmail: (email: string | null) => void;
   completePledge: () => PledgeData;
   reset: () => void;
@@ -28,6 +40,9 @@ const initialState: PledgeState = {
   surveyLocalId: null,
   selectedPhotoLocalId: null,
   email: null,
+  selectedPhotoId: null,
+  selectedPhotoOriginalUrl: null,
+  finishedPhotoUrl: null,
 };
 
 export const usePledgeStore = create<PledgeState & PledgeActions>()((set, get) => ({
@@ -38,11 +53,36 @@ export const usePledgeStore = create<PledgeState & PledgeActions>()((set, get) =
       surveyLocalId,
       selectedPhotoLocalId: null,
       email: null,
+      selectedPhotoId: null,
+      selectedPhotoOriginalUrl: null,
+      finishedPhotoUrl: null,
     });
   },
 
   setPhoto: (photoLocalId) => {
     set({ selectedPhotoLocalId: photoLocalId });
+  },
+
+  setBackendPhoto: ({ photoId, photoLocalId, originalUrl }) => {
+    set({
+      selectedPhotoId: photoId,
+      selectedPhotoLocalId: photoLocalId,
+      selectedPhotoOriginalUrl: originalUrl,
+      finishedPhotoUrl: null,
+    });
+  },
+
+  setFinishedPhotoUrl: (url) => {
+    set({ finishedPhotoUrl: url });
+  },
+
+  clearBackendPhoto: () => {
+    set({
+      selectedPhotoId: null,
+      selectedPhotoLocalId: null,
+      selectedPhotoOriginalUrl: null,
+      finishedPhotoUrl: null,
+    });
   },
 
   setEmail: (email) => {

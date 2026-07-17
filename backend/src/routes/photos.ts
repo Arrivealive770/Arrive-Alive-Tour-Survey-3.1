@@ -7,8 +7,25 @@ import { existsSync } from "fs";
 import { join } from "path";
 import { randomUUID } from "crypto";
 import sharp from "sharp";
+import type { PhotoStatus } from "../types";
 
 const photosRouter = new Hono();
+
+// Delete a previously-uploaded finished photo from storage.vibecodeapp.com.
+// Best-effort: logs but never throws so purge/delete flows always complete.
+const deleteFromRemoteStorage = async (fileUrl: string): Promise<void> => {
+  try {
+    // storage.vibecodeapp.com URLs look like https://storage.vibecodeapp.com/.../<fileId>/<filename>
+    const match = fileUrl.match(/storage\.vibecodeapp\.com\/.*?\/([^/]+)\/[^/]+$/);
+    const fileId = match?.[1];
+    if (!fileId) return;
+    await fetch(`https://storage.vibecodeapp.com/v1/files/${fileId}`, {
+      method: "DELETE",
+    });
+  } catch (error) {
+    console.error("[Photos] Failed to delete remote file:", fileUrl, error);
+  }
+};
 
 // Ensure uploads directory exists
 const UPLOADS_DIR = join(process.cwd(), "uploads");
@@ -197,7 +214,7 @@ photosRouter.post("/upload", async (c) => {
         storageKey: filename,
         storageUrl: `/uploads/${filename}`,
         overlayType,
-        status: "uploaded",
+        status: "available",
         syncedAt: new Date(),
       },
       include: {
@@ -227,21 +244,56 @@ photosRouter.post("/upload", async (c) => {
   }
 });
 
-// POST /api/photos/composite - Composite a photo with an overlay
-const compositeSchema = z.object({
-  photoUrl: z.string().url("Photo URL must be a valid URL"),
-  overlayId: z.string().min(1, "Overlay ID is required"),
-});
+// POST /api/photos/composite - Composite a photo with an overlay.
+// Provide either an explicit overlayId, or an eventId (the event's assigned
+// overlay is used). The overlay is resized to COVER the full photo dimensions
+// regardless of the photo's orientation/aspect ratio.
+const compositeSchema = z
+  .object({
+    photoUrl: z.string().url("Photo URL must be a valid URL"),
+    overlayId: z.string().min(1).optional(),
+    eventId: z.string().min(1).optional(),
+  })
+  .refine((d) => d.overlayId || d.eventId, {
+    message: "Either overlayId or eventId is required",
+  });
 
 photosRouter.post(
   "/composite",
   zValidator("json", compositeSchema),
   async (c) => {
-    const { photoUrl, overlayId } = c.req.valid("json");
+    const { photoUrl, overlayId, eventId } = c.req.valid("json");
+
+    // Resolve the overlay id: explicit overlayId wins, else the event's overlay.
+    let resolvedOverlayId = overlayId;
+    if (!resolvedOverlayId && eventId) {
+      const event = await prisma.event.findUnique({
+        where: { id: eventId },
+        select: { overlayId: true },
+      });
+      if (!event) {
+        return c.json(
+          { error: { message: "Event not found", code: "EVENT_NOT_FOUND" } },
+          404
+        );
+      }
+      if (!event.overlayId) {
+        return c.json(
+          {
+            error: {
+              message: "Event has no overlay assigned",
+              code: "EVENT_OVERLAY_NOT_SET",
+            },
+          },
+          400
+        );
+      }
+      resolvedOverlayId = event.overlayId;
+    }
 
     // Fetch the overlay from database
     const overlay = await prisma.overlay.findUnique({
-      where: { id: overlayId },
+      where: { id: resolvedOverlayId! },
     });
 
     if (!overlay) {
@@ -367,7 +419,11 @@ photosRouter.post(
   }
 );
 
-// DELETE /api/photos/purge/:eventId - Purge all photos for event
+// DELETE /api/photos/purge/:eventId - Post-event bulk delete.
+// Marks ALL not-yet-deleted photos for the event as "deleted" so the deletion
+// propagates to the phone + both tablets (via GET /api/photos/deleted/... and
+// the sync/status poll), and cleans up remote storage where applicable.
+// Returns the count of photos purged.
 photosRouter.delete("/purge/:eventId", async (c) => {
   const eventId = c.req.param("eventId");
 
@@ -380,34 +436,60 @@ photosRouter.delete("/purge/:eventId", async (c) => {
     return c.json({ error: { message: "Event not found", code: "NOT_FOUND" } }, 404);
   }
 
-  // Get all photos for the event
+  // Get all photos for the event that are not already deleted.
   const photos = await prisma.photo.findMany({
-    where: { eventId },
+    where: { eventId, status: { not: "deleted" } },
   });
 
-  // Delete files from disk
+  // Clean up local files on disk and remote (finished) files in storage.
   for (const photo of photos) {
     if (photo.storageKey) {
       const filePath = join(UPLOADS_DIR, photo.storageKey);
       try {
         await unlink(filePath);
-      } catch (error) {
+      } catch {
         // File might not exist, continue
       }
     }
+    if (photo.finishedPhotoUrl) {
+      await deleteFromRemoteStorage(photo.finishedPhotoUrl);
+    }
   }
 
-  // Update photos to purged status
+  // Mark photos deleted (keep storageKey so devices can locate local copies to
+  // remove). deletedAt drives the deletion-propagation list.
+  const now = new Date();
   const result = await prisma.photo.updateMany({
-    where: { eventId },
+    where: { eventId, status: { not: "deleted" } },
     data: {
-      status: "purged",
-      storageKey: null,
-      storageUrl: null,
+      status: "deleted",
+      deletedAt: now,
     },
   });
 
   return c.json({ data: { purgedCount: result.count } });
+});
+
+// GET /api/photos/deleted/:teamId/:eventId - Deletion-propagation list.
+// Returns photos marked "deleted" so each device (phone + both tablets) can
+// remove its local file. Includes id, localId and storageKey to locate copies.
+photosRouter.get("/deleted/:teamId/:eventId", async (c) => {
+  const teamId = c.req.param("teamId");
+  const eventId = c.req.param("eventId");
+
+  const deleted = await prisma.photo.findMany({
+    where: { teamId, eventId, status: "deleted" },
+    select: {
+      id: true,
+      localId: true,
+      storageKey: true,
+      status: true,
+      deletedAt: true,
+    },
+    orderBy: { deletedAt: "desc" },
+  });
+
+  return c.json({ data: { deleted } });
 });
 
 // GET /api/photos/:id - Get single photo (must be after specific routes)
@@ -436,46 +518,248 @@ photosRouter.get("/:id", async (c) => {
   return c.json({ data: photo });
 });
 
-// PUT /api/photos/:id/claim - Mark photo as claimed
-photosRouter.put("/:id/claim", async (c) => {
-  const id = c.req.param("id");
+// ==========================================
+// Photo status state machine transitions
+// ==========================================
 
-  const existingPhoto = await prisma.photo.findUnique({
-    where: { id },
+const CONFLICT = 409 as const;
+
+// PUT /api/photos/:id/select { deviceId } : available -> selected
+// Atomic lock: only succeeds if the photo is currently "available", so two
+// participants on the two tablets can never pick the same photo.
+const selectSchema = z.object({
+  deviceId: z.string().min(1, "deviceId is required"),
+});
+
+photosRouter.put("/:id/select", zValidator("json", selectSchema), async (c) => {
+  const id = c.req.param("id");
+  const { deviceId } = c.req.valid("json");
+
+  const existing = await prisma.photo.findUnique({ where: { id } });
+  if (!existing) {
+    return c.json({ error: { message: "Photo not found", code: "NOT_FOUND" } }, 404);
+  }
+
+  // Conditional update prevents a race across the two tablets.
+  const result = await prisma.photo.updateMany({
+    where: { id, status: "available" },
+    data: { status: "selected", selectedByDeviceId: deviceId },
   });
 
-  if (!existingPhoto) {
+  if (result.count === 0) {
+    return c.json(
+      {
+        error: {
+          message: "Photo is no longer available (already selected)",
+          code: "PHOTO_NOT_AVAILABLE",
+        },
+      },
+      CONFLICT
+    );
+  }
+
+  const photo = await prisma.photo.findUnique({ where: { id } });
+  return c.json({ data: photo });
+});
+
+// PUT /api/photos/:id/release : selected|processing -> available
+// Failure-retry / back-out path. A failed send MUST return the photo here.
+photosRouter.put("/:id/release", async (c) => {
+  const id = c.req.param("id");
+
+  const existing = await prisma.photo.findUnique({ where: { id } });
+  if (!existing) {
     return c.json({ error: { message: "Photo not found", code: "NOT_FOUND" } }, 404);
+  }
+
+  if (existing.status !== "selected" && existing.status !== "processing") {
+    return c.json(
+      {
+        error: {
+          message: `Cannot release a photo in status "${existing.status}"`,
+          code: "INVALID_TRANSITION",
+        },
+      },
+      CONFLICT
+    );
+  }
+
+  const photo = await prisma.photo.update({
+    where: { id },
+    data: { status: "available", selectedByDeviceId: null },
+  });
+
+  return c.json({ data: photo });
+});
+
+// PUT /api/photos/:id/process { finishedPhotoUrl? } : selected -> processing
+const processSchema = z.object({
+  finishedPhotoUrl: z.string().url().optional(),
+});
+
+photosRouter.put("/:id/process", zValidator("json", processSchema), async (c) => {
+  const id = c.req.param("id");
+  const { finishedPhotoUrl } = c.req.valid("json");
+
+  const existing = await prisma.photo.findUnique({ where: { id } });
+  if (!existing) {
+    return c.json({ error: { message: "Photo not found", code: "NOT_FOUND" } }, 404);
+  }
+
+  if (existing.status !== "selected") {
+    return c.json(
+      {
+        error: {
+          message: `Cannot process a photo in status "${existing.status}" (must be "selected")`,
+          code: "INVALID_TRANSITION",
+        },
+      },
+      CONFLICT
+    );
   }
 
   const photo = await prisma.photo.update({
     where: { id },
     data: {
-      status: "used",
-      usedAt: new Date(),
+      status: "processing",
+      ...(finishedPhotoUrl && { finishedPhotoUrl }),
     },
   });
 
   return c.json({ data: photo });
 });
 
-// PUT /api/photos/:id/use - Mark photo as used
-photosRouter.put("/:id/use", async (c) => {
-  const id = c.req.param("id");
+// PUT /api/photos/:id/sent { finishedPhotoUrl } : processing -> sent
+// Deletion is a SEPARATE explicit step (/delete) done only after this succeeds.
+const sentSchema = z.object({
+  finishedPhotoUrl: z.string().url("finishedPhotoUrl is required"),
+});
 
-  const existingPhoto = await prisma.photo.findUnique({
+photosRouter.put("/:id/sent", zValidator("json", sentSchema), async (c) => {
+  const id = c.req.param("id");
+  const { finishedPhotoUrl } = c.req.valid("json");
+
+  const existing = await prisma.photo.findUnique({ where: { id } });
+  if (!existing) {
+    return c.json({ error: { message: "Photo not found", code: "NOT_FOUND" } }, 404);
+  }
+
+  if (existing.status !== "processing") {
+    return c.json(
+      {
+        error: {
+          message: `Cannot mark sent a photo in status "${existing.status}" (must be "processing")`,
+          code: "INVALID_TRANSITION",
+        },
+      },
+      CONFLICT
+    );
+  }
+
+  const now = new Date();
+  const photo = await prisma.photo.update({
     where: { id },
+    data: {
+      status: "sent",
+      finishedPhotoUrl,
+      sentAt: now,
+      usedAt: now,
+    },
   });
 
-  if (!existingPhoto) {
+  return c.json({ data: photo });
+});
+
+// PUT /api/photos/:id/delete : any -> deleted
+// Explicit deletion. Appears in the deletion-propagation list so devices remove
+// their local copies. Cleans up remote finished file best-effort.
+photosRouter.put("/:id/delete", async (c) => {
+  const id = c.req.param("id");
+
+  const existing = await prisma.photo.findUnique({ where: { id } });
+  if (!existing) {
     return c.json({ error: { message: "Photo not found", code: "NOT_FOUND" } }, 404);
+  }
+
+  if (existing.finishedPhotoUrl) {
+    await deleteFromRemoteStorage(existing.finishedPhotoUrl);
+  }
+  if (existing.storageKey) {
+    try {
+      await unlink(join(UPLOADS_DIR, existing.storageKey));
+    } catch {
+      // ignore
+    }
   }
 
   const photo = await prisma.photo.update({
     where: { id },
+    data: { status: "deleted", deletedAt: new Date() },
+  });
+
+  return c.json({ data: photo });
+});
+
+// ==========================================
+// Backwards-compat aliases (legacy claim/use).
+// These now map onto the new state machine so old clients keep working:
+//   /claim -> select (locks the photo). Requires deviceId; falls back to a
+//             synthetic id if none supplied so legacy callers don't break.
+//   /use   -> best-effort advance to "sent" (available->selected->processing->sent).
+// ==========================================
+
+photosRouter.put("/:id/claim", async (c) => {
+  const id = c.req.param("id");
+
+  let deviceId = "legacy";
+  try {
+    const body = (await c.req.json()) as { deviceId?: string };
+    if (body?.deviceId) deviceId = body.deviceId;
+  } catch {
+    // no body
+  }
+
+  const existing = await prisma.photo.findUnique({ where: { id } });
+  if (!existing) {
+    return c.json({ error: { message: "Photo not found", code: "NOT_FOUND" } }, 404);
+  }
+
+  const result = await prisma.photo.updateMany({
+    where: { id, status: "available" },
+    data: { status: "selected", selectedByDeviceId: deviceId },
+  });
+
+  if (result.count === 0) {
+    return c.json(
+      {
+        error: {
+          message: "Photo is no longer available (already selected)",
+          code: "PHOTO_NOT_AVAILABLE",
+        },
+      },
+      CONFLICT
+    );
+  }
+
+  const photo = await prisma.photo.findUnique({ where: { id } });
+  return c.json({ data: photo });
+});
+
+photosRouter.put("/:id/use", async (c) => {
+  const id = c.req.param("id");
+
+  const existing = await prisma.photo.findUnique({ where: { id } });
+  if (!existing) {
+    return c.json({ error: { message: "Photo not found", code: "NOT_FOUND" } }, 404);
+  }
+
+  const now = new Date();
+  const photo = await prisma.photo.update({
+    where: { id },
     data: {
-      status: "used",
-      usedAt: new Date(),
+      status: "sent",
+      sentAt: now,
+      usedAt: now,
     },
   });
 

@@ -5,7 +5,28 @@ interface ApiResponse<T> {
   data: T;
 }
 
+// Error envelope: { error: { message, code } }
+interface ApiErrorBody {
+  error?: { message?: string; code?: string };
+}
+
 const baseUrl = process.env.EXPO_PUBLIC_BACKEND_URL!;
+
+/**
+ * Error thrown for non-2xx responses. Exposes the backend `code`
+ * (e.g. "PHOTO_NOT_AVAILABLE") and HTTP `status` so callers can branch.
+ */
+export class ApiError extends Error {
+  status: number;
+  code: string | null;
+
+  constructor(message: string, status: number, code: string | null) {
+    super(message);
+    this.name = "ApiError";
+    this.status = status;
+    this.code = code;
+  }
+}
 
 const request = async <T>(
   url: string,
@@ -21,14 +42,32 @@ const request = async <T>(
     return undefined as T;
   }
 
-  // 2. JSON responses: parse and unwrap { data }
   const contentType = response.headers.get("content-type");
-  if (contentType?.includes("application/json")) {
+  const isJson = contentType?.includes("application/json") ?? false;
+
+  // 2. Non-OK: surface a typed ApiError with the backend error code.
+  if (!response.ok) {
+    let code: string | null = null;
+    let message = `Request failed: ${response.status}`;
+    if (isJson) {
+      try {
+        const body = (await response.json()) as ApiErrorBody;
+        code = body.error?.code ?? null;
+        message = body.error?.message ?? message;
+      } catch {
+        // ignore parse errors, keep default message
+      }
+    }
+    throw new ApiError(message, response.status, code);
+  }
+
+  // 3. JSON responses: parse and unwrap { data }
+  if (isJson) {
     const json: ApiResponse<T> = await response.json();
     return json.data;
   }
 
-  // 3. Non-JSON: return undefined
+  // 4. Non-JSON: return undefined
   return undefined as T;
 };
 

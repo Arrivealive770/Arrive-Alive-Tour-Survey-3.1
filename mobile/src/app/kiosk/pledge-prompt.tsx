@@ -124,10 +124,10 @@ export default function PledgePromptScreen() {
   }, [startPledge, router, picturePledgeEnabled]);
 
   const handleDecline = useCallback(() => {
-    // Reset and go back to survey type selection for next participant
-    reset();
-    router.replace('/kiosk' as any);
-  }, [reset, router]);
+    // Survey is already recorded. Go to the completion screen, which still
+    // surfaces a persistent "Take the Pledge" button so they can opt in later.
+    router.replace('/kiosk/pledge/thank-you?declined=1' as any);
+  }, [router]);
 
   // Handle idle reset
   const handleIdleReset = useCallback(() => {

@@ -24,6 +24,9 @@ export class DatabaseService {
       // SQL comments) in a single call, so we pass the whole schema at once.
       await this.db.execAsync(CREATE_TABLES_SQL);
 
+      // Lightweight migrations for existing databases (safe to run repeatedly).
+      await this.runMigrations();
+
       console.log('[DatabaseService] Database initialized successfully');
     } catch (error) {
       console.error('[DatabaseService] Failed to initialize database:', error);
@@ -36,6 +39,26 @@ export class DatabaseService {
       throw new Error('Database not initialized. Call initialize() first.');
     }
     return this.db;
+  }
+
+  /**
+   * Add columns to existing databases that predate them.
+   * SQLite lacks "ADD COLUMN IF NOT EXISTS", so we swallow the
+   * "duplicate column" error that occurs when already migrated.
+   */
+  private async runMigrations(): Promise<void> {
+    const db = this.getDb();
+    const alters = [
+      `ALTER TABLE pledge_queue ADD COLUMN photoId TEXT`,
+      `ALTER TABLE pledge_queue ADD COLUMN compositedPhotoUrl TEXT`,
+    ];
+    for (const sql of alters) {
+      try {
+        await db.execAsync(sql);
+      } catch {
+        // Column already exists — ignore.
+      }
+    }
   }
 
   // ==================== Device Config ====================
@@ -181,8 +204,8 @@ export class DatabaseService {
   async queuePledge(pledge: Omit<PledgeQueueItem, 'syncStatus' | 'syncAttempts' | 'lastSyncError'>): Promise<void> {
     const db = this.getDb();
     await db.runAsync(
-      `INSERT INTO pledge_queue (localId, surveyLocalId, teamId, eventId, email, photoLocalId, createdAt, syncStatus, syncAttempts)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      `INSERT INTO pledge_queue (localId, surveyLocalId, teamId, eventId, email, photoLocalId, photoId, compositedPhotoUrl, createdAt, syncStatus, syncAttempts)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
       [
         pledge.localId,
         pledge.surveyLocalId,
@@ -190,6 +213,8 @@ export class DatabaseService {
         pledge.eventId,
         pledge.email,
         pledge.photoLocalId,
+        pledge.photoId ?? null,
+        pledge.compositedPhotoUrl ?? null,
         pledge.createdAt,
         SYNC_STATUS.PENDING,
         0,
@@ -319,6 +344,56 @@ export class DatabaseService {
     await db.runAsync(
       'DELETE FROM photo_cache WHERE teamId = ? AND eventId = ?',
       [teamId, eventId]
+    );
+  }
+
+  /**
+   * Look up cached photos (tablet) by their server localIds so their
+   * local files can be removed during deletion propagation.
+   */
+  async getPhotoCacheByLocalIds(localIds: string[]): Promise<PhotoCacheItem[]> {
+    if (localIds.length === 0) return [];
+    const db = this.getDb();
+    const placeholders = localIds.map(() => '?').join(',');
+    return await db.getAllAsync<PhotoCacheItem>(
+      `SELECT * FROM photo_cache WHERE localId IN (${placeholders})`,
+      localIds
+    );
+  }
+
+  /** Remove cached photo rows (tablet) matching the given localIds. */
+  async deletePhotoCacheByLocalIds(localIds: string[]): Promise<void> {
+    if (localIds.length === 0) return;
+    const db = this.getDb();
+    const placeholders = localIds.map(() => '?').join(',');
+    await db.runAsync(
+      `DELETE FROM photo_cache WHERE localId IN (${placeholders})`,
+      localIds
+    );
+  }
+
+  /**
+   * Look up queued phone photos by localId so their local files can be
+   * removed during deletion propagation.
+   */
+  async getPhotoQueueByLocalIds(localIds: string[]): Promise<PhotoQueueItem[]> {
+    if (localIds.length === 0) return [];
+    const db = this.getDb();
+    const placeholders = localIds.map(() => '?').join(',');
+    return await db.getAllAsync<PhotoQueueItem>(
+      `SELECT * FROM photo_queue WHERE localId IN (${placeholders})`,
+      localIds
+    );
+  }
+
+  /** Remove queued phone photo rows matching the given localIds. */
+  async deletePhotoQueueByLocalIds(localIds: string[]): Promise<void> {
+    if (localIds.length === 0) return;
+    const db = this.getDb();
+    const placeholders = localIds.map(() => '?').join(',');
+    await db.runAsync(
+      `DELETE FROM photo_queue WHERE localId IN (${placeholders})`,
+      localIds
     );
   }
 

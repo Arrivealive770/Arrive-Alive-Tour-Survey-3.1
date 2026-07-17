@@ -54,6 +54,8 @@ export interface Event {
   eventDate: string;
   surveyTypes: SurveyTypeSlug[];
   overlayType: string; // Now an overlay ID
+  overlayId?: string | null; // Assigned custom overlay id
+  overlay?: Overlay | null; // Assigned overlay relation (when included)
   picturePledgeEnabled?: boolean;
   status: 'active' | 'completed';
   createdAt: string;
@@ -78,14 +80,83 @@ export interface Overlay {
   createdAt: string;
 }
 
-// Photo composite endpoint
+// ==========================================
+// Photo status state machine (backend contract)
+// ==========================================
+
+export type PhotoStatus =
+  | 'available'
+  | 'selected'
+  | 'processing'
+  | 'sent'
+  | 'deleted';
+
+/** Full Photo record as returned by the API. Dates are ISO strings. */
+export interface Photo {
+  id: string;
+  localId: string;
+  teamId: string;
+  eventId: string;
+  storageKey: string | null;
+  /** URL of the ORIGINAL (raw, no-overlay) photo. */
+  storageUrl: string | null;
+  overlayType: string;
+  status: PhotoStatus;
+  selectedByDeviceId: string | null;
+  /** URL of the composited/overlaid finished photo. */
+  finishedPhotoUrl: string | null;
+  usedAt: string | null;
+  sentAt: string | null;
+  deletedAt: string | null;
+  createdAt: string;
+  syncedAt: string | null;
+}
+
+/** GET /api/sync/photos/:teamId/:eventId returns a subset of Photo fields. */
+export interface AvailablePhoto {
+  id: string;
+  localId: string;
+  storageKey: string | null;
+  storageUrl: string | null;
+  overlayType: string;
+  status: PhotoStatus;
+  createdAt: string;
+}
+
+/** An entry telling a device which local file to remove. */
+export interface DeletedPhotoEntry {
+  id: string;
+  localId: string;
+  storageKey: string | null;
+  status: PhotoStatus; // "deleted"
+  deletedAt: string | null;
+}
+
+export interface DeletedPhotosResponse {
+  deleted: DeletedPhotoEntry[];
+}
+
+// Photo composite endpoint (POST /api/photos/composite)
 export interface CompositePhotoRequest {
+  /** URL of the original photo to composite the overlay onto. */
   photoUrl: string;
-  overlayId: string;
+  /** Overlay id (optional if eventId supplied). */
+  overlayId?: string;
+  /** Event id — resolves the event's assigned overlay if overlayId omitted. */
+  eventId?: string;
 }
 
 export interface CompositePhotoResponse {
-  url: string;
+  compositedUrl: string;
+  fileId: string;
+  originalPhotoUrl: string;
+  overlayId: string;
+  overlayName: string;
+}
+
+/** DELETE /api/photos/purge/:eventId response value. */
+export interface PurgePhotosResponse {
+  purgedCount: number;
 }
 
 // US States for dropdown

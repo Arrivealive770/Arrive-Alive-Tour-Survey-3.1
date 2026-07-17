@@ -113,13 +113,15 @@ model Event {
   venueState           String
   eventDate            DateTime
   surveyTypes          String   // JSON string array of survey type slugs enabled for this event
-  overlayType          String   // Photo overlay type for this event
+  overlayType          String   // Legacy: photo overlay type slug for this event
+  overlayId            String?  // Custom uploaded overlay assigned to this event
   picturePledgeEnabled Boolean  @default(false) // Whether picture pledge feature is enabled
   status               String   @default("active") // "active" | "completed"
   createdAt            DateTime @default(now())
 
   // Relations
   team                  Team                   @relation(fields: [teamId], references: [id], onDelete: Cascade)
+  overlay               Overlay?               @relation(fields: [overlayId], references: [id], onDelete: SetNull)
   surveyResponses       SurveyResponse[]
   pledges               Pledge[]
   photos                Photo[]
@@ -223,12 +225,22 @@ model Photo {
   teamId      String
   eventId     String
   storageKey  String?   // Key in storage system (e.g., S3 key)
-  storageUrl  String?   // Full URL to access the photo
+  storageUrl  String?   // Full URL to access the ORIGINAL (raw, no-overlay) photo
   overlayType String    // Type of overlay applied
-  status      String    @default("pending") // "pending" | "uploaded" | "used" | "purged"
-  usedAt      DateTime?
-  createdAt   DateTime  @default(now())
-  syncedAt    DateTime?
+  // Photo status state machine (single source of truth):
+  // "available"  — uploaded/synced from phone, selectable by participants
+  // "selected"   — a participant has picked it (locked so no one else can)
+  // "processing" — overlay is being applied / finished photo is being sent
+  // "sent"       — finished (overlaid) photo successfully delivered
+  // "deleted"    — cleaned up; should be removed from phone + both tablets
+  status             String    @default("available")
+  selectedByDeviceId String?   // Device (tablet) that selected/locked this photo
+  finishedPhotoUrl   String?   // The composited/overlaid finished result
+  usedAt             DateTime? // Retained for backwards compat (set when sent)
+  sentAt             DateTime? // When the finished photo was successfully delivered
+  deletedAt          DateTime? // When the photo was marked deleted
+  createdAt          DateTime  @default(now())
+  syncedAt           DateTime?
 
   // Relations
   team    Team     @relation(fields: [teamId], references: [id], onDelete: Cascade)
@@ -297,6 +309,9 @@ model Overlay {
   isActive    Boolean  @default(true)
   createdAt   DateTime @default(now())
   updatedAt   DateTime @updatedAt
+
+  // Relations
+  events Event[]
 
   @@index([isActive])
 }

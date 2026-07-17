@@ -21,12 +21,16 @@ import { DEFAULT_RETRY_CONFIG } from './sync-types';
 
 const BATCH_SIZE = 50;
 const PHOTO_BATCH_SIZE = 10;
+// How often to poll the backend for photos that were deleted elsewhere so we
+// can remove the matching local files from this phone / tablet.
+const DELETION_POLL_INTERVAL_MS = 20000;
 
 class SyncService {
   private syncInProgress = false;
   private retryTimeouts: Map<string, ReturnType<typeof setTimeout>> = new Map();
   private netInfoUnsubscribe: (() => void) | null = null;
   private appStateSubscription: { remove: () => void } | null = null;
+  private deletionPollTimer: ReturnType<typeof setInterval> | null = null;
   private isInitialized = false;
   private baseUrl: string;
 
@@ -68,6 +72,10 @@ class SyncService {
     if (isDatabaseInitialized()) {
       this.updatePendingCounts();
     }
+
+    // Start polling for remote deletions so finished/purged photos are cleaned
+    // off this device (phone photo_queue + tablet photo_cache).
+    this.startDeletionPolling();
 
     this.isInitialized = true;
     console.log('[SyncService] Initialized successfully');
@@ -158,11 +166,12 @@ class SyncService {
     console.log('[SyncService] Starting sync...');
 
     try {
-      // Sync surveys, pledges, and photos
+      // Sync surveys, pledges, and photos; also propagate remote deletions.
       const [surveyResult, pledgeResult, photoResult] = await Promise.all([
         this.syncSurveys(),
         this.syncPledges(),
         this.syncPhotos(),
+        this.syncDeletions(),
       ]);
 
       // Update sync timestamp
@@ -353,6 +362,8 @@ class SyncService {
             eventId: p.eventId,
             email: p.email,
             photoLocalId: p.photoLocalId,
+            photoId: p.photoId,
+            compositedPhotoUrl: p.compositedPhotoUrl,
             createdAt: p.createdAt,
           })),
           deviceId,
@@ -627,6 +638,110 @@ class SyncService {
   }
 
   /**
+   * Start the periodic deletion poll. When a photo is finished (sent -> deleted)
+   * or an event is purged, the backend marks photos "deleted". Every device
+   * polls for those and removes the matching local files + rows so they never
+   * render again on the phone or either tablet.
+   */
+  private startDeletionPolling(): void {
+    if (this.deletionPollTimer) return;
+
+    // Run once immediately, then on an interval.
+    this.syncDeletions().catch((e) =>
+      console.error('[SyncService] Initial deletion poll failed:', e)
+    );
+
+    this.deletionPollTimer = setInterval(() => {
+      this.syncDeletions().catch((e) =>
+        console.error('[SyncService] Deletion poll failed:', e)
+      );
+    }, DELETION_POLL_INTERVAL_MS);
+  }
+
+  /**
+   * Poll the backend for photos deleted elsewhere and remove their local
+   * copies from this device. Matches by localId (and storageKey for logging).
+   */
+  async syncDeletions(): Promise<number> {
+    const db = getDatabaseSafe();
+    if (!db) return 0;
+
+    const teamId = useDeviceStore.getState().teamId;
+    const eventId = useDeviceStore.getState().currentEventId;
+    if (!teamId || !eventId) return 0;
+
+    const isOnline = useSyncStore.getState().isOnline;
+    if (!isOnline) return 0;
+
+    let removed = 0;
+
+    try {
+      const response = await fetch(
+        `${this.baseUrl}/api/photos/deleted/${teamId}/${eventId}`
+      );
+      if (!response.ok) {
+        throw new Error(`Server error: ${response.status}`);
+      }
+
+      const result = (await response.json()) as {
+        data: { deleted: Array<{ localId: string; storageKey: string | null }> };
+      };
+      const deleted = result.data?.deleted ?? [];
+      if (deleted.length === 0) return 0;
+
+      const localIds = deleted.map((d) => d.localId);
+
+      // 1. Remove tablet photo_cache files + rows.
+      const cached = await db.getPhotoCacheByLocalIds(localIds);
+      for (const item of cached) {
+        await this.deleteLocalFile(item.localPath);
+      }
+      if (cached.length > 0) {
+        await db.deletePhotoCacheByLocalIds(cached.map((c) => c.localId));
+        // Remove from in-memory tablet cache so they stop rendering.
+        const removedIds = new Set(cached.map((c) => c.localId));
+        const remaining = usePhotoCacheStore
+          .getState()
+          .cachedPhotos.filter((p) => !removedIds.has(p.localId));
+        usePhotoCacheStore.getState().setCachedPhotos(remaining);
+        removed += cached.length;
+      }
+
+      // 2. Remove phone photo_queue files + rows.
+      const queued = await db.getPhotoQueueByLocalIds(localIds);
+      for (const item of queued) {
+        await this.deleteLocalFile(item.localPath);
+      }
+      if (queued.length > 0) {
+        await db.deletePhotoQueueByLocalIds(queued.map((q) => q.localId));
+        removed += queued.length;
+      }
+
+      if (removed > 0) {
+        console.log(`[SyncService] Deletion poll removed ${removed} local photos`);
+        await this.updatePendingCounts();
+      }
+    } catch (error) {
+      console.error('[SyncService] Deletion sync error:', error);
+    }
+
+    return removed;
+  }
+
+  /** Best-effort delete of a local file (no-op on web / missing file). */
+  private async deleteLocalFile(path: string | null | undefined): Promise<void> {
+    if (!path || Platform.OS === 'web') return;
+    try {
+      const info = await FileSystem.getInfoAsync(path);
+      if (info.exists) {
+        await FileSystem.deleteAsync(path, { idempotent: true });
+      }
+    } catch (error) {
+      console.error('[SyncService] Failed to delete local file:', path, error);
+    }
+  }
+
+  /**
    * Schedule a retry for failed sync operations
    */
   scheduleRetry(type: SyncItemType, delayMs: number): void {
@@ -731,6 +846,12 @@ class SyncService {
 
     // Cancel all retries
     this.cancelAllRetries();
+
+    // Stop deletion polling
+    if (this.deletionPollTimer) {
+      clearInterval(this.deletionPollTimer);
+      this.deletionPollTimer = null;
+    }
 
     // Unsubscribe from network info
     if (this.netInfoUnsubscribe) {

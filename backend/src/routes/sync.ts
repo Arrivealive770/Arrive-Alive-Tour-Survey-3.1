@@ -291,7 +291,7 @@ syncRouter.post(
             overlayType: photo.overlayType,
             storageKey: photo.storageKey,
             storageUrl: photo.storageUrl,
-            status: photo.storageUrl ? "uploaded" : "pending",
+            status: "available",
             createdAt: photo.createdAt ? new Date(photo.createdAt) : new Date(),
             syncedAt: new Date(),
           },
@@ -328,7 +328,10 @@ syncRouter.post(
   }
 );
 
-// GET /api/sync/photos/:teamId/:eventId - Get photo list for tablet to download
+// GET /api/sync/photos/:teamId/:eventId - Participant selection grid for BOTH
+// tablets. Photos belong to team+event (not a single tablet), so both tablets
+// polling this see the same set. Returns ONLY status="available" so selected/
+// processing/sent/deleted photos never appear in the grid.
 syncRouter.get("/photos/:teamId/:eventId", async (c) => {
   const teamId = c.req.param("teamId");
   const eventId = c.req.param("eventId");
@@ -337,7 +340,7 @@ syncRouter.get("/photos/:teamId/:eventId", async (c) => {
     where: {
       teamId,
       eventId,
-      status: { in: ["uploaded", "pending"] },
+      status: "available",
     },
     select: {
       id: true,
@@ -386,17 +389,37 @@ syncRouter.post(
       },
     });
 
-    // Count pending photos (for tablets to download from phones)
+    // Count available photos (selection grid) for tablets to download.
     const pendingPhotosCount = activeEvent
       ? await prisma.photo.count({
           where: {
             teamId: device.teamId,
             eventId: activeEvent.id,
-            status: "uploaded",
-            usedAt: null,
+            status: "available",
           },
         })
       : 0;
+
+    // Deletion propagation: photos marked "deleted" that this device (phone or
+    // either tablet) should remove locally. Includes localId + storageKey so a
+    // device can locate its local copy.
+    const deletedPhotos = activeEvent
+      ? await prisma.photo.findMany({
+          where: {
+            teamId: device.teamId,
+            eventId: activeEvent.id,
+            status: "deleted",
+          },
+          select: {
+            id: true,
+            localId: true,
+            storageKey: true,
+            status: true,
+            deletedAt: true,
+          },
+          orderBy: { deletedAt: "desc" },
+        })
+      : [];
 
     // Get recent sync logs
     const recentLogs = await prisma.syncLog.findMany({
@@ -439,6 +462,7 @@ syncRouter.post(
         pendingWork: {
           photosToDownload: pendingPhotosCount,
         },
+        deletedPhotos,
         recentLogs,
       },
     });

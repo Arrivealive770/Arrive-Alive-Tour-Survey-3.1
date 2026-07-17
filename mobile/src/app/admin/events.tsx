@@ -10,12 +10,20 @@ import {
   Alert,
   ActivityIndicator,
 } from 'react-native';
-import { Plus, X, MapPin, Check, Calendar } from 'lucide-react-native';
+import { Plus, X, MapPin, Check, Calendar, Image as ImageIcon, Trash2 } from 'lucide-react-native';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { EventCard } from '@/components/admin/EventCard';
 import { useDeviceStore } from '@/lib/state/device-store';
 import { api } from '@/lib/api/api';
-import { SURVEY_TYPES, US_STATES, type SurveyTypeSlug, type Event, type CreateEventRequest } from '@/lib/api/types';
+import {
+  SURVEY_TYPES,
+  US_STATES,
+  type SurveyTypeSlug,
+  type Event,
+  type CreateEventRequest,
+  type Overlay,
+  type PurgePhotosResponse,
+} from '@/lib/api/types';
 import { cn } from '@/lib/cn';
 
 interface EventWithCounts extends Event {
@@ -77,6 +85,63 @@ export default function EventsScreen() {
       Alert.alert('Error', error.message || 'Failed to end event');
     },
   });
+
+  // Fetch available overlays for per-event assignment
+  const { data: overlays } = useQuery({
+    queryKey: ['overlays'],
+    queryFn: () => api.get<Overlay[]>('/api/overlays'),
+  });
+
+  // Assign an overlay to the selected event
+  const assignOverlayMutation = useMutation({
+    mutationFn: async ({ eventId, overlayId }: { eventId: string; overlayId: string }) => {
+      return api.put<Event>(`/api/events/${eventId}`, { overlayId });
+    },
+    onSuccess: (updated) => {
+      queryClient.invalidateQueries({ queryKey: ['admin-events'] });
+      setSelectedEvent((prev) =>
+        prev && prev.id === updated.id
+          ? { ...prev, overlayId: updated.overlayId, overlay: updated.overlay }
+          : prev
+      );
+      Alert.alert('Overlay Assigned', 'This overlay will be applied to pledge photos for this event.');
+    },
+    onError: (error: Error) => {
+      Alert.alert('Error', error.message || 'Failed to assign overlay');
+    },
+  });
+
+  // Post-event photo purge (propagates deletion to phone + both tablets)
+  const purgePhotosMutation = useMutation({
+    mutationFn: async (eventId: string) => {
+      return api.delete<PurgePhotosResponse>(`/api/photos/purge/${eventId}`);
+    },
+    onSuccess: (result) => {
+      queryClient.invalidateQueries({ queryKey: ['admin-events'] });
+      Alert.alert(
+        'Photos Deleted',
+        `${result?.purgedCount ?? 0} photo${(result?.purgedCount ?? 0) === 1 ? '' : 's'} deleted. Devices will remove their local copies shortly.`
+      );
+    },
+    onError: (error: Error) => {
+      Alert.alert('Error', error.message || 'Failed to delete photos');
+    },
+  });
+
+  const handlePurgePhotos = (eventId: string) => {
+    Alert.alert(
+      'Delete All Photos',
+      'This permanently deletes ALL photos for this event from the cloud, and removes them from the phone and both tablets. This cannot be undone. Continue?',
+      [
+        { text: 'Cancel', style: 'cancel' },
+        {
+          text: 'Delete All',
+          style: 'destructive',
+          onPress: () => purgePhotosMutation.mutate(eventId),
+        },
+      ]
+    );
+  };
 
   const handleEventPress = (event: EventWithCounts) => {
     setSelectedEvent(event);
@@ -283,11 +348,65 @@ export default function EventsScreen() {
                   </View>
                 </View>
 
+                {/* Per-event Photo Overlay assignment */}
+                <View className="bg-zinc-800 rounded-xl p-4 mb-4">
+                  <View className="flex-row items-center mb-2">
+                    <ImageIcon size={16} color="#a78bfa" />
+                    <Text className="text-zinc-300 text-sm font-semibold ml-2">
+                      Pledge Photo Overlay
+                    </Text>
+                  </View>
+                  <Text className="text-zinc-500 text-xs mb-3">
+                    {selectedEvent.overlay?.name
+                      ? `Current: ${selectedEvent.overlay.name}`
+                      : 'No overlay assigned yet. Pick one to apply to pledge photos.'}
+                  </Text>
+                  {overlays && overlays.length > 0 ? (
+                    <View className="flex-row flex-wrap gap-2">
+                      {overlays.map((overlay) => {
+                        const isAssigned = selectedEvent.overlayId === overlay.id;
+                        return (
+                          <Pressable
+                            key={overlay.id}
+                            onPress={() =>
+                              assignOverlayMutation.mutate({
+                                eventId: selectedEvent.id,
+                                overlayId: overlay.id,
+                              })
+                            }
+                            disabled={assignOverlayMutation.isPending}
+                            className={cn(
+                              'flex-row items-center px-3 py-2 rounded-lg',
+                              isAssigned ? 'bg-purple-600' : 'bg-zinc-700'
+                            )}
+                          >
+                            {isAssigned ? (
+                              <Check size={14} color="#fff" style={{ marginRight: 4 }} />
+                            ) : null}
+                            <Text
+                              className={cn(
+                                'text-sm',
+                                isAssigned ? 'text-white' : 'text-zinc-300'
+                              )}
+                            >
+                              {overlay.name}
+                            </Text>
+                          </Pressable>
+                        );
+                      })}
+                    </View>
+                  ) : (
+                    <Text className="text-zinc-600 text-xs">
+                      No overlays available. Upload one first.
+                    </Text>
+                  )}
+                </View>
+
                 {selectedEvent.status === 'active' ? (
                   <Pressable
                     onPress={() => handleEndEvent(selectedEvent.id)}
                     disabled={endEventMutation.isPending}
-                    className="bg-red-600 py-4 rounded-xl items-center mb-6 active:bg-red-700"
+                    className="bg-red-600 py-4 rounded-xl items-center mb-4 active:bg-red-700"
                   >
                     {endEventMutation.isPending ? (
                       <ActivityIndicator color="#fff" />
@@ -296,10 +415,28 @@ export default function EventsScreen() {
                     )}
                   </Pressable>
                 ) : (
-                  <View className="bg-zinc-800 py-4 rounded-xl items-center mb-6">
+                  <View className="bg-zinc-800 py-4 rounded-xl items-center mb-4">
                     <Text className="text-zinc-500 font-semibold">Event Completed</Text>
                   </View>
                 )}
+
+                {/* Post-event: delete all photos everywhere */}
+                <Pressable
+                  onPress={() => handlePurgePhotos(selectedEvent.id)}
+                  disabled={purgePhotosMutation.isPending}
+                  className="flex-row items-center justify-center border border-red-600/60 py-4 rounded-xl mb-6 active:bg-red-950"
+                >
+                  {purgePhotosMutation.isPending ? (
+                    <ActivityIndicator color="#f87171" />
+                  ) : (
+                    <>
+                      <Trash2 size={18} color="#f87171" style={{ marginRight: 8 }} />
+                      <Text className="text-red-400 font-semibold">
+                        Delete all photos (post-event)
+                      </Text>
+                    </>
+                  )}
+                </Pressable>
               </ScrollView>
             ) : null}
           </View>

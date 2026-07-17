@@ -39,6 +39,8 @@ CREATE TABLE IF NOT EXISTS pledge_queue (
   eventId TEXT NOT NULL,
   email TEXT,
   photoLocalId TEXT,
+  photoId TEXT,
+  compositedPhotoUrl TEXT,
   createdAt TEXT NOT NULL,
   syncStatus TEXT DEFAULT 'pending',
   syncAttempts INTEGER DEFAULT 0,
@@ -116,6 +118,7 @@ export interface PledgeQueueItem {
   eventId: string;
   email: string | null;
   photoLocalId: string | null;
+  photoId: string | null;
   compositedPhotoUrl: string | null;
   createdAt: string;
   syncStatus: 'pending' | 'syncing' | 'synced' | 'failed';

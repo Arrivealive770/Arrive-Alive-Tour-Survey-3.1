@@ -1,4 +1,4 @@
-import { useState, useCallback, useMemo } from 'react';
+import { useState, useCallback } from 'react';
 import { View, Text, TextInput, Pressable, Keyboard, useWindowDimensions } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useRouter } from 'expo-router';
@@ -13,12 +13,11 @@ import { Mail, Send, SkipForward } from 'lucide-react-native';
 import { IdleResetTimer } from '@/components/kiosk';
 import { usePledgeStore } from '@/lib/state/pledge-store';
 import { useSurveyStore } from '@/lib/state/survey-store';
-import { usePhotoCacheStore } from '@/lib/state/photo-cache-store';
 import { useSyncStore } from '@/lib/state/sync-store';
 import { useDeviceStore } from '@/lib/state/device-store';
 import { useDatabase } from '@/providers/DatabaseProvider';
 import { api } from '@/lib/api/api';
-import type { CompositePhotoResponse } from '@/lib/api/types';
+import type { CompositePhotoResponse, Photo } from '@/lib/api/types';
 
 const AnimatedPressable = Animated.createAnimatedComponent(Pressable);
 
@@ -39,137 +38,175 @@ export default function EmailScreen() {
   const [email, setEmail] = useState('');
   const [isValid, setIsValid] = useState(false);
   const [isSubmitting, setIsSubmitting] = useState(false);
+  const [error, setError] = useState<string | null>(null);
 
   const setPledgeEmail = usePledgeStore((s) => s.setEmail);
   const completePledge = usePledgeStore((s) => s.completePledge);
   const resetPledge = usePledgeStore((s) => s.reset);
+  const selectedPhotoId = usePledgeStore((s) => s.selectedPhotoId);
   const selectedPhotoLocalId = usePledgeStore((s) => s.selectedPhotoLocalId);
+  const selectedPhotoOriginalUrl = usePledgeStore((s) => s.selectedPhotoOriginalUrl);
+  const finishedPhotoUrl = usePledgeStore((s) => s.finishedPhotoUrl);
   const resetSurvey = useSurveyStore((s) => s.reset);
 
-  const markPhotoUsed = usePhotoCacheStore((s) => s.markPhotoUsed);
-  const cachedPhotos = usePhotoCacheStore((s) => s.cachedPhotos);
   const updateCounts = useSyncStore((s) => s.updateCounts);
   const pendingPledges = useSyncStore((s) => s.pendingPledges);
   const teamId = useDeviceStore((s) => s.teamId);
   const currentEventId = useDeviceStore((s) => s.currentEventId);
-  const currentEventOverlayId = useDeviceStore((s) => s.currentEventOverlayId);
-  const picturePledgeEnabled = useDeviceStore((s) => s.picturePledgeEnabled);
-
-  // Get the selected photo's remote URL for compositing
-  const selectedPhotoUrl = useMemo(() => {
-    if (!selectedPhotoLocalId) return null;
-    const photo = cachedPhotos.find((p) => p.localId === selectedPhotoLocalId);
-    // The photo's localPath may be a local file or a remote URL
-    // For compositing, we need the remote URL
-    return photo?.localPath ?? null;
-  }, [selectedPhotoLocalId, cachedPhotos]);
 
   const handleEmailChange = useCallback((text: string) => {
     setEmail(text.toLowerCase());
     setIsValid(isValidEmail(text));
   }, []);
 
+  /**
+   * Persist the pledge locally (queued for sync) and update counts.
+   * Returns true on success.
+   */
+  const queuePledgeLocally = useCallback(
+    async (pledgeEmail: string | null, finishedUrl: string | null): Promise<boolean> => {
+      if (pledgeEmail) {
+        setPledgeEmail(pledgeEmail);
+      } else {
+        setPledgeEmail(null);
+      }
+      const pledgeData = completePledge();
+
+      if (db && teamId && currentEventId) {
+        await db.queuePledge({
+          localId: pledgeData.localId,
+          surveyLocalId: pledgeData.surveyLocalId,
+          teamId,
+          eventId: currentEventId,
+          email: pledgeEmail,
+          photoLocalId: selectedPhotoLocalId,
+          photoId: selectedPhotoId,
+          compositedPhotoUrl: finishedUrl,
+          createdAt: pledgeData.createdAt,
+        });
+        updateCounts({ pendingPledges: pendingPledges + 1 });
+        return true;
+      }
+      return false;
+    },
+    [
+      setPledgeEmail,
+      completePledge,
+      db,
+      teamId,
+      currentEventId,
+      selectedPhotoLocalId,
+      selectedPhotoId,
+      updateCounts,
+      pendingPledges,
+    ]
+  );
+
   const handleSubmitEmail = useCallback(async () => {
     if (!isValid || isSubmitting) return;
 
     setIsSubmitting(true);
+    setError(null);
     Keyboard.dismiss();
     Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
 
+    // No photo selected (skipped or no photos): just queue the email pledge.
+    if (!selectedPhotoId) {
+      try {
+        await queuePledgeLocally(email, null);
+        router.push('/kiosk/pledge/thank-you' as any);
+      } catch (e) {
+        console.error('[EmailScreen] Failed to save pledge:', e);
+        setError('Something went wrong. Please try again.');
+        setIsSubmitting(false);
+      }
+      return;
+    }
+
+    // Photo pledge send flow: process -> ensure finished url -> queue pledge -> sent -> delete.
     try {
-      let compositedPhotoUrl: string | null = null;
+      // 1. Move photo to processing.
+      await api.put<Photo>(`/api/photos/${selectedPhotoId}/process`, {
+        finishedPhotoUrl: finishedPhotoUrl ?? undefined,
+      });
 
-      // If picture pledge is enabled and we have a photo selected, composite it
-      if (picturePledgeEnabled && selectedPhotoUrl && currentEventOverlayId) {
-        try {
-          const compositeResult = await api.post<CompositePhotoResponse>(
-            '/api/photos/composite',
-            {
-              photoUrl: selectedPhotoUrl,
-              overlayId: currentEventOverlayId,
-            }
-          );
-          compositedPhotoUrl = compositeResult?.url ?? null;
-        } catch (compositeError) {
-          console.error('[EmailScreen] Failed to composite photo:', compositeError);
-          // Continue without composited photo - the pledge can still be saved
-        }
+      // 2. Ensure we have a finished (composited) url. Retry composite if missing.
+      let finishedUrl = finishedPhotoUrl;
+      if (!finishedUrl && selectedPhotoOriginalUrl) {
+        const composite = await api.post<CompositePhotoResponse>(
+          '/api/photos/composite',
+          { photoUrl: selectedPhotoOriginalUrl, eventId: currentEventId }
+        );
+        finishedUrl = composite?.compositedUrl ?? null;
+      }
+      if (!finishedUrl) {
+        throw new Error('Finished photo unavailable');
       }
 
-      setPledgeEmail(email);
-      const pledgeData = completePledge();
+      // 3. Create the pledge (queued -> sync sends the email with the finished photo).
+      await queuePledgeLocally(email, finishedUrl);
 
-      // Save to database
-      if (db && teamId && currentEventId) {
-        await db.queuePledge({
-          localId: pledgeData.localId,
-          surveyLocalId: pledgeData.surveyLocalId,
-          teamId,
-          eventId: currentEventId,
-          email: pledgeData.email,
-          photoLocalId: pledgeData.photoLocalId,
-          compositedPhotoUrl, // Include the composited photo URL
-          createdAt: pledgeData.createdAt,
-        });
-
-        // Mark photo as used if one was selected
-        if (selectedPhotoLocalId) {
-          await db.markPhotoUsed(selectedPhotoLocalId);
-          markPhotoUsed(selectedPhotoLocalId);
-        }
-
-        // Update pending counts
-        updateCounts({ pendingPledges: pendingPledges + 1 });
-      }
+      // 4. Mark the photo sent, then deleted (propagates cleanup to phone + tablets).
+      await api.put<Photo>(`/api/photos/${selectedPhotoId}/sent`, {
+        finishedPhotoUrl: finishedUrl,
+      });
+      await api.put<Photo>(`/api/photos/${selectedPhotoId}/delete`, {});
 
       router.push('/kiosk/pledge/thank-you' as any);
-    } catch (error) {
-      console.error('[EmailScreen] Error submitting pledge:', error);
+    } catch (e) {
+      console.error('[EmailScreen] Pledge send failed:', e);
+      // Release the photo back to available so it can be retried by someone.
+      try {
+        await api.put<Photo>(`/api/photos/${selectedPhotoId}/release`, {});
+      } catch (releaseError) {
+        console.error('[EmailScreen] Release failed:', releaseError);
+      }
+      setError('Could not send your pledge photo. Please try again.');
       setIsSubmitting(false);
     }
-  }, [isValid, isSubmitting, email, setPledgeEmail, completePledge, db, teamId, currentEventId, selectedPhotoLocalId, selectedPhotoUrl, currentEventOverlayId, picturePledgeEnabled, markPhotoUsed, updateCounts, pendingPledges, router]);
+  }, [
+    isValid,
+    isSubmitting,
+    email,
+    selectedPhotoId,
+    selectedPhotoOriginalUrl,
+    finishedPhotoUrl,
+    currentEventId,
+    queuePledgeLocally,
+    router,
+  ]);
 
   const handleSkipEmail = useCallback(async () => {
+    if (isSubmitting) return;
     setIsSubmitting(true);
+    setError(null);
     Keyboard.dismiss();
     Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
 
     try {
-      setPledgeEmail(null);
-      const pledgeData = completePledge();
-
-      // Save to database
-      if (db && teamId && currentEventId) {
-        await db.queuePledge({
-          localId: pledgeData.localId,
-          surveyLocalId: pledgeData.surveyLocalId,
-          teamId,
-          eventId: currentEventId,
-          email: null,
-          photoLocalId: pledgeData.photoLocalId,
-          compositedPhotoUrl: null, // No compositing when skipping email
-          createdAt: pledgeData.createdAt,
-        });
-
-        // Mark photo as used if one was selected
-        if (selectedPhotoLocalId) {
-          await db.markPhotoUsed(selectedPhotoLocalId);
-          markPhotoUsed(selectedPhotoLocalId);
+      // Skipping email: no photo is delivered. Release any selected photo.
+      if (selectedPhotoId) {
+        try {
+          await api.put<Photo>(`/api/photos/${selectedPhotoId}/release`, {});
+        } catch (releaseError) {
+          console.error('[EmailScreen] Release failed:', releaseError);
         }
-
-        // Update pending counts
-        updateCounts({ pendingPledges: pendingPledges + 1 });
       }
-
+      await queuePledgeLocally(null, null);
+      usePledgeStore.getState().clearBackendPhoto();
       router.push('/kiosk/pledge/thank-you' as any);
-    } catch (error) {
-      console.error('[EmailScreen] Error skipping pledge:', error);
+    } catch (e) {
+      console.error('[EmailScreen] Skip pledge failed:', e);
+      setError('Something went wrong. Please try again.');
       setIsSubmitting(false);
     }
-  }, [setPledgeEmail, completePledge, db, teamId, currentEventId, selectedPhotoLocalId, markPhotoUsed, updateCounts, pendingPledges, router]);
+  }, [isSubmitting, selectedPhotoId, queuePledgeLocally, router]);
 
-  // Handle idle reset
   const handleIdleReset = useCallback(() => {
+    const currentPhotoId = usePledgeStore.getState().selectedPhotoId;
+    if (currentPhotoId) {
+      api.put<Photo>(`/api/photos/${currentPhotoId}/release`, {}).catch(() => {});
+    }
     resetPledge();
     resetSurvey();
     router.replace('/kiosk');
@@ -217,7 +254,9 @@ export default function EmailScreen() {
                   maxWidth: 400,
                 }}
               >
-                We'll send your pledge photo to this email
+                {selectedPhotoId
+                  ? "We'll send your pledge photo to this email"
+                  : "We'll send your pledge confirmation to this email"}
               </Text>
             </Animated.View>
 
@@ -245,6 +284,7 @@ export default function EmailScreen() {
                   autoCapitalize="none"
                   autoCorrect={false}
                   autoComplete="email"
+                  editable={!isSubmitting}
                   style={{
                     color: '#ffffff',
                     fontSize: isTablet ? 20 : 18,
@@ -254,14 +294,16 @@ export default function EmailScreen() {
               </View>
               {email && !isValid ? (
                 <Text
-                  style={{
-                    color: '#ef4444',
-                    fontSize: 14,
-                    marginTop: 8,
-                    marginLeft: 4,
-                  }}
+                  style={{ color: '#ef4444', fontSize: 14, marginTop: 8, marginLeft: 4 }}
                 >
                   Please enter a valid email address
+                </Text>
+              ) : null}
+              {error ? (
+                <Text
+                  style={{ color: '#ef4444', fontSize: 14, marginTop: 8, marginLeft: 4 }}
+                >
+                  {error}
                 </Text>
               ) : null}
             </Animated.View>
@@ -272,7 +314,7 @@ export default function EmailScreen() {
               style={{ gap: 12 }}
             >
               <ActionButton
-                label="Send My Pledge"
+                label={isSubmitting ? 'Sending...' : 'Send My Pledge'}
                 icon={<Send size={24} color={isValid && !isSubmitting ? '#000000' : '#52525b'} />}
                 variant="primary"
                 onPress={handleSubmitEmail}

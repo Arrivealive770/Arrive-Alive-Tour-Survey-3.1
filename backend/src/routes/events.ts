@@ -47,6 +47,7 @@ eventsRouter.get("/:id", async (c) => {
     where: { id },
     include: {
       team: true,
+      overlay: true,
       _count: {
         select: {
           surveyResponses: true,
@@ -104,6 +105,7 @@ const createEventSchema = z.object({
   eventDate: z.string().transform((str) => new Date(str)),
   surveyTypes: z.array(z.string()).min(1, "At least one survey type is required"),
   overlayType: z.string().min(1, "Overlay type is required"),
+  overlayId: z.string().min(1).optional(),
   picturePledgeEnabled: z.boolean().optional().default(false),
 });
 
@@ -131,6 +133,7 @@ eventsRouter.post(
         eventDate: data.eventDate,
         surveyTypes: JSON.stringify(data.surveyTypes),
         overlayType: data.overlayType,
+        ...(data.overlayId && { overlayId: data.overlayId }),
         picturePledgeEnabled: data.picturePledgeEnabled,
         status: "active",
       },
@@ -153,6 +156,7 @@ const updateEventSchema = z.object({
   eventDate: z.string().transform((str) => new Date(str)).optional(),
   surveyTypes: z.array(z.string()).optional(),
   overlayType: z.string().min(1).optional(),
+  overlayId: z.string().min(1).nullable().optional(),
   picturePledgeEnabled: z.boolean().optional(),
   status: z.enum(["active", "completed"]).optional(),
 });
@@ -172,6 +176,16 @@ eventsRouter.put(
       return c.json({ error: { message: "Event not found", code: "NOT_FOUND" } }, 404);
     }
 
+    // If assigning an overlay, verify it exists.
+    if (data.overlayId) {
+      const overlay = await prisma.overlay.findUnique({
+        where: { id: data.overlayId },
+      });
+      if (!overlay) {
+        return c.json({ error: { message: "Overlay not found", code: "OVERLAY_NOT_FOUND" } }, 404);
+      }
+    }
+
     const event = await prisma.event.update({
       where: { id },
       data: {
@@ -181,6 +195,8 @@ eventsRouter.put(
         ...(data.eventDate && { eventDate: data.eventDate }),
         ...(data.surveyTypes && { surveyTypes: JSON.stringify(data.surveyTypes) }),
         ...(data.overlayType && { overlayType: data.overlayType }),
+        // overlayId may be set to a string (assign) or null (clear).
+        ...(data.overlayId !== undefined && { overlayId: data.overlayId }),
         ...(data.picturePledgeEnabled !== undefined && { picturePledgeEnabled: data.picturePledgeEnabled }),
         ...(data.status && { status: data.status }),
       },
@@ -188,12 +204,102 @@ eventsRouter.put(
         team: {
           select: { id: true, name: true, code: true },
         },
+        overlay: true,
       },
     });
 
     return c.json({ data: event });
   }
 );
+
+// POST /api/events/:id/overlay - Upload a custom overlay image and assign it to
+// the event in one step (multipart/form-data: file, name?).
+eventsRouter.post("/:id/overlay", async (c) => {
+  const id = c.req.param("id");
+
+  const existingEvent = await prisma.event.findUnique({ where: { id } });
+  if (!existingEvent) {
+    return c.json({ error: { message: "Event not found", code: "NOT_FOUND" } }, 404);
+  }
+
+  const formData = await c.req.formData();
+  const file = formData.get("file") as File | null;
+  const nameRaw = formData.get("name") as string | null;
+
+  if (!file) {
+    return c.json({ error: { message: "File is required", code: "FILE_REQUIRED" } }, 400);
+  }
+
+  const validImageTypes = ["image/png", "image/jpeg", "image/jpg", "image/gif", "image/webp"];
+  if (!validImageTypes.includes(file.type)) {
+    return c.json(
+      {
+        error: {
+          message: "Invalid file type. Only PNG, JPG, GIF, and WebP images are allowed.",
+          code: "INVALID_FILE_TYPE",
+        },
+      },
+      400
+    );
+  }
+
+  try {
+    const uploadFormData = new FormData();
+    uploadFormData.append("file", file);
+
+    const uploadResponse = await fetch("https://storage.vibecodeapp.com/v1/files/upload", {
+      method: "POST",
+      body: uploadFormData,
+    });
+
+    if (!uploadResponse.ok) {
+      console.error("Storage upload failed:", await uploadResponse.text());
+      return c.json(
+        { error: { message: "Failed to upload file to storage", code: "STORAGE_UPLOAD_FAILED" } },
+        500
+      );
+    }
+
+    const uploadResult = (await uploadResponse.json()) as {
+      file: {
+        id: string;
+        originalFilename: string;
+        contentType: string;
+        sizeBytes: number;
+        url: string;
+      };
+    };
+
+    const overlay = await prisma.overlay.create({
+      data: {
+        name: nameRaw?.trim() || `${existingEvent.venueName} overlay`,
+        fileId: uploadResult.file.id,
+        url: uploadResult.file.url,
+        filename: uploadResult.file.originalFilename,
+        contentType: uploadResult.file.contentType,
+        sizeBytes: uploadResult.file.sizeBytes,
+        isActive: true,
+      },
+    });
+
+    const event = await prisma.event.update({
+      where: { id },
+      data: { overlayId: overlay.id },
+      include: {
+        team: { select: { id: true, name: true, code: true } },
+        overlay: true,
+      },
+    });
+
+    return c.json({ data: { event, overlay } }, 201);
+  } catch (error) {
+    console.error("Error uploading event overlay:", error);
+    return c.json(
+      { error: { message: "Internal server error during upload", code: "INTERNAL_ERROR" } },
+      500
+    );
+  }
+});
 
 // PUT /api/events/:id/complete - Mark event completed
 eventsRouter.put("/:id/complete", async (c) => {

@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useState } from 'react';
 import { View, Text, Pressable, useWindowDimensions } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
-import { useRouter } from 'expo-router';
+import { useRouter, useLocalSearchParams } from 'expo-router';
 import Animated, {
   useSharedValue,
   useAnimatedStyle,
@@ -12,11 +12,14 @@ import Animated, {
   FadeInUp,
 } from 'react-native-reanimated';
 import * as Haptics from 'expo-haptics';
-import { Check, Facebook, Twitter } from 'lucide-react-native';
+import { Check, Facebook, Twitter, Camera } from 'lucide-react-native';
 import { usePledgeStore } from '@/lib/state/pledge-store';
 import { useSurveyStore } from '@/lib/state/survey-store';
+import { useDeviceStore } from '@/lib/state/device-store';
 
 const COUNTDOWN_SECONDS = 10;
+// Give participants longer to opt into the pledge after declining.
+const DECLINED_COUNTDOWN_SECONDS = 30;
 
 const PLEDGE_TEXT =
   'Thank you for taking the pledge to drive S.A.F.E. — Sober And Free of Electronics.';
@@ -28,10 +31,17 @@ export default function ThankYouScreen() {
   const { width } = useWindowDimensions();
   const isTablet = width > 600;
 
-  const [countdown, setCountdown] = useState(COUNTDOWN_SECONDS);
+  const params = useLocalSearchParams<{ declined?: string }>();
+  const declined = params.declined === '1';
+
+  const [countdown, setCountdown] = useState(
+    declined ? DECLINED_COUNTDOWN_SECONDS : COUNTDOWN_SECONDS
+  );
 
   const resetPledge = usePledgeStore((s) => s.reset);
   const resetSurvey = useSurveyStore((s) => s.reset);
+  const startPledge = usePledgeStore((s) => s.startPledge);
+  const picturePledgeEnabled = useDeviceStore((s) => s.picturePledgeEnabled);
 
   // Animation values
   const checkScale = useSharedValue(0);
@@ -70,6 +80,17 @@ export default function ThankYouScreen() {
     resetSurvey();
     router.replace('/kiosk' as any);
   }, [resetPledge, resetSurvey, router]);
+
+  // Persistent opt-in: relaunch the SAME pledge photo process later.
+  const handleTakePledge = useCallback(() => {
+    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Heavy);
+    startPledge('');
+    if (picturePledgeEnabled) {
+      router.replace('/kiosk/pledge' as any);
+    } else {
+      router.replace('/kiosk/pledge/email' as any);
+    }
+  }, [startPledge, picturePledgeEnabled, router]);
 
   const checkAnimatedStyle = useAnimatedStyle(() => ({
     transform: [{ scale: checkScale.value }],
@@ -138,8 +159,36 @@ export default function ThankYouScreen() {
             maxWidth: 500,
           }}
         >
-          {PLEDGE_TEXT}
+          {declined
+            ? 'Your responses have been recorded. Would you still like to take the pledge?'
+            : PLEDGE_TEXT}
         </Animated.Text>
+
+        {/* Persistent "Take the Pledge" opt-in (shown when declined) */}
+        {declined ? (
+          <Animated.View
+            entering={FadeInUp.duration(500).delay(700)}
+            style={{ width: '100%', maxWidth: 500, marginBottom: 8 }}
+          >
+            <Pressable
+              onPress={handleTakePledge}
+              style={{
+                flexDirection: 'row',
+                alignItems: 'center',
+                justifyContent: 'center',
+                backgroundColor: '#22c55e',
+                borderRadius: 16,
+                paddingVertical: 18,
+                paddingHorizontal: 24,
+              }}
+            >
+              <Camera size={24} color="#000000" style={{ marginRight: 10 }} />
+              <Text style={{ color: '#000000', fontSize: 18, fontWeight: '700' }}>
+                Take the Pledge
+              </Text>
+            </Pressable>
+          </Animated.View>
+        ) : null}
 
         {/* Social Sharing Prompt */}
         <Animated.View
