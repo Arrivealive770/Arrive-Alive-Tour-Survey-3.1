@@ -20,15 +20,9 @@ export class DatabaseService {
     try {
       this.db = await SQLite.openDatabaseAsync(DATABASE_NAME);
 
-      // Execute all CREATE TABLE statements
-      const statements = CREATE_TABLES_SQL
-        .split(';')
-        .map(s => s.trim())
-        .filter(s => s.length > 0 && !s.startsWith('--'));
-
-      for (const statement of statements) {
-        await this.db.execAsync(statement + ';');
-      }
+      // Create all tables. execAsync runs multiple statements (and handles
+      // SQL comments) in a single call, so we pass the whole schema at once.
+      await this.db.execAsync(CREATE_TABLES_SQL);
 
       console.log('[DatabaseService] Database initialized successfully');
     } catch (error) {
