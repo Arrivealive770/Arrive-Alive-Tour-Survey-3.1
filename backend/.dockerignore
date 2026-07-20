@@ -1,0 +1,21 @@
+node_modules
+npm-debug.log
+
+# Local secrets — set these in the Railway dashboard instead
+.env
+.env.production
+.env.local
+
+# Local dev database — production uses the Railway volume
+dev.db
+dev.db-journal
+*.db
+*.db-journal
+
+# Local backups produced by scripts/start
+prod.db-*
+
+.git
+.gitignore
+Dockerfile
+.dockerignore
