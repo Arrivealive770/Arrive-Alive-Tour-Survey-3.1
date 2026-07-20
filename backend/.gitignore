@@ -36,3 +36,6 @@ studio.log
 
 # Prisma generated files (bunx prisma generate)
 /generated/prisma
+# Local secrets — never commit
+.env
+.env.production

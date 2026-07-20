@@ -42,3 +42,7 @@ yarn-error.*
 
 # Expo log
 expo.log
+
+# Local secrets — never commit
+.env
+.env.production
