@@ -38,9 +38,44 @@ foreach ($f in @($StartBat, $BackupTs)) {
   if (-not (Test-Path $f)) { Write-Host "ERROR: missing $f" -ForegroundColor Red; exit 1 }
 }
 
+# --- Notepad appends .txt unless "All Files" is chosen when saving, and
+# --- Windows hides known extensions, so backend\.env.txt looks exactly like
+# --- backend\.env in Explorer. "You haven't done step 4" is then maddening
+# --- to read when you know full well you have. Detect it and fix it.
 if (-not (Test-Path $EnvFile)) {
-  Write-Host "ERROR: backend\.env not found. Complete step 4 in desktop\README.md first." -ForegroundColor Red
-  exit 1
+  $BackendDir = Join-Path $RepoRoot "backend"
+  $Stray = @(Get-ChildItem $BackendDir -Force -Filter ".env.*" -ErrorAction SilentlyContinue |
+    Where-Object { $_.Name -match '^\.env\.(txt|rtf)$' })
+
+  if ($Stray.Count -eq 1) {
+    Write-Host ""
+    Write-Host "Found '$($Stray[0].Name)' instead of '.env'." -ForegroundColor Yellow
+    Write-Host "Notepad added the extension. Renaming it for you..." -ForegroundColor Yellow
+    Rename-Item -Path $Stray[0].FullName -NewName ".env"
+    Write-Host "  done" -ForegroundColor Green
+  } else {
+    Write-Host ""
+    Write-Host "ERROR: $EnvFile not found." -ForegroundColor Red
+    Write-Host ""
+    Write-Host "Files currently in backend\ that start with '.env':" -ForegroundColor Yellow
+    $found = @(Get-ChildItem $BackendDir -Force -Filter ".env*" -ErrorAction SilentlyContinue)
+    if ($found) { $found | ForEach-Object { Write-Host "  $($_.Name)" } }
+    else { Write-Host "  (none)" }
+    Write-Host ""
+    Write-Host "See step 4 in desktop\README.md. When saving in Notepad you must" -ForegroundColor Yellow
+    Write-Host "set 'Save as type' to 'All Files', or it becomes .env.txt." -ForegroundColor Yellow
+    exit 1
+  }
+}
+
+# --- An empty or placeholder .env passes the existence check above and then
+# --- fails much later with a confusing Zod validation error at startup.
+$EnvText = Get-Content $EnvFile -Raw -ErrorAction SilentlyContinue
+foreach ($required in @("DATABASE_URL", "BETTER_AUTH_SECRET")) {
+  if ($EnvText -notmatch "(?m)^\s*$required\s*=") {
+    Write-Host "ERROR: backend\.env is missing the $required line. See step 4." -ForegroundColor Red
+    exit 1
+  }
 }
 
 # --- OneDrive check. A SQLite database inside a synced folder gets copied

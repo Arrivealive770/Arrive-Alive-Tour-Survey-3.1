@@ -61,10 +61,32 @@ it for you. Otherwise skip this step.
 
 ## Step 4 — Create the settings file
 
-Create a file at `C:\ArriveAlive\backend\.env` containing these five lines.
+**Easiest way — paste this into PowerShell.** It writes the file correctly
+and asks for your Resend key:
 
-Use Notepad, and when saving choose **All Files** for the file type so it
-doesn't become `.env.txt`.
+```powershell
+$key = Read-Host "Paste your Resend API key (starts with re_)"
+@"
+DATABASE_URL="file:./prod.db"
+BETTER_AUTH_SECRET="5e3f5c20969ea59bd52195d9722fe5cf252c4d93d49c9694d7517904eadf2f9a"
+BACKEND_URL="http://localhost:3000"
+NODE_ENV="production"
+RESEND_API_KEY="$key"
+"@ | Set-Content -Path C:\ArriveAlive\backend\.env -Encoding ascii -NoNewline:$false
+Get-Content C:\ArriveAlive\backend\.env
+```
+
+It prints the file back so you can see it worked. Skip to step 5.
+
+---
+
+**Doing it by hand instead?** Create `C:\ArriveAlive\backend\.env` with these
+five lines.
+
+In Notepad, when saving, you **must** change **Save as type** to
+**All Files**. Otherwise Notepad silently saves `.env.txt`, and because
+Windows hides file extensions it still looks like `.env` in Explorer. That
+one catches nearly everybody.
 
 ```
 DATABASE_URL="file:./prod.db"
