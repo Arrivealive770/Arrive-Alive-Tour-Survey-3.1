@@ -219,6 +219,21 @@ key expiry to **never**, or they'll drop off in six months mid-tour.
 https://desktop.tailXXXX.ts.net/health
 ```
 
+**A6.** Put that address into `backend\.env`, replacing the `localhost` line:
+
+```
+BACKEND_URL="https://desktop.tailXXXX.ts.net"
+```
+
+Then restart:
+
+```powershell
+Stop-ScheduledTask  -TaskName ArriveAliveServer
+Start-ScheduledTask -TaskName ArriveAliveServer
+```
+
+**A7.** Tell me the address and I'll build the tablet app (step 7).
+
 ---
 
 ### Option B — Cloudflare Tunnel on a separate domain (~$11/year)

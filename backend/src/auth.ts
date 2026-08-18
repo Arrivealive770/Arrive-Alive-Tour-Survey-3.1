@@ -4,6 +4,7 @@ import { prismaAdapter } from "better-auth/adapters/prisma";
 import { emailOTP } from "better-auth/plugins";
 import { prisma } from "./prisma";
 import { env } from "./env";
+import { TAILSCALE_ORIGIN_PATTERN, localNetworkOrigins } from "./lib/origins";
 
 export const auth = betterAuth({
   database: prismaAdapter(prisma, { provider: "sqlite" }),
@@ -21,6 +22,12 @@ export const auth = betterAuth({
     "https://*.dev.vibecode.run",
     "https://*.vibecode.run",
     "https://*.vibecodeapp.com",
+
+    // Self-hosted desktop deployment. Without these, the admin site loads
+    // from another computer but signing in fails with no visible reason.
+    env.BACKEND_URL,
+    TAILSCALE_ORIGIN_PATTERN,
+    ...localNetworkOrigins(Number(process.env.PORT) || 3000),
   ],
   plugins: [
     expo(),

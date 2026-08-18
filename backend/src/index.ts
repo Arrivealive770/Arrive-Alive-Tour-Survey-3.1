@@ -2,8 +2,9 @@ import "@vibecodeapp/proxy"; // DO NOT REMOVE OTHERWISE VIBECODE PROXY WILL NOT 
 import { Hono } from "hono";
 import { cors } from "hono/cors";
 import { serveStatic } from "hono/bun";
-import "./env";
+import { env } from "./env";
 import { auth } from "./auth";
+import { TAILSCALE_ORIGIN_REGEX, localNetworkOrigins, localIPv4Addresses } from "./lib/origins";
 import { emailService } from "./lib/email-service";
 import { emailQueueProcessor } from "./lib/email-queue-processor";
 import { sampleRouter } from "./routes/sample";
@@ -38,12 +39,25 @@ const allowed = [
   /^https:\/\/[a-z0-9-]+\.dev\.vibecode\.run$/,
   /^https:\/\/[a-z0-9-]+\.vibecode\.run$/,
   /^https:\/\/[a-z0-9-]+\.vibecodeapp\.com$/,
+  // Self-hosted desktop: Tailscale MagicDNS names.
+  TAILSCALE_ORIGIN_REGEX,
 ];
+
+// Exact LAN/Tailscale addresses for this machine, so the admin site works
+// from another computer in the office. Kept as strings rather than a
+// wildcard regex - see src/lib/origins.ts for why.
+const allowedExact = new Set([
+  env.BACKEND_URL,
+  ...localNetworkOrigins(Number(process.env.PORT) || 3000),
+]);
 
 app.use(
   "*",
   cors({
-    origin: (origin) => (origin && allowed.some((re) => re.test(origin)) ? origin : null),
+    origin: (origin) =>
+      origin && (allowedExact.has(origin) || allowed.some((re) => re.test(origin)))
+        ? origin
+        : null,
     credentials: true,
   })
 );
@@ -101,6 +115,15 @@ emailService.initialize();
 emailQueueProcessor.start();
 
 const port = Number(process.env.PORT) || 3000;
+
+// Print every address this server can be reached on. On the desktop
+// deployment this log file is the only feedback anyone gets, and "which
+// address do I type on the other computer" is the first question asked.
+console.log(`Admin site:  http://localhost:${port}/admin`);
+for (const ip of localIPv4Addresses()) {
+  const label = ip.startsWith("100.") ? "Tailscale" : "Local network";
+  console.log(`${label}: http://${ip}:${port}/admin`);
+}
 
 export default {
   port,
