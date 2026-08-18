@@ -39,3 +39,13 @@ studio.log
 # Local secrets — never commit
 .env
 .env.production
+
+# Desktop deployment: the live production database and its nightly
+# backups. These hold participant email addresses and the GitHub mirror is
+# public, so they must never be committed. The push script also refuses
+# outright on any .db file, but that is the backstop — this is the fence.
+prisma/backups/
+prisma/prod.db
+prisma/prod.db-*
+prisma/production.db
+prisma/production.db-*
