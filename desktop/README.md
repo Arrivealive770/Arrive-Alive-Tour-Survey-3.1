@@ -159,42 +159,88 @@ Right now the server only works on the desktop itself. Tablets at venues
 need a real internet address, and Android refuses plain `http://`
 connections — so you need `https`.
 
-Cloudflare Tunnel does this for free, without touching your router, and
-without exposing your home IP address.
+There are two ways to do this. Both are reliable. Pick one.
 
-### Which domain to use
+### First: do NOT put arrivealivetour.com on Cloudflare
 
-Cloudflare requires you to point a whole domain's nameservers at it. That
-means whichever domain you choose here, Cloudflare takes over all of its DNS —
-website, email records, everything.
+Cloudflare only works if you hand it a whole domain's DNS, and
+`arrivealivetour.com` currently runs:
 
-**Recommended: buy a separate domain** (`arrivealivesurvey.com` or similar,
-around $11/year). Then `arrivealivetour.com` is never touched, so the website
-and the Resend email records cannot be disturbed by this.
+| Record | What it does |
+|---|---|
+| MX → `outlook.com` | **Your company email (Microsoft 365)** |
+| A → `192.124.249.114` | Your website |
+| `resend._domainkey` TXT | Resend's email signature |
+| `send.` MX + SPF | Resend's sending records |
+| `google-site-verification` | Google tooling |
 
-Using a subdomain of `arrivealivetour.com` is free and works, but it means
-moving the live website's DNS to Cloudflare. Cloudflare copies the existing
-records during setup, but if an SPF or DKIM record is missed, pledge emails
-start landing in spam — and that is a bad thing to discover mid-tour.
+Move the nameservers and every one of those has to survive the migration.
+If the MX record doesn't, company email stops. That is not a risk worth
+taking for a survey server nobody ever types the address of.
 
-Nobody ever sees or types this address; only the tablets use it. So pick the
-option with less risk, not the prettier name.
+Cloudflare does have a way to hand over just one subdomain, but it's an
+Enterprise-plan feature, so it isn't available to you.
 
-Below, **`<your-domain>`** means whichever domain you chose.
+---
 
-**6a.** Add `<your-domain>` to Cloudflare at
+### Option A — Tailscale (free, no domain, nothing to buy)
+
+Tailscale builds a small private network between your desktop and your
+tablets. No domain, no DNS changes, no router settings, and it gives you a
+real `https` address for free. Your existing domain is never touched.
+
+The trade-off: the Tailscale app has to be installed and signed in on every
+tablet.
+
+**A1.** Sign up at [tailscale.com](https://tailscale.com) with your Google or
+Microsoft account. The free plan covers 6 people and unlimited devices.
+
+**A2.** Install Tailscale on the desktop, sign in. Then in the
+[admin console](https://login.tailscale.com/admin/dns) → **DNS**, turn on
+**MagicDNS**, then turn on **HTTPS Certificates**.
+
+**A3.** On the desktop, in PowerShell:
+
+```powershell
+tailscale serve --bg 3000
+```
+
+It prints your address — something like
+`https://desktop.tailXXXX.ts.net`. Write it down; that's what goes in the
+tablets.
+
+**A4.** Install the Tailscale app from the Play Store on each tablet and sign
+in with the same account. In the admin console, find each tablet and set its
+key expiry to **never**, or they'll drop off in six months mid-tour.
+
+**A5.** Test from a tablet on cellular:
+
+```
+https://desktop.tailXXXX.ts.net/health
+```
+
+---
+
+### Option B — Cloudflare Tunnel on a separate domain (~$11/year)
+
+Buy `arrivealivesurvey.com` (or anything cheap) and give *that* to
+Cloudflare. `arrivealivetour.com` stays exactly as it is. Nothing to install
+on the tablets.
+
+Below, **`<your-domain>`** is the new domain you bought.
+
+**B1.** Add `<your-domain>` to Cloudflare at
 [dash.cloudflare.com](https://dash.cloudflare.com) (free plan). It will ask
-you to change your nameservers at your domain registrar — this can take a
-few hours to take effect.
+you to change your nameservers at the registrar — allow a few hours.
 
-**6b.** Go to **Zero Trust → Networks → Tunnels → Create a tunnel**.
+**B2.** Go to **Zero Trust → Networks → Tunnels → Create a tunnel**.
 Choose **Cloudflared**, name it `arrivealive`.
 
-**6c.** Cloudflare shows you a Windows install command with a long token in
+**B3.** Cloudflare shows you a Windows install command with a long token in
 it. Copy it and run it in PowerShell **as Administrator**. This installs the
 tunnel as a Windows service, so it also auto-starts at boot.
 
-**6d.** Still in Cloudflare, add a **Public Hostname** to the tunnel:
+**B4.** Still in Cloudflare, add a **Public Hostname** to the tunnel:
 
 | Field | Value |
 |---|---|
@@ -203,11 +249,34 @@ tunnel as a Windows service, so it also auto-starts at boot.
 | Service Type | `HTTP` |
 | URL | `localhost:3000` |
 
-**6e.** Test it from your phone on cellular (not your home wifi):
+**B5.** Test it from your phone on cellular (not your home wifi):
 
 ```
 https://surveys.<your-domain>/health
 ```
+
+---
+
+### Option C — skip step 6 entirely (free, but read the catch)
+
+The tablets already work with no internet at all. They store every survey and
+pledge on the device and sync when they can reach the server.
+
+So you *can* do nothing here, run on office wifi only, and let the tablets
+sync when the team gets back.
+
+The catch, and it's a real one: **pledge emails don't send until the tablet
+syncs.** Someone who pledges on a Friday gets their photo email whenever the
+tablets next reach the desktop. If the team is out for two weeks, that's two
+weeks. And until they sync, that event's data exists only on the tablet — a
+lost or broken tablet is lost data with no backup.
+
+Fine for local events where tablets come home the same day. Not good for
+touring. Option A costs nothing and removes both problems, so prefer it.
+
+---
+
+### Either way
 
 `{"status":"ok"}` means you're live.
 
