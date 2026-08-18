@@ -164,6 +164,15 @@ https://surveys.arrivealivetour.com/health
 
 `{"status":"ok"}` means you're live.
 
+**6f.** Send yourself one test pledge from a tablet, to your own email address.
+
+Pledge emails still go out through Resend from `noreply@arrivealivetour.com` —
+that part is untouched by this move. This test is only to confirm your Resend
+key made it into the `.env` file correctly.
+
+Check the email arrives **and that the photo shows up in it**. If the email
+arrives with no photo, tell me and I'll look at the log.
+
 ---
 
 ## Step 7 — Point the tablets at your desktop

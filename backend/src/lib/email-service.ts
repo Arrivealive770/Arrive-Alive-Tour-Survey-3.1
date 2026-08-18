@@ -139,8 +139,16 @@ class EmailService {
   generatePledgeEmailHtml(params: { photoUrl?: string }): string {
     const { photoUrl } = params;
 
-    const photoSection = photoUrl
-      ? `<p><img src="${photoUrl}" alt="Your Pledge Photo" style="max-width: 100%; height: auto;" /></p>`
+    // Composited pledge photos are absolute CDN URLs, but the fallback path
+    // stores a server-relative one (/uploads/...). Email clients cannot
+    // resolve relative paths, so make it absolute or the recipient just sees
+    // a broken image.
+    const absolutePhotoUrl = photoUrl?.startsWith("/")
+      ? `${env.BACKEND_URL.replace(/\/$/, "")}${photoUrl}`
+      : photoUrl;
+
+    const photoSection = absolutePhotoUrl
+      ? `<p><img src="${absolutePhotoUrl}" alt="Your Pledge Photo" style="max-width: 100%; height: auto;" /></p>`
       : "";
 
     return `<!DOCTYPE html>
