@@ -150,4 +150,54 @@ pledgesRouter.put(
   }
 );
 
+// DELETE /api/pledges/purge/:eventId - Post-event deletion of participant
+// personal data.
+//
+// Removes the Pledge rows for an event, which is where participant EMAIL
+// ADDRESSES live. EmailQueue rows cascade automatically (EmailQueue.pledge is
+// onDelete: Cascade), so nothing is left queued to send afterwards.
+//
+// SurveyResponse rows are deliberately NOT touched. The foreign key lives on
+// Pledge (pledge.surveyResponseId -> SurveyResponse), so deleting pledges
+// cannot cascade into survey data — the survey answers and age ranges that
+// reporting depends on survive the purge.
+//
+// Photos are a separate concern: DELETE /api/photos/purge/:eventId unlinks the
+// image files and marks the rows deleted so the phone and both tablets drop
+// their local copies. Run that first, then this. (Pledge.photoId is
+// onDelete: SetNull, so the order does not corrupt either side.)
+pledgesRouter.delete("/purge/:eventId", async (c) => {
+  const eventId = c.req.param("eventId");
+
+  const event = await prisma.event.findUnique({
+    where: { id: eventId },
+  });
+
+  if (!event) {
+    return c.json({ error: { message: "Event not found", code: "NOT_FOUND" } }, 404);
+  }
+
+  // Counted before deleting so the response reports what was actually removed.
+  const queuedEmailCount = await prisma.emailQueue.count({
+    where: { pledge: { eventId } },
+  });
+
+  const result = await prisma.pledge.deleteMany({
+    where: { eventId },
+  });
+
+  // Proof for the caller that the purge kept what it was supposed to keep.
+  const survivingSurveyResponses = await prisma.surveyResponse.count({
+    where: { eventId },
+  });
+
+  return c.json({
+    data: {
+      purgedPledgeCount: result.count,
+      purgedQueuedEmailCount: queuedEmailCount,
+      survivingSurveyResponseCount: survivingSurveyResponses,
+    },
+  });
+});
+
 export { pledgesRouter };

@@ -1301,6 +1301,7 @@ adminPortalRouter.get("/", (c) => {
                 <td class="actions">
                   <button class="btn btn-secondary btn-sm" onclick="editEvent('\${event.id}')">Edit</button>
                   \${event.status === 'active' ? \`<button class="btn btn-warning btn-sm" onclick="completeEvent('\${event.id}')">Complete</button>\` : ''}
+                  <button class="btn btn-danger btn-sm" onclick="purgePledges('\${event.id}', '\${escapeHtml(event.venueName).replace(/'/g, "\\\\'")}')">Purge Pledges</button>
                 </td>
               </tr>
             \`).join('');
@@ -1384,6 +1385,62 @@ adminPortalRouter.get("/", (c) => {
             loadEvents();
           } catch (err) {
             alert('Error completing event');
+          }
+        }
+
+        // Post-event privacy purge. Deletes the photos and the participant
+        // email addresses for one event, and keeps the survey answers.
+        async function purgePledges(eventId, venueName) {
+          if (!confirm(
+            'Purge pledge data for "' + venueName + '"?\\n\\n' +
+            'This DELETES:\\n' +
+            '  - all participant photos for this event\\n' +
+            '  - all participant email addresses for this event\\n' +
+            '  - any pledge emails still waiting to send\\n\\n' +
+            'This KEEPS:\\n' +
+            '  - all survey answers and age ranges for reporting\\n\\n' +
+            'This cannot be undone.'
+          )) return;
+
+          try {
+            // Photos first: this unlinks the image files and flags the rows so
+            // the phone and tablets drop their local copies on next sync. Doing
+            // it before the pledges means a failure here leaves the emails in
+            // place rather than orphaning photos nothing points at any more.
+            const photoRes = await fetch(API_BASE + '/photos/purge/' + eventId, {
+              method: 'DELETE'
+            });
+            const photoData = await photoRes.json();
+
+            if (photoData.error) {
+              alert('Could not purge photos: ' + photoData.error.message + '\\n\\nNothing was deleted.');
+              return;
+            }
+
+            const pledgeRes = await fetch(API_BASE + '/pledges/purge/' + eventId, {
+              method: 'DELETE'
+            });
+            const pledgeData = await pledgeRes.json();
+
+            if (pledgeData.error) {
+              alert(
+                'Photos were purged, but the email addresses could not be deleted: ' +
+                pledgeData.error.message + '\\n\\nPlease try Purge Pledges again.'
+              );
+              return;
+            }
+
+            alert(
+              'Purge complete for "' + venueName + '".\\n\\n' +
+              'Deleted ' + (photoData.data.purgedCount || 0) + ' photo(s)\\n' +
+              'Deleted ' + (pledgeData.data.purgedPledgeCount || 0) + ' email address(es)\\n' +
+              'Deleted ' + (pledgeData.data.purgedQueuedEmailCount || 0) + ' unsent email(s)\\n\\n' +
+              'Kept ' + (pledgeData.data.survivingSurveyResponseCount || 0) + ' survey response(s).'
+            );
+
+            loadEvents();
+          } catch (err) {
+            alert('Error purging pledge data');
           }
         }
 
