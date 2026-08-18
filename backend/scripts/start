@@ -39,19 +39,10 @@ fi
 echo "Installing dependencies..."
 bun install
 
-# Generate Prisma client and push schema if prisma is installed (database-auth skill)
-if [ -f "prisma/schema.prisma" ]; then
-  echo "Generating Prisma client..."
-  bunx prisma generate
-  echo "Pushing schema to database..."
-  bunx prisma db push --accept-data-loss
-
-  # Enable DB viewer (idempotent, safe to call multiple times)
-  if [ -n "${VIBECODE_PROJECT_ID:-}" ]; then
-    echo "Enabling database viewer..."
-    curl -s -X POST "https://api.vibecodeapp.com/api/projects/${VIBECODE_PROJECT_ID}/cloud/db/enable" || true
-  fi
-fi
+# Sync the database schema (Prisma). scripts/prisma-setup.sh chooses
+# db push vs. migrate deploy based on environment and whether the
+# project uses Prisma Migrate. ENG-1188.
+source "$(dirname "$0")/prisma-setup.sh"
 
 # Start server based on environment
 # Use bun directly (not "bun run") so signals propagate correctly
