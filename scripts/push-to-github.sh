@@ -32,9 +32,15 @@ git clone --quiet --no-hardlinks --single-branch --branch "${BRANCH}" \
   "${WORKSPACE}" "${EXPORT_DIR}/repo"
 cd "${EXPORT_DIR}/repo"
 
-echo "Removing .env files from history..."
+echo "Removing .env files and the dev database from history..."
+# The dev database is stripped too, not just the .env files. It is tracked in
+# the workspace repo on purpose (it is the local test data, and the sandbox is
+# restored from git), but this GitHub repo is PUBLIC and the Pledge table holds
+# participant EMAIL ADDRESSES. Publishing it would leak exactly the personal
+# data the post-event purge exists to destroy. Railway never needs it either:
+# start:prod runs `prisma db push`, which builds the schema on its own volume.
 FILTER_BRANCH_SQUELCH_WARNING=1 git filter-branch -f --index-filter \
-  'git rm --cached --ignore-unmatch -q backend/.env backend/.env.production mobile/.env mobile/.env.production' \
+  'git rm --cached --ignore-unmatch -q backend/.env backend/.env.production mobile/.env mobile/.env.production backend/prisma/dev.db backend/prisma/dev.db-shm backend/prisma/dev.db-wal' \
   --prune-empty -- "${BRANCH}" >/dev/null 2>&1
 
 echo "Redacting secrets from commit messages..."
@@ -58,8 +64,14 @@ HITS=$(
 )
 ENV_FILES=$(git log "${BRANCH}" --pretty=format: --name-only | grep -cE '(^|/)\.env' || true)
 
-if [[ "${HITS}" != "0" || "${ENV_FILES}" != "0" ]]; then
-  echo "ABORTING: scrub incomplete (secret matches=${HITS}, env files=${ENV_FILES})" >&2
+# Any SQLite database reaching this public repo is a personal-data leak: the
+# Pledge table stores participant email addresses. Checked as a pattern rather
+# than a fixed filename so a future production.db or a renamed copy is caught
+# too, instead of silently sailing past a list that only names dev.db.
+DB_FILES=$(git log "${BRANCH}" --pretty=format: --name-only | grep -cE '\.(db|sqlite|sqlite3)(-shm|-wal|-journal)?$' || true)
+
+if [[ "${HITS}" != "0" || "${ENV_FILES}" != "0" || "${DB_FILES}" != "0" ]]; then
+  echo "ABORTING: scrub incomplete (secret matches=${HITS}, env files=${ENV_FILES}, database files=${DB_FILES})" >&2
   exit 1
 fi
 
