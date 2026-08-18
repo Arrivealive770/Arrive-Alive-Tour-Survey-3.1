@@ -373,12 +373,38 @@ Get-ScheduledTask -TaskName ArriveAlive*
 
 ### Updating the app later
 
+**If you installed with Git:**
+
 ```powershell
 cd C:\ArriveAlive
 git pull
 Stop-ScheduledTask  -TaskName ArriveAliveServer
 Start-ScheduledTask -TaskName ArriveAliveServer
 ```
+
+**If you downloaded the ZIP,** you have no `git pull`. Install Git once and
+you'll never have to re-download again:
+
+```powershell
+winget install --id Git.Git -e --source winget
+```
+
+Close and reopen PowerShell, then convert your existing folder in place —
+this keeps your database and your `.env`:
+
+```powershell
+cd C:\ArriveAlive
+git init
+git remote add origin https://github.com/Arrivealive770/Arrive-Alive-Tour-Survey-3.1.git
+git fetch origin
+git reset --mixed origin/main
+git checkout -- .
+```
+
+`git reset --mixed` then `checkout -- .` overwrites the project files with
+the latest versions. It does **not** touch `backend\.env`, `backend\prisma\prod.db`,
+or your backups — those are ignored by Git, which is exactly why they're
+ignored. From then on, `git pull` is all you need.
 
 ---
 
