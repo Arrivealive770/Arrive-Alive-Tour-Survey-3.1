@@ -69,13 +69,20 @@ doesn't become `.env.txt`.
 ```
 DATABASE_URL="file:./prod.db"
 BETTER_AUTH_SECRET="5e3f5c20969ea59bd52195d9722fe5cf252c4d93d49c9694d7517904eadf2f9a"
-BACKEND_URL="https://surveys.arrivealivetour.com"
+BACKEND_URL="http://localhost:3000"
 NODE_ENV="production"
 RESEND_API_KEY="your-resend-key-here"
 ```
 
 Replace the Resend key with yours — that's what sends the pledge emails.
 Without it the server still runs, but no emails go out.
+
+`BACKEND_URL` becomes your real address in step 6, once you've picked a
+domain. `localhost` is fine until then.
+
+Do **not** add an email from-address here. Pledge emails already default to
+`Arrive Alive Tour <noreply@arrivealivetour.com>`, and that stays correct no
+matter which domain the survey server ends up on.
 
 This file is never uploaded to GitHub.
 
@@ -135,7 +142,27 @@ connections — so you need `https`.
 Cloudflare Tunnel does this for free, without touching your router, and
 without exposing your home IP address.
 
-**6a.** Add `arrivealivetour.com` to Cloudflare at
+### Which domain to use
+
+Cloudflare requires you to point a whole domain's nameservers at it. That
+means whichever domain you choose here, Cloudflare takes over all of its DNS —
+website, email records, everything.
+
+**Recommended: buy a separate domain** (`arrivealivesurvey.com` or similar,
+around $11/year). Then `arrivealivetour.com` is never touched, so the website
+and the Resend email records cannot be disturbed by this.
+
+Using a subdomain of `arrivealivetour.com` is free and works, but it means
+moving the live website's DNS to Cloudflare. Cloudflare copies the existing
+records during setup, but if an SPF or DKIM record is missed, pledge emails
+start landing in spam — and that is a bad thing to discover mid-tour.
+
+Nobody ever sees or types this address; only the tablets use it. So pick the
+option with less risk, not the prettier name.
+
+Below, **`<your-domain>`** means whichever domain you chose.
+
+**6a.** Add `<your-domain>` to Cloudflare at
 [dash.cloudflare.com](https://dash.cloudflare.com) (free plan). It will ask
 you to change your nameservers at your domain registrar — this can take a
 few hours to take effect.
@@ -152,14 +179,14 @@ tunnel as a Windows service, so it also auto-starts at boot.
 | Field | Value |
 |---|---|
 | Subdomain | `surveys` |
-| Domain | `arrivealivetour.com` |
+| Domain | `<your-domain>` |
 | Service Type | `HTTP` |
 | URL | `localhost:3000` |
 
 **6e.** Test it from your phone on cellular (not your home wifi):
 
 ```
-https://surveys.arrivealivetour.com/health
+https://surveys.<your-domain>/health
 ```
 
 `{"status":"ok"}` means you're live.
