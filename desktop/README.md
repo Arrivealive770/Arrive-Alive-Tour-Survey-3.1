@@ -103,6 +103,7 @@ This sets up three things:
 |---|---|
 | `ArriveAliveServer` task | Starts the server at boot, before you log in |
 | `ArriveAliveBackup` task | Backs up the survey database nightly at 2:37am |
+| Firewall rule | Lets other computers on your network reach the admin site |
 | Power settings | Stops the desktop sleeping while plugged in |
 
 It survives Windows Update reboots — that's the whole point of using a
@@ -124,6 +125,25 @@ curl http://localhost:3000/health
 You want `{"status":"ok"}`.
 
 Your admin website is now at **http://localhost:3000/admin**
+
+### Using it from another computer in the office
+
+The installer prints an address like `http://192.168.1.42:3000/admin` when it
+finishes. Type that into a browser on any other computer, laptop, or phone on
+the same wifi and you get the same admin site.
+
+Two things to know:
+
+- **That number can change** when the desktop reconnects to the network. If
+  the address stops working, run `ipconfig` on the desktop and look for
+  "IPv4 Address". (Ask your router to reserve a fixed address for the desktop
+  if you'll be doing this a lot.)
+- **Same network only.** From home, a coffee shop, or a venue, this address
+  does nothing. That's step 6.
+
+If other computers can't reach it, Windows probably has your network marked
+as "Public". Go to **Settings → Network & Internet →** your connection **→**
+set it to **Private**, then try again.
 
 **If something's wrong,** the log tells you why:
 

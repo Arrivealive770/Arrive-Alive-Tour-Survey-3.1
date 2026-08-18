@@ -133,6 +133,33 @@ Register-ScheduledTask `
 
 Write-Host "  done" -ForegroundColor Green
 
+# --------------------------------------------------------------- firewall
+# The server listens on 0.0.0.0:3000, so it is already willing to serve
+# other machines on the LAN. Windows Firewall blocks it by default though,
+# and the usual "allow this app?" popup never appears here because the
+# server starts at boot with nobody logged in to click it.
+#
+# Private and Domain profiles only. Deliberately NOT Public: if this
+# machine ever joins an untrusted network, the survey database should not
+# be reachable from it. The Cloudflare Tunnel in step 6 is how the outside
+# world gets in, and that needs no inbound rule at all.
+Write-Host ""
+Write-Host "Allowing other computers on your network to reach the server..."
+
+Get-NetFirewallRule -DisplayName "Arrive Alive Survey Server" -ErrorAction SilentlyContinue |
+  Remove-NetFirewallRule -ErrorAction SilentlyContinue
+
+New-NetFirewallRule `
+  -DisplayName "Arrive Alive Survey Server" `
+  -Direction Inbound `
+  -Protocol TCP `
+  -LocalPort 3000 `
+  -Action Allow `
+  -Profile Private,Domain `
+  -Description "Lets other computers and tablets on the local network reach the Arrive Alive survey server." | Out-Null
+
+Write-Host "  done" -ForegroundColor Green
+
 # ------------------------------------------------------------------ power
 # A sleeping desktop cannot receive syncs from the field. Disable sleep and
 # hibernate on AC power; the screen is still free to switch off.
@@ -146,6 +173,32 @@ Write-Host ""
 Write-Host "==================================================" -ForegroundColor Cyan
 Write-Host " Setup complete" -ForegroundColor Cyan
 Write-Host "==================================================" -ForegroundColor Cyan
+
+# --- The firewall rule above only applies on Private/Domain networks. If
+# --- Windows has this machine's network marked Public, the rule is inert
+# --- and other computers get a silent timeout, which is a miserable thing
+# --- to debug. Say so now rather than let them find out.
+$publicNets = Get-NetConnectionProfile | Where-Object { $_.NetworkCategory -eq "Public" }
+if ($publicNets) {
+  Write-Host ""
+  Write-Host "NOTE: Windows treats your network as 'Public', so other computers" -ForegroundColor Yellow
+  Write-Host "cannot reach the server yet. To change it:" -ForegroundColor Yellow
+  Write-Host "  Settings > Network & Internet > (your connection) > Private network" -ForegroundColor Yellow
+}
+
+# --- Print the LAN address so they do not have to go hunting through
+# --- ipconfig output to find it.
+$lanIp = Get-NetIPAddress -AddressFamily IPv4 |
+  Where-Object { $_.IPAddress -notlike "127.*" -and $_.IPAddress -notlike "169.254.*" } |
+  Select-Object -First 1 -ExpandProperty IPAddress
+
+Write-Host ""
+Write-Host "On this desktop:      http://localhost:3000/admin"
+if ($lanIp) {
+  Write-Host "From other computers: http://${lanIp}:3000/admin"
+  Write-Host "  (that address can change when the desktop reconnects to the network)"
+}
+
 Write-Host ""
 Write-Host "Start the server now without rebooting:"
 Write-Host "  Start-ScheduledTask -TaskName ArriveAliveServer"
