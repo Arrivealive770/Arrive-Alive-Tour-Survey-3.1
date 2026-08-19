@@ -490,6 +490,42 @@ If `winget` itself is not recognized (older Windows 10), download the
 installer from <https://git-scm.com/download/win>, run it, accept every
 default, then close and reopen PowerShell.
 
+### What kind of change needs what
+
+Three separate things can change, and they update in three different ways.
+Check this list before assuming you need a new APK — most changes don't.
+
+**Survey content, teams, events, photo overlays, admin accounts**
+Change them in the admin site. Live immediately, on every tablet, no build
+and no restart. The tablets read all of this from the server.
+
+**The server and the admin site itself**
+`git pull` on the desktop, then restart — section A above. The tablets need
+no attention.
+
+**The tablet app itself** (screens, wording on buttons, the survey flow, a new
+feature)
+This needs a new APK: build it in Expo, then install it on each tablet. As
+long as it's built from the same Expo project, it installs over the old one
+and keeps each tablet's saved setup and any surveys that haven't synced yet.
+
+That last one means physically touching every tablet, which is the painful
+one mid-tour. It can be avoided — see below.
+
+### Over-the-air app updates (not set up yet)
+
+Expo can push app updates to the tablets over the internet: you publish, and
+each tablet picks the change up the next time it's opened. No APK, no
+re-installing, no chasing tablets between venues.
+
+It is **not** enabled on this project — it needs the `expo-updates` package
+added and configured, which happens on the Expo side. Worth doing before a
+tour rather than during one.
+
+Even with it on, some changes still need a fresh APK: a new device permission,
+a new native module (camera, Bluetooth, printing), or an Expo SDK upgrade.
+Day-to-day wording and layout changes go over the air.
+
 ---
 
 ## Restoring a backup
