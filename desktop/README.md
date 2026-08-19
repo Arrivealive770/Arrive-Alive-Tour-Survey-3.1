@@ -542,3 +542,52 @@ Start-ScheduledTask -TaskName ArriveAliveServer
 
 Keep the `.broken` copy until you've confirmed the restore looks right in the
 admin website.
+
+---
+
+## Moving the server to a different computer
+
+Nothing here is tied to one machine. On the new computer, do steps 1–5 of this
+guide (Git, Bun, `.env`, auto-start), then handle the two things that are easy
+to get wrong.
+
+**Bring the database, not just the code.** `backend\prisma\prod.db` holds every
+survey response and pledge email ever collected; a fresh checkout starts empty.
+Stop the server on the old computer first, or you'll copy a half-written file:
+
+```powershell
+Stop-ScheduledTask -TaskName ArriveAliveServer
+```
+
+Then copy `prod.db` — along with `prod.db-wal` and `prod.db-shm` if they exist —
+into `backend\prisma\` on the new computer. A file from `backend\prisma\backups\`
+works too, renamed to `prod.db`. Copy `backend\.env` across as well.
+
+**Keep the Tailscale name.** The tablets have the old machine's address baked
+into them, so if the new computer comes up under a different name, every tablet
+needs a new APK. Avoid that entirely: in the
+[Tailscale admin console](https://login.tailscale.com/admin/machines), remove
+the old machine (or rename it), then rename the new one to the **same** name
+the tablets already know. Run `tailscale serve --bg 3000` on the new machine and
+the address answers exactly as before — the tablets never notice.
+
+Verify with the step 4 and 5 checks (`/health` from the desktop, then from a
+tablet) before the old computer goes away.
+
+---
+
+## Adding or replacing tablets and phones
+
+Install the same APK, open it, type the team code, choose **Tablet** or
+**Phone**. That's the whole process, and there's no limit on how many.
+
+Each device needs the Tailscale app installed and signed in to the same
+account, and its key expiry set to **never** in the Tailscale admin console.
+
+Nothing is stored only on a device except survey responses that haven't synced
+yet, so a dead tablet costs you nothing as long as it had signal at the venue.
+Replacing one is: install, team code, back in service.
+
+iPhones and iPads are a different matter — Apple does not allow installing an
+app from a file. That route needs an Apple Developer account and TestFlight, so
+plan for it rather than assuming a spare iPad can fill in.
