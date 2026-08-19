@@ -99,6 +99,24 @@ RESEND_API_KEY="your-resend-key-here"
 Replace the Resend key with yours — that's what sends the pledge emails.
 Without it the server still runs, but no emails go out.
 
+**Already saved it as `.env.txt`?** Don't recreate it — just rename it. In
+PowerShell:
+
+```powershell
+cd C:\ArriveAlive\backend
+Get-ChildItem -Force -Filter ".env*" | Select-Object Name
+Rename-Item .env.txt .env
+Get-ChildItem -Force -Filter ".env*" | Select-Object Name
+```
+
+The first listing shows what you actually have; the second should show `.env`
+and nothing else. If the first listing shows **both** `.env` and `.env.txt`,
+open each with `Get-Content .\.env.txt` to see which one has your real
+settings, delete the empty one, then rename.
+
+To stop Windows hiding extensions from you in future: in File Explorer, open
+the **View** menu → **Show** → tick **File name extensions**.
+
 `BACKEND_URL` becomes your real address in step 6, once you've picked a
 domain. `localhost` is fine until then.
 

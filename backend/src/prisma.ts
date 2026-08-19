@@ -1,6 +1,11 @@
 import { PrismaClient } from "@prisma/client";
+import { env } from "./env";
 
-const prisma = new PrismaClient();
+// Pass the URL explicitly so env.ts stays the single source of truth. Left to
+// itself the client reads process.env.DATABASE_URL and knows nothing about the
+// development default in env.ts, so a checkout with no backend/.env started
+// fine and then threw on the first query.
+const prisma = new PrismaClient({ datasourceUrl: env.DATABASE_URL });
 
 // IMPORTANT: SQLite optimizations for better performance
 async function initSqlitePragmas(prisma: PrismaClient) {

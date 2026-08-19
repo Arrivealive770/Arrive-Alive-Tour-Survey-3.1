@@ -44,6 +44,17 @@ cd /d "%ROOT%\backend" || (
   exit /b 1
 )
 
+REM Notepad appends .txt unless "All Files" is picked when saving, and Windows
+REM hides known extensions, so backend\.env.txt looks identical to backend\.env
+REM in Explorer. install-autostart.ps1 repairs this at install time; do the same
+REM here, because this is what actually runs at boot with nobody watching.
+if not exist ".env" (
+  if exist ".env.txt" (
+    echo Found .env.txt instead of .env - renaming it. >> "%LOG%"
+    ren ".env.txt" ".env" >> "%LOG%" 2>&1
+  )
+)
+
 if not exist ".env" (
   echo ERROR: backend\.env is missing - see desktop\README.md step 4. >> "%LOG%"
   exit /b 1

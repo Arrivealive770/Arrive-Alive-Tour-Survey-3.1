@@ -1,6 +1,13 @@
 import { z } from "zod";
 
 /**
+ * Development-only Better Auth signing secret. A fresh checkout has no
+ * backend/.env, and without some secret the server exits before it can boot.
+ * Production must never reach this — see the transform below.
+ */
+const DEV_AUTH_SECRET = "dev-only-insecure-secret-not-for-production";
+
+/**
  * Environment variable schema using Zod
  * This ensures all required environment variables are present and valid
  */
@@ -11,14 +18,35 @@ const envSchema = z.object({
   BACKEND_URL: z.url("BACKEND_URL must be a valid URL").default("http://localhost:3000"), // Set via the Vibecode enviroment at run-time
   // Database
   DATABASE_URL: z.string().default("file:./dev.db"),
-  // Authentication
-  BETTER_AUTH_SECRET: z.string().min(1, "BETTER_AUTH_SECRET is required"),
+  // Authentication. Filled in by the transform below: required in production,
+  // defaulted in development.
+  BETTER_AUTH_SECRET: z.string().min(1).optional(),
   // Email (use either Resend or SendGrid — an API key from one of them is required for email sending)
   RESEND_API_KEY: z.string().optional(),
   SENDGRID_API_KEY: z.string().optional(),
   EMAIL_FROM_ADDRESS: z.string().email().default("noreply@arrivealivetour.com"),
   EMAIL_FROM_NAME: z.string().default("Arrive Alive Tour"),
-});
+})
+  // NODE_ENV is read from the parsed object rather than process.env directly:
+  // ProcessEnv is augmented from this schema at the bottom of the file, so
+  // touching process.env here would make envSchema reference its own type.
+  .transform((raw, ctx) => {
+    // A guessable signing secret in production would let anyone forge a staff
+    // login, so the desktop kiosk and Railway must supply their own.
+    if (raw.NODE_ENV === "production" && !raw.BETTER_AUTH_SECRET) {
+      ctx.addIssue({
+        code: "custom",
+        path: ["BETTER_AUTH_SECRET"],
+        message: "BETTER_AUTH_SECRET is required",
+      });
+      return z.NEVER;
+    }
+
+    return {
+      ...raw,
+      BETTER_AUTH_SECRET: raw.BETTER_AUTH_SECRET ?? DEV_AUTH_SECRET,
+    };
+  });
 
 /**
  * Validate and parse environment variables

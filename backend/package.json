@@ -11,9 +11,6 @@
     "typecheck": "tsc --noEmit",
     "seed": "bun run prisma/seed.ts"
   },
-  "prisma": {
-    "seed": "bun run prisma/seed.ts"
-  },
   "devDependencies": {
     "@types/bun": "latest",
     "prisma": "6",
