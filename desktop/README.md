@@ -444,6 +444,16 @@ Start-ScheduledTask -TaskName ArriveAliveServer
 If `git pull` answers `fatal: not a git repository`, the folder came from a
 ZIP and was never connected. Do B, starting at the `git init` block.
 
+If it refuses with **`Your local changes to the following files would be
+overwritten`** and names `backend/bun.lock`, that's just your Bun version
+having rewritten the package list. It holds nothing of yours — throw it away
+and pull again:
+
+```powershell
+git checkout -- backend/bun.lock
+git pull
+```
+
 #### B — Install Git, then connect this folder once
 
 ```powershell

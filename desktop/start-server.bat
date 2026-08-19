@@ -60,14 +60,27 @@ if not exist ".env" (
   exit /b 1
 )
 
+REM A failed install is only fatal on a machine that has never installed. This
+REM runs at boot in venues with flaky or absent Wi-Fi, and a transient npm
+REM tarball error must not be the reason a working kiosk refuses to start.
 echo Installing dependencies... >> "%LOG%"
-call "!BUN!" install >> "%LOG%" 2>&1 || (
-  echo ERROR: bun install failed. >> "%LOG%"
-  exit /b 1
+call "!BUN!" install >> "%LOG%" 2>&1
+if errorlevel 1 (
+  if exist "node_modules\@prisma\client\package.json" (
+    echo WARNING: bun install failed - continuing with the packages already installed. >> "%LOG%"
+    echo WARNING: if the app misbehaves, run "bun install" by hand with internet access. >> "%LOG%"
+  ) else (
+    echo ERROR: bun install failed and node_modules is not usable yet. >> "%LOG%"
+    echo ERROR: connect this computer to the internet and try again. >> "%LOG%"
+    exit /b 1
+  )
 )
 
+REM "!BUN!" is a full path to bun.exe, so "!BUN!x" spelled bun.exex and cmd
+REM reported it as "not recognized". `bun x` is the same thing as `bunx` and
+REM needs no second executable on disk.
 echo Preparing database... >> "%LOG%"
-call "!BUN!x" prisma generate >> "%LOG%" 2>&1 || (
+call "!BUN!" x prisma generate >> "%LOG%" 2>&1 || (
   echo ERROR: prisma generate failed. >> "%LOG%"
   exit /b 1
 )
@@ -75,7 +88,7 @@ call "!BUN!x" prisma generate >> "%LOG%" 2>&1 || (
 REM No --accept-data-loss here on purpose. This runs unattended against
 REM the real survey database, so a schema change that would drop a column
 REM must stop and be looked at rather than silently destroy event data.
-call "!BUN!x" prisma db push --skip-generate >> "%LOG%" 2>&1 || (
+call "!BUN!" x prisma db push --skip-generate >> "%LOG%" 2>&1 || (
   echo ERROR: prisma db push failed - schema change may need review. >> "%LOG%"
   exit /b 1
 )
