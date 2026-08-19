@@ -373,7 +373,22 @@ Get-ScheduledTask -TaskName ArriveAlive*
 
 ### Updating the app later
 
-**If you installed with Git:**
+**Start here every time.** In PowerShell:
+
+```powershell
+git --version
+```
+
+- **You see a version number** (e.g. `git version 2.47.1`) → go to A below.
+- **You see `git : The term 'git' is not recognized...`** → Git is not
+  installed *on this computer*, or PowerShell hasn't picked it up yet. Go to
+  B below.
+
+Connecting the project to GitHub **on the GitHub website** does not put Git
+on your desktop. Git is a program that has to be installed on the machine
+you're typing on, separately, once.
+
+#### A — Git is installed and this folder is already connected
 
 ```powershell
 cd C:\ArriveAlive
@@ -382,15 +397,26 @@ Stop-ScheduledTask  -TaskName ArriveAliveServer
 Start-ScheduledTask -TaskName ArriveAliveServer
 ```
 
-**If you downloaded the ZIP,** you have no `git pull`. Install Git once and
-you'll never have to re-download again:
+If `git pull` answers `fatal: not a git repository`, the folder came from a
+ZIP and was never connected. Do B, starting at the `git init` block.
+
+#### B — Install Git, then connect this folder once
 
 ```powershell
 winget install --id Git.Git -e --source winget
 ```
 
-Close and reopen PowerShell, then convert your existing folder in place —
-this keeps your database and your `.env`:
+**Now close PowerShell completely and open a new window.** A PowerShell
+window only learns about newly installed programs when it starts, so the
+window you ran the install in will keep saying `'git' is not recognized`
+forever. Confirm in the new window:
+
+```powershell
+git --version
+```
+
+Then connect your existing folder in place — this keeps your database and
+your `.env`:
 
 ```powershell
 cd C:\ArriveAlive
@@ -404,7 +430,11 @@ git checkout -- .
 `git reset --mixed` then `checkout -- .` overwrites the project files with
 the latest versions. It does **not** touch `backend\.env`, `backend\prisma\prod.db`,
 or your backups — those are ignored by Git, which is exactly why they're
-ignored. From then on, `git pull` is all you need.
+ignored. From then on, A is all you need.
+
+If `winget` itself is not recognized (older Windows 10), download the
+installer from <https://git-scm.com/download/win>, run it, accept every
+default, then close and reopen PowerShell.
 
 ---
 
