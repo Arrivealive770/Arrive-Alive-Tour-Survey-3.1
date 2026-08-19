@@ -389,6 +389,32 @@ Start-ScheduledTask -TaskName ArriveAliveBackup
 Get-ScheduledTask -TaskName ArriveAlive*
 ```
 
+**`Stop-ScheduledTask : The system cannot find the file specified`** means the
+task doesn't exist yet — step 5 was never finished, so nothing is scheduled to
+stop. Nothing is broken. Check with:
+
+```powershell
+Get-ScheduledTask -TaskName ArriveAlive*
+```
+
+Blank output confirms it. Go back and do step 5. Until then you can run the
+server by hand any time by double-clicking
+`C:\ArriveAlive\desktop\start-server.bat` — it just won't come back on its own
+after a reboot.
+
+If step 5's installer says the `-File` path **does not exist**, your project
+folder is nested one level deeper (common with ZIP downloads — you get
+`C:\ArriveAlive\Arrive-Alive-Tour-Survey-3.1\...`). Find the real location:
+
+```powershell
+Get-ChildItem C:\ArriveAlive -Recurse -Filter install-autostart.ps1 |
+  Select-Object FullName
+```
+
+Then `cd` to the folder that contains `desktop\` and run the installer from
+there. If it is nested, move the inner folder's contents up to `C:\ArriveAlive`
+so every other command in this guide matches.
+
 ### Updating the app later
 
 **Start here every time.** In PowerShell:
