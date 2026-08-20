@@ -300,12 +300,12 @@ export default function PhotoQueueScreen() {
           }}
         >
           <Text className="text-white text-xl font-bold mb-6">
-            Photo ID QR Code
+            Photo ID
           </Text>
           <QRCodeDisplay
             value={selectedPhoto.localId}
             size={220}
-            label="Scan this code on the tablet to select this photo"
+            label="Use this ID to find the photo on the tablet"
           />
           <Text className="text-zinc-500 text-sm mt-8">
             Tap anywhere to close

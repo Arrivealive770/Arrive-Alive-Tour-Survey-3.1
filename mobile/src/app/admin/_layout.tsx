@@ -1,6 +1,6 @@
 import { useState } from 'react';
 import { Tabs } from 'expo-router';
-import { LayoutDashboard, Calendar, Tablet, Settings, ClipboardList } from 'lucide-react-native';
+import { LayoutDashboard, Calendar, Tablet, Settings, ClipboardList, FileUp } from 'lucide-react-native';
 import { PINEntry } from '@/components/admin/PINEntry';
 import { useDeviceStore } from '@/lib/state/device-store';
 
@@ -80,6 +80,15 @@ export default function AdminLayout() {
           title: 'Surveys',
           tabBarIcon: ({ color, size }) => (
             <ClipboardList size={size} color={color} />
+          ),
+        }}
+      />
+      <Tabs.Screen
+        name="survey-imports"
+        options={{
+          title: 'Imports',
+          tabBarIcon: ({ color, size }) => (
+            <FileUp size={size} color={color} />
           ),
         }}
       />

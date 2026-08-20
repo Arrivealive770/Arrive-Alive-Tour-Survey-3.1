@@ -61,10 +61,17 @@ export default function EmailScreen() {
 
   /**
    * Persist the pledge locally (queued for sync) and update counts.
-   * Returns true on success.
+   * Throws if the pledge cannot be stored — callers surface that to the user
+   * rather than showing a thank-you screen for a pledge that was never saved.
    */
   const queuePledgeLocally = useCallback(
-    async (pledgeEmail: string | null, finishedUrl: string | null): Promise<boolean> => {
+    async (pledgeEmail: string | null, finishedUrl: string | null): Promise<void> => {
+      if (!db || !teamId || !currentEventId) {
+        throw new Error(
+          `Cannot queue pledge - missing ${!db ? 'database' : !teamId ? 'team' : 'event'}`
+        );
+      }
+
       if (pledgeEmail) {
         setPledgeEmail(pledgeEmail);
       } else {
@@ -72,22 +79,18 @@ export default function EmailScreen() {
       }
       const pledgeData = completePledge();
 
-      if (db && teamId && currentEventId) {
-        await db.queuePledge({
-          localId: pledgeData.localId,
-          surveyLocalId: pledgeData.surveyLocalId,
-          teamId,
-          eventId: currentEventId,
-          email: pledgeEmail,
-          photoLocalId: selectedPhotoLocalId,
-          photoId: selectedPhotoId,
-          compositedPhotoUrl: finishedUrl,
-          createdAt: pledgeData.createdAt,
-        });
-        updateCounts({ pendingPledges: pendingPledges + 1 });
-        return true;
-      }
-      return false;
+      await db.queuePledge({
+        localId: pledgeData.localId,
+        surveyLocalId: pledgeData.surveyLocalId,
+        teamId,
+        eventId: currentEventId,
+        email: pledgeEmail,
+        photoLocalId: selectedPhotoLocalId,
+        photoId: selectedPhotoId,
+        compositedPhotoUrl: finishedUrl,
+        createdAt: pledgeData.createdAt,
+      });
+      updateCounts({ pendingPledges: pendingPledges + 1 });
     },
     [
       setPledgeEmail,

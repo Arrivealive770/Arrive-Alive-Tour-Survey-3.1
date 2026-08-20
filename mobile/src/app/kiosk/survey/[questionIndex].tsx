@@ -1,122 +1,15 @@
-import { useState, useEffect, useCallback, useMemo, useRef } from 'react';
-import { View, ScrollView } from 'react-native';
+import { useState, useEffect, useCallback, useRef } from 'react';
+import { View, Text, ScrollView, Pressable, ActivityIndicator } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useRouter, useLocalSearchParams } from 'expo-router';
+import { AlertTriangle } from 'lucide-react-native';
 import { ProgressBar, QuestionCard, AnswerButton, IdleResetTimer } from '@/components/kiosk';
-import { useSurveyStore } from '@/lib/state/survey-store';
+import { useSurveyQuestions, responseKeyFor } from '@/lib/survey-questions';
+import { useSurveyStore, toAnswerMap } from '@/lib/state/survey-store';
 import { useSyncStore } from '@/lib/state/sync-store';
 import { useDatabase } from '@/providers/DatabaseProvider';
 import { useDeviceStore } from '@/lib/state/device-store';
 
-// Mock questions - in production these come from API based on survey type
-const MOCK_QUESTIONS = [
-  {
-    id: 'q1',
-    text: 'Have you ever driven under the influence of alcohol or drugs?',
-    options: [
-      { value: 'yes', label: 'Yes' },
-      { value: 'no', label: 'No' },
-    ],
-  },
-  {
-    id: 'q2',
-    text: 'Have you ever been a passenger with someone who was driving under the influence?',
-    options: [
-      { value: 'yes', label: 'Yes' },
-      { value: 'no', label: 'No' },
-    ],
-  },
-  {
-    id: 'q3',
-    text: 'Do you use your phone while driving?',
-    options: [
-      { value: 'never', label: 'Never' },
-      { value: 'sometimes', label: 'Sometimes' },
-      { value: 'often', label: 'Often' },
-      { value: 'always', label: 'Always' },
-    ],
-  },
-  {
-    id: 'q4',
-    text: 'Do you text while driving?',
-    options: [
-      { value: 'never', label: 'Never' },
-      { value: 'sometimes', label: 'Sometimes' },
-      { value: 'often', label: 'Often' },
-      { value: 'always', label: 'Always' },
-    ],
-  },
-  {
-    id: 'q5',
-    text: 'Do you always wear your seatbelt when driving or riding in a vehicle?',
-    options: [
-      { value: 'yes', label: 'Yes, always' },
-      { value: 'mostly', label: 'Most of the time' },
-      { value: 'sometimes', label: 'Sometimes' },
-      { value: 'rarely', label: 'Rarely' },
-      { value: 'never', label: 'Never' },
-    ],
-  },
-  {
-    id: 'q6',
-    text: 'Have you or someone you know been affected by a drunk or distracted driving incident?',
-    options: [
-      { value: 'yes', label: 'Yes' },
-      { value: 'no', label: 'No' },
-    ],
-  },
-  {
-    id: 'q7',
-    text: 'How often do you think about the consequences of distracted driving?',
-    options: [
-      { value: 'never', label: 'Never' },
-      { value: 'rarely', label: 'Rarely' },
-      { value: 'sometimes', label: 'Sometimes' },
-      { value: 'often', label: 'Often' },
-    ],
-  },
-  {
-    id: 'q8',
-    text: 'Would you intervene if a friend was about to drive under the influence?',
-    options: [
-      { value: 'definitely', label: 'Definitely yes' },
-      { value: 'probably', label: 'Probably yes' },
-      { value: 'unsure', label: 'Not sure' },
-      { value: 'no', label: 'Probably not' },
-    ],
-  },
-  {
-    id: 'q9',
-    text: 'Do you have a designated driver plan when going out?',
-    options: [
-      { value: 'always', label: 'Always' },
-      { value: 'usually', label: 'Usually' },
-      { value: 'sometimes', label: 'Sometimes' },
-      { value: 'never', label: 'Never' },
-    ],
-  },
-  {
-    id: 'q10',
-    text: 'How likely are you to use a rideshare service instead of driving after drinking?',
-    options: [
-      { value: 'very', label: 'Very likely' },
-      { value: 'somewhat', label: 'Somewhat likely' },
-      { value: 'unlikely', label: 'Unlikely' },
-      { value: 'never', label: 'Would not use' },
-    ],
-  },
-  {
-    id: 'q11',
-    text: 'After this presentation, will you commit to driving Sober And Free of Electronics (S.A.F.E.)?',
-    options: [
-      { value: 'yes', label: 'Yes, I commit' },
-      { value: 'maybe', label: 'I will try' },
-      { value: 'no', label: 'Not sure' },
-    ],
-  },
-];
-
-const TOTAL_QUESTIONS = 11;
 const AUTO_ADVANCE_DELAY = 300;
 const IDLE_TIMEOUT = 60000; // 60 seconds
 
@@ -128,9 +21,9 @@ export default function QuestionScreen() {
   const { db, isReady } = useDatabase();
   const deviceId = useDeviceStore((s) => s.deviceId);
   const teamId = useDeviceStore((s) => s.teamId);
+  const currentEventId = useDeviceStore((s) => s.currentEventId);
 
   const currentSurveyType = useSurveyStore((s) => s.currentSurveyType);
-  const responses = useSurveyStore((s) => s.responses);
   const setResponse = useSurveyStore((s) => s.setResponse);
   const completeSurvey = useSurveyStore((s) => s.completeSurvey);
   const reset = useSurveyStore((s) => s.reset);
@@ -141,13 +34,11 @@ export default function QuestionScreen() {
   const [isProcessing, setIsProcessing] = useState(false);
   const advanceTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
-  // Get current question
-  const currentQuestion = useMemo(() => {
-    return MOCK_QUESTIONS[questionIndex - 1] || MOCK_QUESTIONS[0];
-  }, [questionIndex]);
-
-  // Get existing response for this question
-  const existingResponse = responses[currentQuestion.id];
+  // Real questions for the selected survey type (cached locally for offline use)
+  const { questions, isLoading, isError, refetch } = useSurveyQuestions(currentSurveyType);
+  const totalQuestions = questions.length;
+  const currentQuestion = questions[questionIndex - 1] ?? null;
+  const questionKey = currentQuestion ? responseKeyFor(currentQuestion) : '';
 
   // Clear timer on unmount
   useEffect(() => {
@@ -158,26 +49,29 @@ export default function QuestionScreen() {
     };
   }, []);
 
-  // Reset selected answer when question changes
+  // Reset the selection when the question changes. This deliberately does NOT
+  // depend on the stored response: re-running on every answer would clear
+  // isProcessing mid auto-advance and let a second tap skip a question.
   useEffect(() => {
-    setSelectedAnswer(existingResponse?.answer as string || null);
+    const existing = questionKey ? useSurveyStore.getState().responses[questionKey] : undefined;
+    setSelectedAnswer((existing?.answer as string) ?? null);
     setIsProcessing(false);
-  }, [questionIndex, existingResponse]);
+  }, [questionIndex, questionKey]);
 
   // Handle answer selection with auto-advance
   const handleAnswerSelect = useCallback(
     async (value: string) => {
-      if (isProcessing) return;
+      if (isProcessing || !questionKey) return;
 
       setSelectedAnswer(value);
       setIsProcessing(true);
 
-      // Store the response
-      setResponse(currentQuestion.id, value);
+      // Store the response under the key the backend aggregates by
+      setResponse(questionKey, value);
 
       // Set up auto-advance
       advanceTimerRef.current = setTimeout(async () => {
-        if (questionIndex >= TOTAL_QUESTIONS) {
+        if (questionIndex >= totalQuestions) {
           // Last question - complete survey and navigate
           const completed = completeSurvey();
 
@@ -190,9 +84,9 @@ export default function QuestionScreen() {
               await db.queueSurvey({
                 localId: completed.localId,
                 teamId: teamId || currentEvent?.teamId || 'unknown',
-                eventId: currentEvent?.eventId || 'unknown',
+                eventId: currentEvent?.eventId || currentEventId || 'unknown',
                 surveyTypeSlug: completed.surveyTypeSlug,
-                responses: JSON.stringify(completed.responses),
+                responses: JSON.stringify(toAnswerMap(completed.responses)),
                 ageRange: completed.ageRange,
                 deviceId: deviceId,
                 completedAt: completed.completedAt,
@@ -221,13 +115,15 @@ export default function QuestionScreen() {
     },
     [
       isProcessing,
-      currentQuestion.id,
+      questionKey,
+      totalQuestions,
       questionIndex,
       setResponse,
       completeSurvey,
       isReady,
       db,
       teamId,
+      currentEventId,
       deviceId,
       updateCounts,
       router,
@@ -247,8 +143,56 @@ export default function QuestionScreen() {
     }
   }, [currentSurveyType, router]);
 
+  // Out-of-range index (e.g. a shortened survey) - restart cleanly
+  useEffect(() => {
+    if (!isLoading && totalQuestions > 0 && questionIndex > totalQuestions) {
+      router.replace('/kiosk/survey/1' as any);
+    }
+  }, [isLoading, totalQuestions, questionIndex, router]);
+
   if (!currentSurveyType) {
     return null;
+  }
+
+  if (isLoading) {
+    return (
+      <SafeAreaView className="flex-1 bg-black items-center justify-center">
+        <ActivityIndicator size="large" color="#22c55e" />
+        <Text className="text-zinc-400 mt-4 text-lg">Loading questions...</Text>
+      </SafeAreaView>
+    );
+  }
+
+  // No questions available: either the server is unreachable and nothing was
+  // ever cached, or this survey type has no questions set up yet.
+  if (isError || !currentQuestion) {
+    return (
+      <SafeAreaView className="flex-1 bg-black items-center justify-center px-10">
+        <AlertTriangle size={56} color="#ef4444" />
+        <Text className="text-white text-2xl font-bold mt-6 text-center">
+          Questions Unavailable
+        </Text>
+        <Text className="text-zinc-400 text-base mt-2 text-center">
+          {isError
+            ? 'Could not download the survey questions. Connect this device to the internet once, then try again.'
+            : 'This survey has no questions set up yet. Add them in the admin portal.'}
+        </Text>
+        <View className="flex-row gap-3 mt-8">
+          <Pressable
+            onPress={() => refetch()}
+            className="px-6 h-14 items-center justify-center bg-white rounded-xl active:bg-zinc-200"
+          >
+            <Text className="text-black font-semibold text-lg">Try Again</Text>
+          </Pressable>
+          <Pressable
+            onPress={handleIdleReset}
+            className="px-6 h-14 items-center justify-center bg-zinc-800 rounded-xl active:bg-zinc-700"
+          >
+            <Text className="text-white font-semibold text-lg">Back</Text>
+          </Pressable>
+        </View>
+      </SafeAreaView>
+    );
   }
 
   return (
@@ -259,11 +203,11 @@ export default function QuestionScreen() {
     >
       <SafeAreaView className="flex-1 bg-black" edges={['top', 'bottom']}>
         {/* Progress Bar */}
-        <ProgressBar current={questionIndex} total={TOTAL_QUESTIONS} />
+        <ProgressBar current={questionIndex} total={totalQuestions} />
 
         {/* Question */}
         <QuestionCard
-          questionText={currentQuestion.text}
+          questionText={currentQuestion.questionText}
           questionNumber={questionIndex}
         />
 
@@ -275,10 +219,10 @@ export default function QuestionScreen() {
           >
             {currentQuestion.options.map((option) => (
               <AnswerButton
-                key={option.value}
-                text={option.label}
-                value={option.value}
-                isSelected={selectedAnswer === option.value}
+                key={option}
+                text={option}
+                value={option}
+                isSelected={selectedAnswer === option}
                 onPress={handleAnswerSelect}
                 disabled={isProcessing}
               />

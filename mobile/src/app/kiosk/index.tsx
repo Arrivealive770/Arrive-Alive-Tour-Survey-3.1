@@ -8,6 +8,7 @@ import { useSurveyStore } from '@/lib/state/survey-store';
 import { useDeviceStore } from '@/lib/state/device-store';
 import { useDatabase } from '@/providers/DatabaseProvider';
 import { api } from '@/lib/api/api';
+import { useSurveyTypes } from '@/lib/survey-questions';
 import type { LucideIcon } from 'lucide-react-native';
 import type { SurveyTypeSlug, Event } from '@/lib/api/types';
 
@@ -28,6 +29,10 @@ export default function KioskHome() {
   const startSurvey = useSurveyStore((s) => s.startSurvey);
   const currentEventId = useDeviceStore((s) => s.currentEventId);
   const setDeviceConfig = useDeviceStore((s) => s.setDeviceConfig);
+
+  // Downloads and caches the questions while the kiosk is idle, so the survey
+  // itself still works if the venue's connection drops later.
+  useSurveyTypes();
 
   const [surveyTypes, setSurveyTypes] = useState<SurveyTypeSlug[]>([]);
   const [venueName, setVenueName] = useState<string>('');

@@ -16,40 +16,16 @@ import {
   ExternalLink,
   Monitor,
 } from 'lucide-react-native';
-import { useQuery } from '@tanstack/react-query';
-import { api } from '@/lib/api/api';
+import { useSurveyTypes, type SurveyTypeDefinition } from '@/lib/survey-questions';
 import { cn } from '@/lib/cn';
 import { useRouter } from 'expo-router';
-
-// Types for survey display
-interface SurveyQuestion {
-  id?: string;
-  orderIndex: number;
-  questionText: string;
-  answerType: string;
-  options: string[];
-  isRequired: boolean;
-}
-
-interface SurveyType {
-  id: string;
-  slug: string;
-  name: string;
-  description: string | null;
-  isActive: boolean;
-  createdAt: string;
-  questions: SurveyQuestion[];
-}
 
 export default function SurveysScreen() {
   const router = useRouter();
   const [expandedSurvey, setExpandedSurvey] = useState<string | null>(null);
 
-  // Fetch survey types from API
-  const { data: surveyTypes, isLoading, refetch, isRefetching } = useQuery({
-    queryKey: ['survey-types'],
-    queryFn: () => api.get<SurveyType[]>('/api/surveys/types?includeInactive=true'),
-  });
+  // Fetch survey types (shared cache with the kiosk)
+  const { data: surveyTypes, isLoading, refetch, isRefetching } = useSurveyTypes();
 
   const activeSurveys = surveyTypes?.filter((s) => s.isActive) || [];
   const inactiveSurveys = surveyTypes?.filter((s) => !s.isActive) || [];
@@ -61,7 +37,7 @@ export default function SurveysScreen() {
     }
   };
 
-  const renderSurveyCard = (survey: SurveyType) => {
+  const renderSurveyCard = (survey: SurveyTypeDefinition) => {
     const isExpanded = expandedSurvey === survey.id;
 
     return (

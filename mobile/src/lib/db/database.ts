@@ -8,10 +8,20 @@ import {
   type PhotoCacheItem,
   type PhotoQueueItem,
   type CurrentEvent,
+  type TodayStats,
+  type ActivityItem,
   SYNC_STATUS,
   UPLOAD_STATUS,
   PHOTO_STATUS,
 } from './schema';
+
+/** "jordan@email.com" -> "j***@email.com" */
+export function maskEmail(email: string | null): string | null {
+  if (!email) return null;
+  const [name, domain] = email.split('@');
+  if (!domain) return '***';
+  return `${name.slice(0, 1)}***@${domain}`;
+}
 
 export class DatabaseService {
   private db: SQLite.SQLiteDatabase | null = null;
@@ -138,6 +148,18 @@ export class DatabaseService {
     );
   }
 
+  /**
+   * Attach the age range collected on the demographics screen, which is shown
+   * after the survey has already been queued.
+   */
+  async updateSurveyAgeRange(localId: string, ageRange: string | null): Promise<void> {
+    const db = this.getDb();
+    await db.runAsync('UPDATE survey_queue SET ageRange = ? WHERE localId = ?', [
+      ageRange,
+      localId,
+    ]);
+  }
+
   async markSurveysSyncing(localIds: string[]): Promise<void> {
     if (localIds.length === 0) return;
     const db = this.getDb();
@@ -186,6 +208,70 @@ export class DatabaseService {
       }
     }
     return counts;
+  }
+
+  /**
+   * Counts for everything collected on this device today, read straight from the
+   * local queues so the numbers are correct even with no connectivity.
+   */
+  async getTodayStats(): Promise<TodayStats> {
+    const db = this.getDb();
+
+    const surveyRows = await db.getAllAsync<{ surveyTypeSlug: string; count: number }>(
+      `SELECT surveyTypeSlug, COUNT(*) as count FROM survey_queue
+       WHERE date(completedAt) = date('now', 'localtime')
+       GROUP BY surveyTypeSlug`
+    );
+
+    const pledgeRow = await db.getFirstAsync<{ count: number }>(
+      `SELECT COUNT(*) as count FROM pledge_queue
+       WHERE date(createdAt) = date('now', 'localtime')`
+    );
+
+    const photoRow = await db.getFirstAsync<{ count: number }>(
+      `SELECT COUNT(*) as count FROM photo_queue
+       WHERE date(createdAt) = date('now', 'localtime')`
+    );
+
+    return {
+      surveys: surveyRows.reduce((sum, row) => sum + row.count, 0),
+      pledges: pledgeRow?.count ?? 0,
+      photos: photoRow?.count ?? 0,
+      surveysByType: surveyRows.map((row) => ({
+        surveyTypeSlug: row.surveyTypeSlug,
+        count: row.count,
+      })),
+    };
+  }
+
+  /**
+   * Most recent surveys, pledges and photos captured on this device, newest
+   * first. Emails are masked so the dashboard can be shown in public.
+   */
+  async getRecentActivity(limit: number = 5): Promise<ActivityItem[]> {
+    const db = this.getDb();
+    const rows = await db.getAllAsync<{
+      id: string;
+      type: string;
+      label: string | null;
+      at: string;
+    }>(
+      `SELECT localId as id, 'survey' as type, surveyTypeSlug as label, completedAt as at FROM survey_queue
+       UNION ALL
+       SELECT localId as id, 'pledge' as type, email as label, createdAt as at FROM pledge_queue
+       UNION ALL
+       SELECT localId as id, 'photo' as type, NULL as label, createdAt as at FROM photo_queue
+       ORDER BY at DESC
+       LIMIT ?`,
+      [limit]
+    );
+
+    return rows.map((row) => ({
+      id: row.id,
+      type: row.type as ActivityItem['type'],
+      label: row.type === 'pledge' ? maskEmail(row.label) : row.label,
+      at: row.at,
+    }));
   }
 
   async deleteSyncedSurveys(olderThanDays: number = 7): Promise<number> {

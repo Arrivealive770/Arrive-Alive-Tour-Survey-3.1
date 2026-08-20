@@ -1,5 +1,6 @@
 import { useState, useMemo } from 'react';
-import { View, Text, ScrollView, Pressable } from 'react-native';
+import { View, Text, ScrollView, Pressable, ActivityIndicator } from 'react-native';
+import { useQuery } from '@tanstack/react-query';
 import { ChevronLeft } from 'lucide-react-native';
 import { useRouter } from 'expo-router';
 import {
@@ -13,49 +14,37 @@ import { BarChart, PieChart, LineChart, SURVEY_TYPE_COLORS, CHART_COLORS } from 
 import { ExportButton } from '@/components/admin/ExportButton';
 import { ClipboardList, Camera, TrendingUp, Percent } from 'lucide-react-native';
 import { SURVEY_TYPES } from '@/lib/api/types';
+import { api } from '@/lib/api/api';
+import { useDeviceStore } from '@/lib/state/device-store';
 
-// Mock data generator
-const generateMockData = (startDate: Date, endDate: Date, surveyType: string) => {
-  const days: { label: string; value: number }[] = [];
-  const current = new Date(startDate);
+interface AnalyticsData {
+  totalSurveys: number;
+  surveysByType: { surveyTypeSlug: string; count: number }[];
+  surveysByDay: { date: string; count: number }[];
+  totalPledges: number;
+  pledgeRate: number;
+}
 
-  while (current <= endDate) {
-    days.push({
-      label: `${current.getMonth() + 1}/${current.getDate()}`,
-      value: Math.floor(Math.random() * 30) + 5,
-    });
-    current.setDate(current.getDate() + 1);
-  }
+interface SurveyResultsData {
+  totalResponses: number;
+  questionResults: {
+    questionId: string;
+    orderIndex: number;
+    questionText: string;
+    totalResponses: number;
+    options: { label: string; count: number; percentage: number }[];
+  }[];
+}
 
-  return days.slice(-7); // Max 7 days for display
-};
-
-// Mock question response data
-const MOCK_QUESTION_RESPONSES = [
-  {
-    question: 'Q1: Awareness',
-    responses: [
-      { label: 'Yes', value: 156, color: CHART_COLORS.green },
-      { label: 'No', value: 44, color: CHART_COLORS.red },
-    ],
-  },
-  {
-    question: 'Q2: Prior Experience',
-    responses: [
-      { label: 'Never', value: 89, color: CHART_COLORS.blue },
-      { label: 'Once', value: 67, color: CHART_COLORS.purple },
-      { label: 'Multiple', value: 44, color: CHART_COLORS.amber },
-    ],
-  },
-  {
-    question: 'Q3: Impact Level',
-    responses: [
-      { label: 'Low', value: 45, color: CHART_COLORS.green },
-      { label: 'Medium', value: 98, color: CHART_COLORS.amber },
-      { label: 'High', value: 57, color: CHART_COLORS.red },
-    ],
-  },
+const QUESTION_COLORS = [
+  CHART_COLORS.blue,
+  CHART_COLORS.green,
+  CHART_COLORS.amber,
+  CHART_COLORS.purple,
+  CHART_COLORS.red,
 ];
+
+const toDateParam = (date: Date) => date.toISOString();
 
 export default function AnalyticsScreen() {
   const router = useRouter();
@@ -84,35 +73,90 @@ export default function AnalyticsScreen() {
     setFilters((prev) => ({ ...prev, [key]: value }));
   };
 
-  // Generate chart data based on filters
+  const teamId = useDeviceStore((state) => state.teamId);
+  const selectedType = (filters.surveyType as string) || '';
+  const startParam = toDateParam(dateRange.startDate);
+  const endParam = toDateParam(dateRange.endDate);
+
+  const analyticsQuery = useQuery({
+    queryKey: ['admin', 'analytics', teamId, startParam, endParam],
+    enabled: !!teamId,
+    queryFn: () =>
+      api.get<AnalyticsData>(
+        `/api/admin/analytics?teamId=${teamId}&startDate=${startParam}&endDate=${endParam}`
+      ),
+  });
+
+  // Per-question breakdown is only meaningful for one survey type at a time.
+  const resultsQuery = useQuery({
+    queryKey: ['admin', 'survey-results', selectedType, teamId, startParam, endParam],
+    enabled: !!selectedType && !!teamId,
+    queryFn: () =>
+      api.get<SurveyResultsData>(
+        `/api/surveys/results/${selectedType}?teamId=${teamId}&startDate=${startParam}&endDate=${endParam}`
+      ),
+  });
+
+  const analytics = analyticsQuery.data;
+  const isLoading = analyticsQuery.isLoading;
+  const isError = analyticsQuery.isError;
+
   const dailyData = useMemo(() => {
-    return generateMockData(
-      dateRange.startDate,
-      dateRange.endDate,
-      filters.surveyType as string
-    );
-  }, [dateRange, filters.surveyType]);
+    const byDay = analytics?.surveysByDay ?? [];
+    return byDay.slice(-7).map((day) => {
+      const [, month, dayOfMonth] = day.date.split('-');
+      return { label: `${Number(month)}/${Number(dayOfMonth)}`, value: day.count };
+    });
+  }, [analytics]);
 
   const surveyTypeData = useMemo(() => {
+    const counts = new Map(
+      (analytics?.surveysByType ?? []).map((row) => [row.surveyTypeSlug, row.count])
+    );
     return SURVEY_TYPES.map((type) => ({
       label: type.label,
-      value: Math.floor(Math.random() * 50) + 10,
+      value: counts.get(type.slug) ?? 0,
       color: SURVEY_TYPE_COLORS[type.slug],
+    })).filter((row) => row.value > 0);
+  }, [analytics]);
+
+  const questionBreakdown = useMemo(() => {
+    const results = selectedType ? resultsQuery.data?.questionResults ?? [] : [];
+    return results.map((question) => ({
+      question: `Q${question.orderIndex}: ${question.questionText}`,
+      responses: question.options.map((option, index) => ({
+        label: option.label,
+        value: option.count,
+        color: QUESTION_COLORS[index % QUESTION_COLORS.length],
+      })),
     }));
-  }, [dateRange]);
+  }, [selectedType, resultsQuery.data]);
 
-  const totalSurveys = surveyTypeData.reduce((sum, d) => sum + d.value, 0);
-  const totalPledges = Math.floor(totalSurveys * 0.68);
-  const conversionRate = Math.round((totalPledges / totalSurveys) * 100);
-  const avgPerDay = Math.round(totalSurveys / 7);
+  const filteredTypeTotal = selectedType
+    ? surveyTypeData.find((row) => row.label === SURVEY_TYPES.find((t) => t.slug === selectedType)?.label)?.value ?? 0
+    : 0;
 
+  const totalSurveys = selectedType ? filteredTypeTotal : analytics?.totalSurveys ?? 0;
+  const totalPledges = analytics?.totalPledges ?? 0;
+  const conversionRate = Math.round(analytics?.pledgeRate ?? 0);
+  const dayCount = Math.max(
+    1,
+    Math.round(
+      (dateRange.endDate.getTime() - dateRange.startDate.getTime()) / (24 * 60 * 60 * 1000)
+    )
+  );
+  const avgPerDay = Math.round(totalSurveys / dayCount);
+
+  // Pull the real CSV the server generates rather than re-deriving it here.
   const handleExport = async (): Promise<string> => {
-    // Generate CSV content
-    const headers = ['Date', 'Survey Type', 'Count', 'Pledges'];
-    const rows = dailyData.map((d) => [d.label, 'All', d.value, Math.floor(d.value * 0.68)]);
-
-    const csv = [headers.join(','), ...rows.map((r) => r.join(','))].join('\n');
-    return csv;
+    const baseUrl = process.env.EXPO_PUBLIC_BACKEND_URL ?? '';
+    const response = await fetch(
+      `${baseUrl}/api/admin/export/csv?teamId=${teamId}&startDate=${startParam}&endDate=${endParam}`
+    );
+    if (!response.ok) {
+      throw new Error('Export failed');
+    }
+    return response.text();
   };
 
   return (
@@ -182,6 +226,21 @@ export default function AnalyticsScreen() {
           />
         </View>
 
+        {/* Loading / error state for the synced numbers */}
+        {isLoading ? (
+          <View className="items-center py-4">
+            <ActivityIndicator size="large" color="#3b82f6" />
+          </View>
+        ) : null}
+        {isError ? (
+          <View className="bg-red-500/10 rounded-xl p-4 mb-4">
+            <Text className="text-red-400 text-sm text-center">
+              Could not load analytics. These numbers come from the server, so this
+              device needs an internet connection.
+            </Text>
+          </View>
+        ) : null}
+
         {/* Daily Surveys Chart */}
         <View className="bg-zinc-900 rounded-2xl p-4 mb-4">
           <Text className="text-white font-semibold mb-4">Surveys by Day</Text>
@@ -199,12 +258,22 @@ export default function AnalyticsScreen() {
           <Text className="text-white font-semibold mb-4">
             Question Response Breakdown
           </Text>
-          {MOCK_QUESTION_RESPONSES.map((q, index) => (
-            <View key={index} className="mb-6 last:mb-0">
-              <Text className="text-zinc-400 text-sm mb-3">{q.question}</Text>
-              <BarChart data={q.responses} />
-            </View>
-          ))}
+          {!selectedType ? (
+            <Text className="text-zinc-500 text-sm">
+              Pick a survey type above to see how each question was answered.
+            </Text>
+          ) : resultsQuery.isLoading ? (
+            <ActivityIndicator size="small" color="#3b82f6" />
+          ) : questionBreakdown.length === 0 ? (
+            <Text className="text-zinc-500 text-sm">No responses yet for this survey.</Text>
+          ) : (
+            questionBreakdown.map((q, index) => (
+              <View key={index} className="mb-6 last:mb-0">
+                <Text className="text-zinc-400 text-sm mb-3">{q.question}</Text>
+                <BarChart data={q.responses} />
+              </View>
+            ))
+          )}
         </View>
 
         {/* Export Button */}

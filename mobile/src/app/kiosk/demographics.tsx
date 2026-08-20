@@ -10,6 +10,7 @@ import Animated, {
 import * as Haptics from 'expo-haptics';
 import { IdleResetTimer } from '@/components/kiosk';
 import { useSurveyStore } from '@/lib/state/survey-store';
+import { useDatabase } from '@/providers/DatabaseProvider';
 
 const AnimatedPressable = Animated.createAnimatedComponent(Pressable);
 
@@ -80,6 +81,7 @@ function AgeBracketButton({ label, value, isSelected, onPress }: AgeBracketButto
 export default function DemographicsScreen() {
   const router = useRouter();
   const reset = useSurveyStore((s) => s.reset);
+  const { db } = useDatabase();
 
   const [selectedAge, setSelectedAge] = useState<string | null>(null);
   const [isProcessing, setIsProcessing] = useState(false);
@@ -100,11 +102,20 @@ export default function DemographicsScreen() {
     setSelectedAge(value);
     setIsProcessing(true);
 
+    // The survey row was already queued on the last question, so write the age
+    // onto that row rather than letting the answer fall on the floor.
+    const localId = useSurveyStore.getState().lastCompletedLocalId;
+    if (db && localId) {
+      db.updateSurveyAgeRange(localId, value).catch((error) => {
+        console.error('[Demographics] Failed to save age range:', error);
+      });
+    }
+
     // Auto-advance after selection
     advanceTimerRef.current = setTimeout(() => {
       router.replace('/kiosk/pledge-prompt' as any);
     }, 300);
-  }, [isProcessing, router]);
+  }, [isProcessing, router, db]);
 
   const handleSkip = useCallback(() => {
     Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);

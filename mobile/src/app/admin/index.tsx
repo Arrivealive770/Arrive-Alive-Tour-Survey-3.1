@@ -11,36 +11,40 @@ import {
   BarChart3,
   Clock,
 } from 'lucide-react-native';
+import { useQuery } from '@tanstack/react-query';
 import { SummaryCard } from '@/components/admin/SummaryCard';
 import { PieChart, SURVEY_TYPE_COLORS } from '@/components/admin/AnalyticsChart';
 import { useSync } from '@/providers/SyncProvider';
 import { useSyncStore } from '@/lib/state/sync-store';
 import { useDeviceStore } from '@/lib/state/device-store';
+import { useDatabase } from '@/providers/DatabaseProvider';
+import { getDatabaseSafe } from '@/lib/db/database';
+import type { ActivityItem } from '@/lib/db/schema';
 import { SURVEY_TYPES } from '@/lib/api/types';
 
-// Mock data for demonstration (in real app, would come from API/database)
-const MOCK_TODAY_STATS = {
-  surveys: 47,
-  pledges: 32,
-  surveysByType: [
-    { label: 'Marijuana', value: 15, color: SURVEY_TYPE_COLORS.marijuana },
-    { label: 'Alcohol', value: 12, color: SURVEY_TYPE_COLORS.alcohol },
-    { label: 'Distracted', value: 10, color: SURVEY_TYPE_COLORS.distracted },
-    { label: 'Impaired', value: 6, color: SURVEY_TYPE_COLORS.impaired },
-    { label: 'Combo', value: 4, color: SURVEY_TYPE_COLORS.combo },
-  ],
-  recentActivity: [
-    { id: '1', type: 'survey', surveyType: 'marijuana', time: '2 min ago' },
-    { id: '2', type: 'pledge', email: 'j***@email.com', time: '5 min ago' },
-    { id: '3', type: 'survey', surveyType: 'alcohol', time: '8 min ago' },
-    { id: '4', type: 'photo', time: '10 min ago' },
-    { id: '5', type: 'survey', surveyType: 'distracted', time: '15 min ago' },
-  ],
+const SURVEY_TYPE_LABELS: Record<string, string> = {
+  marijuana: 'Marijuana',
+  alcohol: 'Alcohol',
+  distracted: 'Distracted',
+  impaired: 'Impaired',
+  combo: 'Combo',
 };
+
+/** "2026-08-20T14:03:00Z" -> "12 min ago" */
+function timeAgo(iso: string): string {
+  const seconds = Math.max(0, Math.round((Date.now() - new Date(iso).getTime()) / 1000));
+  if (seconds < 60) return 'just now';
+  const minutes = Math.round(seconds / 60);
+  if (minutes < 60) return `${minutes} min ago`;
+  const hours = Math.round(minutes / 60);
+  if (hours < 24) return `${hours} hr ago`;
+  return `${Math.round(hours / 24)} d ago`;
+}
 
 export default function AdminDashboard() {
   const router = useRouter();
   const { isOnline, isSyncing, pendingCount, sync, lastSyncAt } = useSync();
+  const { db, isReady } = useDatabase();
   const [isRefreshing, setIsRefreshing] = useState(false);
 
   const pendingSurveys = useSyncStore((s) => s.pendingSurveys);
@@ -49,12 +53,41 @@ export default function AdminDashboard() {
 
   const teamCode = useDeviceStore((s) => s.teamCode);
 
+  // Real numbers, read from the local queues so they stay correct offline.
+  // Resolved via getDatabaseSafe() rather than the context value so the query
+  // function has no external dependencies.
+  const { data: dashboardData, refetch: refetchDashboard } = useQuery({
+    queryKey: ['admin', 'today-stats', isReady],
+    enabled: isReady,
+    queryFn: async () => {
+      const database = getDatabaseSafe();
+      if (!database) return null;
+      const [stats, activity] = await Promise.all([
+        database.getTodayStats(),
+        database.getRecentActivity(5),
+      ]);
+      return { stats, activity };
+    },
+  });
+
+  const todayStats = dashboardData?.stats;
+  const recentActivity: ActivityItem[] = dashboardData?.activity ?? [];
+
+  const surveysToday = todayStats?.surveys ?? 0;
+  const pledgesToday = todayStats?.pledges ?? 0;
+
+  const surveysByType = (todayStats?.surveysByType ?? []).map((row) => ({
+    label: SURVEY_TYPE_LABELS[row.surveyTypeSlug] ?? row.surveyTypeSlug,
+    value: row.count,
+    color:
+      SURVEY_TYPE_COLORS[row.surveyTypeSlug as keyof typeof SURVEY_TYPE_COLORS] ?? '#71717a',
+  }));
+
   const handleRefresh = useCallback(async () => {
     setIsRefreshing(true);
-    // In real app, would refresh stats from API
-    await new Promise((resolve) => setTimeout(resolve, 1000));
+    await refetchDashboard();
     setIsRefreshing(false);
-  }, []);
+  }, [refetchDashboard]);
 
   const handleForceSync = async () => {
     try {
@@ -74,8 +107,8 @@ export default function AdminDashboard() {
     });
   };
 
-  const conversionRate = MOCK_TODAY_STATS.surveys > 0
-    ? Math.round((MOCK_TODAY_STATS.pledges / MOCK_TODAY_STATS.surveys) * 100)
+  const conversionRate = surveysToday > 0
+    ? Math.round((pledgesToday / surveysToday) * 100)
     : 0;
 
   return (
@@ -123,14 +156,14 @@ export default function AdminDashboard() {
         <SummaryCard
           icon={ClipboardList}
           label="Surveys Today"
-          value={MOCK_TODAY_STATS.surveys}
+          value={surveysToday}
           accentColor="#3b82f6"
           className="flex-1 mr-2"
         />
         <SummaryCard
           icon={Camera}
           label="Pledges Today"
-          value={MOCK_TODAY_STATS.pledges}
+          value={pledgesToday}
           accentColor="#a855f7"
           className="flex-1 ml-2"
         />
@@ -163,7 +196,7 @@ export default function AdminDashboard() {
             <ChevronRight size={16} color="#3b82f6" />
           </Pressable>
         </View>
-        <PieChart data={MOCK_TODAY_STATS.surveysByType} />
+        <PieChart data={surveysByType} />
       </View>
 
       {/* Force Sync Button */}
@@ -214,40 +247,44 @@ export default function AdminDashboard() {
       {/* Recent Activity */}
       <View className="bg-zinc-900 rounded-2xl p-4 mb-4">
         <Text className="text-white text-lg font-semibold mb-4">Recent Activity</Text>
-        {MOCK_TODAY_STATS.recentActivity.map((activity) => (
-          <View
-            key={activity.id}
-            className="flex-row items-center py-3 border-b border-zinc-800 last:border-b-0"
-          >
+        {recentActivity.length === 0 ? (
+          <Text className="text-zinc-500 text-sm">No activity on this device yet.</Text>
+        ) : (
+          recentActivity.map((activity) => (
             <View
-              className={`w-8 h-8 rounded-lg items-center justify-center mr-3 ${
-                activity.type === 'survey'
-                  ? 'bg-blue-500/20'
-                  : activity.type === 'pledge'
-                  ? 'bg-purple-500/20'
-                  : 'bg-green-500/20'
-              }`}
+              key={activity.id}
+              className="flex-row items-center py-3 border-b border-zinc-800 last:border-b-0"
             >
-              {activity.type === 'survey' ? (
-                <ClipboardList size={16} color="#3b82f6" />
-              ) : activity.type === 'pledge' ? (
-                <Camera size={16} color="#a855f7" />
-              ) : (
-                <Camera size={16} color="#22c55e" />
-              )}
+              <View
+                className={`w-8 h-8 rounded-lg items-center justify-center mr-3 ${
+                  activity.type === 'survey'
+                    ? 'bg-blue-500/20'
+                    : activity.type === 'pledge'
+                    ? 'bg-purple-500/20'
+                    : 'bg-green-500/20'
+                }`}
+              >
+                {activity.type === 'survey' ? (
+                  <ClipboardList size={16} color="#3b82f6" />
+                ) : activity.type === 'pledge' ? (
+                  <Camera size={16} color="#a855f7" />
+                ) : (
+                  <Camera size={16} color="#22c55e" />
+                )}
+              </View>
+              <View className="flex-1">
+                <Text className="text-white text-sm">
+                  {activity.type === 'survey'
+                    ? `${SURVEY_TYPE_LABELS[activity.label ?? ''] ?? activity.label} Survey`
+                    : activity.type === 'pledge'
+                    ? `Pledge${activity.label ? ` - ${activity.label}` : ''}`
+                    : 'Photo captured'}
+                </Text>
+                <Text className="text-zinc-500 text-xs">{timeAgo(activity.at)}</Text>
+              </View>
             </View>
-            <View className="flex-1">
-              <Text className="text-white text-sm">
-                {activity.type === 'survey'
-                  ? `${activity.surveyType?.charAt(0).toUpperCase()}${activity.surveyType?.slice(1)} Survey`
-                  : activity.type === 'pledge'
-                  ? `Pledge ${activity.email ? `- ${activity.email}` : ''}`
-                  : 'Photo captured'}
-              </Text>
-              <Text className="text-zinc-500 text-xs">{activity.time}</Text>
-            </View>
-          </View>
-        ))}
+          ))
+        )}
       </View>
 
       {/* Analytics Link */}

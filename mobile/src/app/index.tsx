@@ -1,14 +1,20 @@
 import { useState } from 'react';
-import { View, Text, Pressable, TextInput, Modal, Image } from 'react-native';
+import { View, Text, Pressable, TextInput, Modal, Image, ActivityIndicator } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { router, Redirect } from 'expo-router';
-import { Play, RefreshCw, Camera, Tablet } from 'lucide-react-native';
-import { useDeviceStore, useDeviceType, useTeamId } from '@/lib/state/device-store';
+import { Play, RefreshCw, Camera, Tablet, Settings } from 'lucide-react-native';
+import {
+  useDeviceStore,
+  useDeviceHydrated,
+  useDeviceType,
+  useTeamId,
+} from '@/lib/state/device-store';
 import { cn } from '@/lib/cn';
 
 const AATLogo = require('@/assets/aat-logo.png');
 
 export default function HomeScreen() {
+  const hasHydrated = useDeviceHydrated();
   const teamId = useTeamId();
   const deviceType = useDeviceType();
   const adminPin = useDeviceStore((s) => s.adminPin);
@@ -28,6 +34,10 @@ export default function HomeScreen() {
     router.push('/photo-hub' as any);
   };
 
+  const handleOpenAdmin = () => {
+    router.push('/admin' as any);
+  };
+
   const handleResetDevice = () => {
     setShowResetModal(true);
     setPinInput('');
@@ -43,6 +53,16 @@ export default function HomeScreen() {
       setPinError(true);
     }
   };
+
+  // Saved settings load asynchronously. Rendering a decision before they arrive
+  // would bounce an already-configured device back to setup on every cold start.
+  if (!hasHydrated) {
+    return (
+      <View className="flex-1 bg-black items-center justify-center">
+        <ActivityIndicator size="large" color="#fff" />
+      </View>
+    );
+  }
 
   // Redirect to setup if not configured
   if (!isConfigured) {
@@ -107,6 +127,20 @@ export default function HomeScreen() {
               </View>
             </Pressable>
           )}
+
+          {/* Admin - PIN protected by the admin layout */}
+          <Pressable
+            onPress={handleOpenAdmin}
+            className="flex-row items-center w-full h-20 px-6 bg-zinc-900 rounded-2xl active:bg-zinc-800"
+          >
+            <View className="w-12 h-12 rounded-full bg-zinc-800 items-center justify-center mr-4">
+              <Settings size={24} color="#fff" />
+            </View>
+            <View className="flex-1">
+              <Text className="text-xl font-bold text-white">Admin</Text>
+              <Text className="text-sm text-zinc-500">Events, devices and results</Text>
+            </View>
+          </Pressable>
         </View>
 
         {/* Reset Button - small at bottom */}

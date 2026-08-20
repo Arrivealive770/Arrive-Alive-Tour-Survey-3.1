@@ -1,86 +1,46 @@
 import { useState, useCallback } from 'react';
-import { View, Text, ScrollView, RefreshControl } from 'react-native';
+import { View, Text, ScrollView, RefreshControl, ActivityIndicator } from 'react-native';
 import { Wifi, WifiOff, AlertTriangle } from 'lucide-react-native';
+import { useQuery } from '@tanstack/react-query';
 import { DeviceStatusCard } from '@/components/admin/DeviceStatusCard';
 import { useDeviceStore } from '@/lib/state/device-store';
 import { useSyncStore } from '@/lib/state/sync-store';
+import { api } from '@/lib/api/api';
 import type { Device } from '@/lib/api/types';
 
-// Mock devices for demonstration
-const MOCK_DEVICES: (Device & { pendingCount: number; isOnline: boolean })[] = [
-  {
-    id: 'device-1',
-    teamId: 'team-1',
-    deviceName: 'Tablet 1',
-    deviceType: 'tablet',
-    isActive: true,
-    lastSyncAt: new Date(Date.now() - 2 * 60 * 1000).toISOString(), // 2 minutes ago
-    createdAt: new Date().toISOString(),
-    pendingCount: 0,
-    isOnline: true,
-  },
-  {
-    id: 'device-2',
-    teamId: 'team-1',
-    deviceName: 'Tablet 2',
-    deviceType: 'tablet',
-    isActive: true,
-    lastSyncAt: new Date(Date.now() - 15 * 60 * 1000).toISOString(), // 15 minutes ago
-    createdAt: new Date().toISOString(),
-    pendingCount: 5,
-    isOnline: true,
-  },
-  {
-    id: 'device-3',
-    teamId: 'team-1',
-    deviceName: 'Photo Hub',
-    deviceType: 'phone',
-    isActive: true,
-    lastSyncAt: new Date(Date.now() - 5 * 60 * 1000).toISOString(), // 5 minutes ago
-    createdAt: new Date().toISOString(),
-    pendingCount: 3,
-    isOnline: true,
-  },
-  {
-    id: 'device-4',
-    teamId: 'team-1',
-    deviceName: 'Tablet 3',
-    deviceType: 'tablet',
-    isActive: true,
-    lastSyncAt: new Date(Date.now() - 2 * 60 * 60 * 1000).toISOString(), // 2 hours ago
-    createdAt: new Date().toISOString(),
-    pendingCount: 12,
-    isOnline: false,
-  },
-];
+// A device counts as online if the server heard from it recently.
+const ONLINE_WINDOW_MS = 10 * 60 * 1000;
 
 export default function DevicesScreen() {
-  const [devices, setDevices] = useState(MOCK_DEVICES);
   const [isRefreshing, setIsRefreshing] = useState(false);
 
   const currentDeviceId = useDeviceStore((s) => s.deviceId);
+  const teamId = useDeviceStore((s) => s.teamId);
   const isOnline = useSyncStore((s) => s.isOnline);
+  const pendingCount = useSyncStore((s) => s.pendingSurveys + s.pendingPledges + s.pendingPhotos);
+
+  const { data, isLoading, isError, refetch } = useQuery({
+    queryKey: ['admin', 'devices', teamId],
+    enabled: !!teamId,
+    queryFn: () => api.get<Device[]>(`/api/devices?teamId=${teamId}`),
+  });
+
+  const devices = (data ?? []).filter((device) => device.isActive);
 
   const handleRefresh = useCallback(async () => {
     setIsRefreshing(true);
-    // In real app, would fetch devices from API
-    await new Promise((resolve) => setTimeout(resolve, 1000));
-
-    // Simulate updating device status
-    setDevices((prev) =>
-      prev.map((device) => ({
-        ...device,
-        lastSyncAt: device.isOnline ? new Date().toISOString() : device.lastSyncAt,
-      }))
-    );
-
+    await refetch();
     setIsRefreshing(false);
-  }, []);
+  }, [refetch]);
 
-  const onlineDevices = devices.filter((d) => d.isOnline);
-  const offlineDevices = devices.filter((d) => !d.isOnline);
+  const isRecentlySynced = (device: Device) =>
+    !!device.lastSyncAt && Date.now() - new Date(device.lastSyncAt).getTime() < ONLINE_WINDOW_MS;
 
-  const totalPending = devices.reduce((sum, d) => sum + d.pendingCount, 0);
+  const onlineDevices = devices.filter(isRecentlySynced);
+  const offlineDevices = devices.filter((device) => !isRecentlySynced(device));
+
+  // Only this device knows its own queue depth; other devices report on sync.
+  const totalPending = pendingCount;
 
   return (
     <ScrollView
@@ -182,8 +142,8 @@ export default function DevicesScreen() {
               name={device.deviceName}
               type={device.deviceType}
               lastSyncTime={device.lastSyncAt}
-              pendingCount={device.pendingCount}
-              isOnline={device.isOnline}
+              pendingCount={device.id === currentDeviceId ? pendingCount : 0}
+              isOnline
             />
           ))}
         </View>
@@ -202,18 +162,39 @@ export default function DevicesScreen() {
               name={device.deviceName}
               type={device.deviceType}
               lastSyncTime={device.lastSyncAt}
-              pendingCount={device.pendingCount}
-              isOnline={device.isOnline}
+              pendingCount={device.id === currentDeviceId ? pendingCount : 0}
+              isOnline={false}
             />
           ))}
+        </View>
+      ) : null}
+
+      {/* Empty / error states */}
+      {isLoading ? (
+        <View className="items-center py-8">
+          <ActivityIndicator size="large" color="#3b82f6" />
+        </View>
+      ) : null}
+      {isError ? (
+        <View className="bg-zinc-900/50 rounded-xl p-4 mt-2">
+          <Text className="text-zinc-400 text-sm text-center">
+            Could not load devices. Pull down to try again.
+          </Text>
+        </View>
+      ) : null}
+      {!isLoading && !isError && devices.length === 0 ? (
+        <View className="bg-zinc-900/50 rounded-xl p-4 mt-2">
+          <Text className="text-zinc-400 text-sm text-center">
+            No devices registered for this team yet.
+          </Text>
         </View>
       ) : null}
 
       {/* Help Text */}
       <View className="bg-zinc-900/50 rounded-xl p-4 mt-2">
         <Text className="text-zinc-500 text-sm text-center">
-          Pull down to refresh device status. Devices are considered offline if they
-          haven't synced in the last 30 minutes.
+          Pull down to refresh. A device shows as offline if it hasn&apos;t synced in
+          the last 10 minutes.
         </Text>
       </View>
     </ScrollView>

@@ -41,6 +41,13 @@ interface DeviceActions {
   reset: () => void;
 }
 
+// Hydration state is kept outside DeviceState so it is never persisted and
+// never wiped by reset().
+interface DeviceHydration {
+  _hasHydrated: boolean;
+  setHasHydrated: (value: boolean) => void;
+}
+
 const initialState: DeviceState = {
   deviceId: null,
   deviceName: null,
@@ -58,10 +65,13 @@ const initialState: DeviceState = {
   tabletLocalPort: 8082,
 };
 
-export const useDeviceStore = create<DeviceState & DeviceActions>()(
+export const useDeviceStore = create<DeviceState & DeviceActions & DeviceHydration>()(
   persist(
     (set, get) => ({
       ...initialState,
+
+      _hasHydrated: false,
+      setHasHydrated: (value) => set({ _hasHydrated: value }),
 
       setDeviceConfig: (config) => {
         set((state) => ({
@@ -106,13 +116,25 @@ export const useDeviceStore = create<DeviceState & DeviceActions>()(
         localPhotoTransferEnabled: state.localPhotoTransferEnabled,
         tabletLocalIp: state.tabletLocalIp,
         tabletLocalPort: state.tabletLocalPort,
-        // Don't persist isKioskMode or currentEventId
+        // The selected event must survive an app restart. Without it a relaunched
+        // tablet/phone has no eventId, which silently drops pledges and blocks
+        // photo capture. It mirrors the `current_event` row in SQLite.
+        currentEventId: state.currentEventId,
+        picturePledgeEnabled: state.picturePledgeEnabled,
+        currentEventOverlayId: state.currentEventOverlayId,
+        // Don't persist isKioskMode - kiosk should never be locked on cold start
       }),
+      // AsyncStorage reads are async, so the store starts empty and fills in a
+      // tick later. Screens must wait for this before deciding "not configured".
+      onRehydrateStorage: () => (state) => {
+        state?.setHasHydrated(true);
+      },
     }
   )
 );
 
 // Selector hooks for accessing specific state slices
+export const useDeviceHydrated = () => useDeviceStore((s) => s._hasHydrated);
 export const useDeviceId = () => useDeviceStore((s) => s.deviceId);
 export const useDeviceType = () => useDeviceStore((s) => s.deviceType);
 export const useTeamId = () => useDeviceStore((s) => s.teamId);

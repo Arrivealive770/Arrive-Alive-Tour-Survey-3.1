@@ -162,6 +162,21 @@ export interface CurrentEvent {
   startedAt: string | null;
 }
 
+// Aggregated counts for the admin dashboard, computed from the local queues.
+export interface TodayStats {
+  surveys: number;
+  pledges: number;
+  photos: number;
+  surveysByType: { surveyTypeSlug: string; count: number }[];
+}
+
+export interface ActivityItem {
+  id: string;
+  type: 'survey' | 'pledge' | 'photo';
+  label: string | null; // survey type slug, masked email, or null for photos
+  at: string; // ISO timestamp
+}
+
 // Sync status constants
 export const SYNC_STATUS = {
   PENDING: 'pending',

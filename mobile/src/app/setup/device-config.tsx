@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react';
-import { View, Text, ActivityIndicator } from 'react-native';
+import { View, Text, ActivityIndicator, Pressable } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { router } from 'expo-router';
 import { useMutation } from '@tanstack/react-query';
@@ -55,14 +55,40 @@ export default function DeviceConfigScreen() {
   };
 
   const isLoading = registerDeviceMutation.isPending;
+  const registerError = registerDeviceMutation.error;
+
+  // Registration needs the server. If it fails, say so instead of leaving the
+  // person staring at a spinner or a button that appears to do nothing.
+  const renderError = () => (
+    <View className="items-center px-4">
+      <Text className="text-red-500 text-lg font-semibold text-center">
+        Could not reach the server
+      </Text>
+      <Text className="text-zinc-400 text-center mt-2">
+        Check this device&apos;s internet connection and try again.
+      </Text>
+      <Pressable
+        onPress={() => registerDeviceMutation.mutate(selectedRole ?? 'phone')}
+        className="mt-6 px-8 h-14 items-center justify-center bg-white rounded-xl active:bg-zinc-200"
+      >
+        <Text className="text-black font-semibold text-lg">Try Again</Text>
+      </Pressable>
+    </View>
+  );
 
   // If phone code, show loading while auto-registering
   if (codeType === 'phone') {
     return (
       <SafeAreaView className="flex-1 bg-black">
         <View className="flex-1 items-center justify-center">
-          <ActivityIndicator size="large" color="#fff" />
-          <Text className="text-white mt-4 text-lg">Setting up phone device...</Text>
+          {registerError ? (
+            renderError()
+          ) : (
+            <>
+              <ActivityIndicator size="large" color="#fff" />
+              <Text className="text-white mt-4 text-lg">Setting up phone device...</Text>
+            </>
+          )}
         </View>
       </SafeAreaView>
     );
@@ -107,6 +133,11 @@ export default function DeviceConfigScreen() {
             onPress={() => handleSelectRole('phone')}
           />
         </View>
+
+        {/* Registration error */}
+        {registerError && !isLoading ? (
+          <View className="mt-8">{renderError()}</View>
+        ) : null}
 
         {/* Footer note */}
         <View className="flex-1 justify-end pb-8">

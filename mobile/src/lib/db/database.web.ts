@@ -9,12 +9,22 @@ import {
   type PhotoCacheItem,
   type PhotoQueueItem,
   type CurrentEvent,
+  type TodayStats,
+  type ActivityItem,
   SYNC_STATUS,
   UPLOAD_STATUS,
   PHOTO_STATUS,
 } from './schema';
 
 const STORAGE_KEY = `${DATABASE_NAME}_data`;
+
+/** "jordan@email.com" -> "j***@email.com" */
+function maskEmail(email: string | null): string | null {
+  if (!email) return null;
+  const [name, domain] = email.split('@');
+  if (!domain) return '***';
+  return `${name.slice(0, 1)}***@${domain}`;
+}
 
 interface DatabaseData {
   device_config: Record<string, DeviceConfig>;
@@ -126,6 +136,14 @@ export class DatabaseService {
       .slice(0, limit);
   }
 
+  async updateSurveyAgeRange(localId: string, ageRange: string | null): Promise<void> {
+    this.ensureInitialized();
+    const survey = this.data.survey_queue[localId];
+    if (!survey) return;
+    survey.ageRange = ageRange;
+    saveData(this.data);
+  }
+
   async getSurveyById(localId: string): Promise<SurveyQueueItem | null> {
     this.ensureInitialized();
     return this.data.survey_queue[localId] ?? null;
@@ -174,6 +192,58 @@ export class DatabaseService {
       }
     }
     return counts;
+  }
+
+  async getTodayStats(): Promise<TodayStats> {
+    this.ensureInitialized();
+    const today = new Date().toDateString();
+    const isToday = (value: string | null) =>
+      !!value && new Date(value).toDateString() === today;
+
+    const surveys = Object.values(this.data.survey_queue).filter((s) =>
+      isToday(s.completedAt)
+    );
+    const byType = new Map<string, number>();
+    for (const survey of surveys) {
+      byType.set(survey.surveyTypeSlug, (byType.get(survey.surveyTypeSlug) ?? 0) + 1);
+    }
+
+    return {
+      surveys: surveys.length,
+      pledges: Object.values(this.data.pledge_queue).filter((p) => isToday(p.createdAt))
+        .length,
+      photos: Object.values(this.data.photo_queue).filter((p) => isToday(p.createdAt))
+        .length,
+      surveysByType: [...byType.entries()].map(([surveyTypeSlug, count]) => ({
+        surveyTypeSlug,
+        count,
+      })),
+    };
+  }
+
+  async getRecentActivity(limit: number = 5): Promise<ActivityItem[]> {
+    this.ensureInitialized();
+    const items: ActivityItem[] = [
+      ...Object.values(this.data.survey_queue).map((s) => ({
+        id: s.localId,
+        type: 'survey' as const,
+        label: s.surveyTypeSlug,
+        at: s.completedAt,
+      })),
+      ...Object.values(this.data.pledge_queue).map((p) => ({
+        id: p.localId,
+        type: 'pledge' as const,
+        label: maskEmail(p.email),
+        at: p.createdAt,
+      })),
+      ...Object.values(this.data.photo_queue).map((p) => ({
+        id: p.localId,
+        type: 'photo' as const,
+        label: null,
+        at: p.createdAt,
+      })),
+    ];
+    return items.sort((a, b) => b.at.localeCompare(a.at)).slice(0, limit);
   }
 
   async deleteSyncedSurveys(olderThanDays: number = 7): Promise<number> {

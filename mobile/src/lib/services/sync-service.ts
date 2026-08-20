@@ -239,11 +239,37 @@ class SyncService {
 
     try {
       // Get pending surveys
-      const pendingSurveys = await db.getPendingSurveys(BATCH_SIZE);
+      const allPending = await db.getPendingSurveys(BATCH_SIZE);
+
+      // The server rejects unknown event/team ids with a foreign-key error, so
+      // sending them just retries forever. Fill in the ids this device knows
+      // about; anything still unresolved is failed once, not looped on.
+      const currentEventId = useDeviceStore.getState().currentEventId;
+      const pendingSurveys = [];
+      for (const survey of allPending) {
+        const resolvedEventId =
+          survey.eventId && survey.eventId !== 'unknown' ? survey.eventId : currentEventId;
+        const resolvedTeamId =
+          survey.teamId && survey.teamId !== 'unknown' ? survey.teamId : teamId;
+
+        if (!resolvedEventId || resolvedEventId === 'unknown' || resolvedTeamId === 'unknown') {
+          console.warn(`[SyncService] Survey ${survey.localId} has no valid event - not syncable`);
+          await db.markSurveyFailed(survey.localId, 'No event selected when this survey was taken');
+          useSyncStore.getState().addError({
+            type: 'survey',
+            localId: survey.localId,
+            message: 'No event selected when this survey was taken',
+          });
+          totalFailed++;
+          continue;
+        }
+
+        pendingSurveys.push({ ...survey, eventId: resolvedEventId, teamId: resolvedTeamId });
+      }
 
       if (pendingSurveys.length === 0) {
         console.log('[SyncService] No pending surveys to sync');
-        return { synced: 0, failed: 0 };
+        return { synced: 0, failed: totalFailed };
       }
 
       console.log(`[SyncService] Syncing ${pendingSurveys.length} surveys`);

@@ -16,6 +16,10 @@ interface SurveyState {
 
   // Age range collected at start (if required)
   ageRange: string | null;
+
+  // localId of the survey just written to the queue. Demographics is shown
+  // after the survey is queued, so it needs this to attach the age range.
+  lastCompletedLocalId: string | null;
 }
 
 interface CompletedSurvey {
@@ -43,6 +47,7 @@ const initialState: SurveyState = {
   responses: {},
   startTime: null,
   ageRange: null,
+  lastCompletedLocalId: null,
 };
 
 export const useSurveyStore = create<SurveyState & SurveyActions>()((set, get) => ({
@@ -107,8 +112,9 @@ export const useSurveyStore = create<SurveyState & SurveyActions>()((set, get) =
       durationSeconds,
     };
 
-    // Reset state after completing
-    set(initialState);
+    // Reset state after completing, but keep the id so the demographics screen
+    // can still attach the age range to this survey.
+    set({ ...initialState, lastCompletedLocalId: completedSurvey.localId });
 
     return completedSurvey;
   },
@@ -118,10 +124,29 @@ export const useSurveyStore = create<SurveyState & SurveyActions>()((set, get) =
   },
 }));
 
+/**
+ * Flattens the session responses into the shape the backend aggregates:
+ * { "q1": "Yes", "q2": "Never", ... }. The server looks answers up by
+ * `q<orderIndex>` and matches them against the question's option strings, so
+ * anything else (including the nested SurveyResponse objects) reports as zero.
+ */
+export function toAnswerMap(
+  responses: Record<string, SurveyResponse>
+): Record<string, string> {
+  const answers: Record<string, string> = {};
+  Object.values(responses).forEach((response) => {
+    answers[response.questionId] = Array.isArray(response.answer)
+      ? response.answer.join(', ')
+      : String(response.answer);
+  });
+  return answers;
+}
+
 // Selector hooks for accessing specific state slices
 export const useCurrentSurveyType = () => useSurveyStore((s) => s.currentSurveyType);
 export const useCurrentQuestionIndex = () => useSurveyStore((s) => s.currentQuestionIndex);
 export const useSurveyResponses = () => useSurveyStore((s) => s.responses);
 export const useSurveyStartTime = () => useSurveyStore((s) => s.startTime);
 export const useSurveyAgeRange = () => useSurveyStore((s) => s.ageRange);
+export const useLastCompletedSurveyId = () => useSurveyStore((s) => s.lastCompletedLocalId);
 export const useIsSurveyActive = () => useSurveyStore((s) => s.currentSurveyType !== null);
