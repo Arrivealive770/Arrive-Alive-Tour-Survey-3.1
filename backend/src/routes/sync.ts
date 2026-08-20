@@ -173,13 +173,28 @@ syncRouter.post(
           continue;
         }
 
+        // The tablet knows the photo by its LOCAL id, so resolve it to the
+        // server row. Without this the pledge has no photo link and the photo
+        // cannot be deleted the moment the email is delivered.
+        let photoId = pledge.photoId || undefined;
+        if (!photoId && pledge.photoLocalId) {
+          const photo = await prisma.photo.findUnique({
+            where: { localId: pledge.photoLocalId },
+            select: { id: true },
+          });
+          photoId = photo?.id;
+        }
+
         const createdPledge = await prisma.pledge.create({
           data: {
             localId: pledge.localId,
             teamId: pledge.teamId,
             eventId: pledge.eventId,
             email: pledge.email || "",
-            surveyResponseId: pledge.surveyResponseId || undefined,
+            // surveyLocalId / surveyResponseId are accepted from older app
+            // builds for compatibility but are deliberately NOT stored: a
+            // pledge holds an email address, so linking it to a survey would
+            // de-anonymise the survey. See the note on SurveyResponse.
             photoId: pledge.photoId || undefined,
             emailStatus: pledge.email ? "pending" : "skipped",
             createdAt: pledge.createdAt ? new Date(pledge.createdAt) : new Date(),

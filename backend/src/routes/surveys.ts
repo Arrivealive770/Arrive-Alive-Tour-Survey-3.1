@@ -5,6 +5,36 @@ import { prisma } from "../prisma";
 
 const surveysRouter = new Hono();
 
+/**
+ * How a question is answered on the kiosk.
+ * - single_choice: pick exactly one option; the kiosk auto-advances.
+ * - multi_select:  multiple choice; pick any number of options and press
+ *                  Continue. The stored answer is an array of option labels.
+ */
+const ANSWER_TYPES = z.enum(["single_choice", "multi_select"]);
+
+/**
+ * Normalise one stored answer into the list of options it selected.
+ *
+ * A single-choice answer is a string; a multi-select answer is an array. Older
+ * app builds joined multi answers with ", " before sending, so that shape is
+ * accepted too — otherwise those responses would silently count as zero.
+ */
+function selectedOptions(answer: unknown, options: string[]): string[] {
+  if (Array.isArray(answer)) {
+    return answer.map((value) => String(value));
+  }
+  if (typeof answer !== "string" || answer === "") {
+    return [];
+  }
+  if (options.includes(answer)) {
+    return [answer];
+  }
+  // Not a known option on its own — it may be a legacy joined multi-answer.
+  const parts = answer.split(", ").map((part) => part.trim());
+  return parts.length > 1 && parts.every((part) => options.includes(part)) ? parts : [answer];
+}
+
 // GET /api/surveys/types - List all survey types with questions
 surveysRouter.get("/types", async (c) => {
   const includeInactive = c.req.query("includeInactive") === "true";
@@ -39,7 +69,7 @@ const createSurveyTypeSchema = z.object({
   questions: z.array(z.object({
     orderIndex: z.number().int().min(1),
     questionText: z.string().min(1, "Question text is required"),
-    answerType: z.string().default("single_choice"),
+    answerType: ANSWER_TYPES.default("single_choice"),
     options: z.array(z.string()).min(2, "At least 2 options required"),
     isRequired: z.boolean().default(true),
   })).optional(),
@@ -121,7 +151,7 @@ const updateSurveyTypeSchema = z.object({
     id: z.string().optional(), // If provided, update existing question
     orderIndex: z.number().int().min(1),
     questionText: z.string().min(1, "Question text is required"),
-    answerType: z.string().default("single_choice"),
+    answerType: ANSWER_TYPES.default("single_choice"),
     options: z.array(z.string()).min(2, "At least 2 options required"),
     isRequired: z.boolean().default(true),
   })).optional(),
@@ -451,17 +481,28 @@ surveysRouter.get("/results/:slug", async (c) => {
       optionCounts[opt] = 0;
     });
 
-    responses.forEach((response) => {
-      const answers = JSON.parse(response.responses) as Record<string, string>;
-      const questionKey = `q${question.orderIndex}`;
-      const answer = answers[questionKey];
+    // Number of PEOPLE who answered this question. For single choice that is
+    // the same as the sum of the counts; for multi select it is not, and
+    // percentages must be out of respondents or they add up past 100%.
+    let respondentCount = 0;
 
-      if (answer && optionCounts[answer] !== undefined) {
-        optionCounts[answer]++;
-      }
+    responses.forEach((response) => {
+      const answers = JSON.parse(response.responses) as Record<string, unknown>;
+      const questionKey = `q${question.orderIndex}`;
+      const picked = selectedOptions(answers[questionKey], options);
+
+      let counted = false;
+      picked.forEach((choice) => {
+        if (optionCounts[choice] !== undefined) {
+          optionCounts[choice]++;
+          counted = true;
+        }
+      });
+
+      if (counted) respondentCount++;
     });
 
-    const totalResponses = Object.values(optionCounts).reduce((sum, count) => sum + count, 0);
+    const totalResponses = respondentCount;
 
     return {
       questionId: question.id,

@@ -2,6 +2,8 @@ import { Hono } from "hono";
 import { zValidator } from "@hono/zod-validator";
 import { z } from "zod";
 import { prisma } from "../prisma";
+import { purgeEventParticipantData } from "../lib/pledge-privacy";
+import { eventPurgeScheduler } from "../lib/event-purge";
 
 const eventsRouter = new Hono();
 
@@ -103,6 +105,15 @@ const createEventSchema = z.object({
   venueCity: z.string().min(1, "Venue city is required"),
   venueState: z.string().min(1, "Venue state is required"),
   eventDate: z.string().transform((str) => new Date(str)),
+  // Designated end of the event. Every photo and email address for the event is
+  // deleted automatically once this time passes. Optional: without it, staff
+  // purge manually from the admin portal.
+  eventEndAt: z
+    .string()
+    .min(1)
+    .transform((str) => new Date(str))
+    .nullable()
+    .optional(),
   surveyTypes: z.array(z.string()).min(1, "At least one survey type is required"),
   overlayType: z.string().min(1, "Overlay type is required"),
   overlayId: z.string().min(1).optional(),
@@ -131,6 +142,7 @@ eventsRouter.post(
         venueCity: data.venueCity,
         venueState: data.venueState,
         eventDate: data.eventDate,
+        eventEndAt: data.eventEndAt ?? null,
         surveyTypes: JSON.stringify(data.surveyTypes),
         overlayType: data.overlayType,
         ...(data.overlayId && { overlayId: data.overlayId }),
@@ -154,6 +166,11 @@ const updateEventSchema = z.object({
   venueCity: z.string().min(1).optional(),
   venueState: z.string().min(1).optional(),
   eventDate: z.string().transform((str) => new Date(str)).optional(),
+  // "" or null clears the scheduled purge; a timestamp (re)schedules it.
+  eventEndAt: z
+    .union([z.string(), z.null()])
+    .transform((value) => (value ? new Date(value) : null))
+    .optional(),
   surveyTypes: z.array(z.string()).optional(),
   overlayType: z.string().min(1).optional(),
   overlayId: z.string().min(1).nullable().optional(),
@@ -193,6 +210,10 @@ eventsRouter.put(
         ...(data.venueCity && { venueCity: data.venueCity }),
         ...(data.venueState && { venueState: data.venueState }),
         ...(data.eventDate && { eventDate: data.eventDate }),
+        ...(data.eventEndAt !== undefined && { eventEndAt: data.eventEndAt }),
+        // Pushing the end time into the future (the event ran long) re-arms the
+        // purge for an event that was already cleaned up.
+        ...(data.eventEndAt && data.eventEndAt > new Date() && { photosPurgedAt: null }),
         ...(data.surveyTypes && { surveyTypes: JSON.stringify(data.surveyTypes) }),
         ...(data.overlayType && { overlayType: data.overlayType }),
         // overlayId may be set to a string (assign) or null (clear).
@@ -333,6 +354,33 @@ eventsRouter.put("/:id/complete", async (c) => {
   });
 
   return c.json({ data: event });
+});
+
+// POST /api/events/:id/purge - Delete every photo and every participant email
+// address for one event, right now. Same work the scheduled end-of-event purge
+// does; this is the "don't wait" button in the admin portal.
+//
+// Survey answers are NOT touched — the response reports how many survived.
+eventsRouter.post("/:id/purge", async (c) => {
+  const id = c.req.param("id");
+
+  const existingEvent = await prisma.event.findUnique({ where: { id } });
+
+  if (!existingEvent) {
+    return c.json({ error: { message: "Event not found", code: "NOT_FOUND" } }, 404);
+  }
+
+  const result = await purgeEventParticipantData(id);
+
+  return c.json({ data: result });
+});
+
+// POST /api/events/purge-due - Run the scheduled purge immediately for every
+// event whose designated end time has passed. The scheduler calls this same
+// code every 5 minutes; the endpoint exists so it can be verified on demand.
+eventsRouter.post("/purge-due", async (c) => {
+  const results = await eventPurgeScheduler.runOnce();
+  return c.json({ data: { purgedEventCount: results.length, results } });
 });
 
 export { eventsRouter };

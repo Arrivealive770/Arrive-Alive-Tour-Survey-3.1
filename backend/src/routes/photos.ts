@@ -8,24 +8,9 @@ import { join } from "path";
 import { randomUUID } from "crypto";
 import sharp from "sharp";
 import { getDeletablePhoneOriginals } from "../lib/photo-cleanup";
+import { deleteFromRemoteStorage, purgeEventPhotos } from "../lib/pledge-privacy";
 
 const photosRouter = new Hono();
-
-// Delete a previously-uploaded finished photo from storage.vibecodeapp.com.
-// Best-effort: logs but never throws so purge/delete flows always complete.
-const deleteFromRemoteStorage = async (fileUrl: string): Promise<void> => {
-  try {
-    // storage.vibecodeapp.com URLs look like https://storage.vibecodeapp.com/.../<fileId>/<filename>
-    const match = fileUrl.match(/storage\.vibecodeapp\.com\/.*?\/([^/]+)\/[^/]+$/);
-    const fileId = match?.[1];
-    if (!fileId) return;
-    await fetch(`https://storage.vibecodeapp.com/v1/files/${fileId}`, {
-      method: "DELETE",
-    });
-  } catch (error) {
-    console.error("[Photos] Failed to delete remote file:", fileUrl, error);
-  }
-};
 
 // Ensure uploads directory exists
 const UPLOADS_DIR = join(process.cwd(), "uploads");
@@ -438,38 +423,9 @@ photosRouter.delete("/purge/:eventId", async (c) => {
     return c.json({ error: { message: "Event not found", code: "NOT_FOUND" } }, 404);
   }
 
-  // Get all photos for the event that are not already deleted.
-  const photos = await prisma.photo.findMany({
-    where: { eventId, status: { not: "deleted" } },
-  });
+  const result = await purgeEventPhotos(eventId);
 
-  // Clean up local files on disk and remote (finished) files in storage.
-  for (const photo of photos) {
-    if (photo.storageKey) {
-      const filePath = join(UPLOADS_DIR, photo.storageKey);
-      try {
-        await unlink(filePath);
-      } catch {
-        // File might not exist, continue
-      }
-    }
-    if (photo.finishedPhotoUrl) {
-      await deleteFromRemoteStorage(photo.finishedPhotoUrl);
-    }
-  }
-
-  // Mark photos deleted (keep storageKey so devices can locate local copies to
-  // remove). deletedAt drives the deletion-propagation list.
-  const now = new Date();
-  const result = await prisma.photo.updateMany({
-    where: { eventId, status: { not: "deleted" } },
-    data: {
-      status: "deleted",
-      deletedAt: now,
-    },
-  });
-
-  return c.json({ data: { purgedCount: result.count } });
+  return c.json({ data: result });
 });
 
 // GET /api/photos/deleted/:teamId/:eventId - Deletion-propagation list.

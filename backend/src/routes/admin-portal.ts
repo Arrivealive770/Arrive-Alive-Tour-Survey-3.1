@@ -525,6 +525,7 @@ adminPortalRouter.get("/", (c) => {
                     <th>Venue</th>
                     <th>Location</th>
                     <th>Date</th>
+                    <th>Photo Deletion</th>
                     <th>Team</th>
                     <th>Status</th>
                     <th>Surveys</th>
@@ -785,6 +786,15 @@ adminPortalRouter.get("/", (c) => {
             <div class="form-group">
               <label for="eventDate">Event Date</label>
               <input type="datetime-local" id="eventDate" required>
+            </div>
+            <div class="form-group">
+              <label for="eventEndAt">Event End Time (photos auto-deleted)</label>
+              <input type="datetime-local" id="eventEndAt">
+              <div style="color: #888; font-size: 12px; margin-top: 4px;">
+                When this time passes, every photo and every participant email address
+                for this event is deleted automatically. Survey answers are kept.
+                Leave blank to purge manually instead.
+              </div>
             </div>
             <div class="form-group">
               <label>Survey Types</label>
@@ -1291,6 +1301,7 @@ adminPortalRouter.get("/", (c) => {
                 </td>
                 <td>\${escapeHtml(event.venueCity)}, \${escapeHtml(event.venueState)}</td>
                 <td>\${new Date(event.eventDate).toLocaleDateString()}</td>
+                <td>\${describePurge(event)}</td>
                 <td>\${event.team ? escapeHtml(event.team.name) : '-'}</td>
                 <td>
                   <span class="badge \${event.status === 'active' ? 'badge-success' : 'badge-warning'}">
@@ -1301,7 +1312,7 @@ adminPortalRouter.get("/", (c) => {
                 <td class="actions">
                   <button class="btn btn-secondary btn-sm" onclick="editEvent('\${event.id}')">Edit</button>
                   \${event.status === 'active' ? \`<button class="btn btn-warning btn-sm" onclick="completeEvent('\${event.id}')">Complete</button>\` : ''}
-                  <button class="btn btn-danger btn-sm" onclick="purgePledges('\${event.id}', '\${escapeHtml(event.venueName).replace(/'/g, "\\\\'")}')">Purge Pledges</button>
+                  <button class="btn btn-danger btn-sm" onclick="purgeEventData('\${event.id}', '\${escapeHtml(event.venueName).replace(/'/g, "\\\\'")}')">Purge Now</button>
                 </td>
               </tr>
             \`).join('');
@@ -1313,6 +1324,13 @@ adminPortalRouter.get("/", (c) => {
           }
         }
 
+        // datetime-local inputs want local wall-clock time, not UTC.
+        function toDateTimeLocal(isoString) {
+          const date = new Date(isoString);
+          const local = new Date(date.getTime() - date.getTimezoneOffset() * 60000);
+          return local.toISOString().slice(0, 16);
+        }
+
         function openEventModal(eventId = null) {
           document.getElementById('eventId').value = '';
           document.getElementById('eventTeam').value = '';
@@ -1320,6 +1338,7 @@ adminPortalRouter.get("/", (c) => {
           document.getElementById('eventVenueCity').value = '';
           document.getElementById('eventVenueState').value = '';
           document.getElementById('eventDate').value = '';
+          document.getElementById('eventEndAt').value = '';
           document.getElementById('eventOverlay').value = '';
           document.getElementById('eventStatus').value = 'active';
           document.getElementById('eventStatusGroup').style.display = 'none';
@@ -1340,6 +1359,10 @@ adminPortalRouter.get("/", (c) => {
               const date = new Date(event.eventDate);
               const localDate = new Date(date.getTime() - date.getTimezoneOffset() * 60000);
               document.getElementById('eventDate').value = localDate.toISOString().slice(0, 16);
+
+              document.getElementById('eventEndAt').value = event.eventEndAt
+                ? toDateTimeLocal(event.eventEndAt)
+                : '';
 
               document.getElementById('eventOverlay').value = event.overlayType;
               document.getElementById('eventStatus').value = event.status;
@@ -1388,11 +1411,28 @@ adminPortalRouter.get("/", (c) => {
           }
         }
 
-        // Post-event privacy purge. Deletes the photos and the participant
-        // email addresses for one event, and keeps the survey answers.
-        async function purgePledges(eventId, venueName) {
+        // What the Photo Deletion column shows for one event.
+        function describePurge(event) {
+          if (event.photosPurgedAt) {
+            return '<span class="badge badge-success">Deleted ' +
+              new Date(event.photosPurgedAt).toLocaleString() + '</span>';
+          }
+          if (!event.eventEndAt) {
+            return '<span class="badge badge-warning">Manual only</span>';
+          }
+          const endsAt = new Date(event.eventEndAt);
+          const label = endsAt.toLocaleString();
+          return endsAt <= new Date()
+            ? '<span class="badge badge-warning">Due ' + label + '</span>'
+            : '<span class="badge badge-info">Auto ' + label + '</span>';
+        }
+
+        // Post-event privacy purge, run on demand. Deletes the photos and the
+        // participant email addresses for one event, and keeps the survey
+        // answers. This is the same work the automatic end-of-event purge does.
+        async function purgeEventData(eventId, venueName) {
           if (!confirm(
-            'Purge pledge data for "' + venueName + '"?\\n\\n' +
+            'Delete participant data for "' + venueName + '" now?\\n\\n' +
             'This DELETES:\\n' +
             '  - all participant photos for this event\\n' +
             '  - all participant email addresses for this event\\n' +
@@ -1403,44 +1443,27 @@ adminPortalRouter.get("/", (c) => {
           )) return;
 
           try {
-            // Photos first: this unlinks the image files and flags the rows so
-            // the phone and tablets drop their local copies on next sync. Doing
-            // it before the pledges means a failure here leaves the emails in
-            // place rather than orphaning photos nothing points at any more.
-            const photoRes = await fetch(API_BASE + '/photos/purge/' + eventId, {
-              method: 'DELETE'
+            const res = await fetch(API_BASE + '/events/' + eventId + '/purge', {
+              method: 'POST'
             });
-            const photoData = await photoRes.json();
+            const data = await res.json();
 
-            if (photoData.error) {
-              alert('Could not purge photos: ' + photoData.error.message + '\\n\\nNothing was deleted.');
-              return;
-            }
-
-            const pledgeRes = await fetch(API_BASE + '/pledges/purge/' + eventId, {
-              method: 'DELETE'
-            });
-            const pledgeData = await pledgeRes.json();
-
-            if (pledgeData.error) {
-              alert(
-                'Photos were purged, but the email addresses could not be deleted: ' +
-                pledgeData.error.message + '\\n\\nPlease try Purge Pledges again.'
-              );
+            if (data.error) {
+              alert('Could not purge: ' + data.error.message);
               return;
             }
 
             alert(
               'Purge complete for "' + venueName + '".\\n\\n' +
-              'Deleted ' + (photoData.data.purgedCount || 0) + ' photo(s)\\n' +
-              'Deleted ' + (pledgeData.data.purgedPledgeCount || 0) + ' email address(es)\\n' +
-              'Deleted ' + (pledgeData.data.purgedQueuedEmailCount || 0) + ' unsent email(s)\\n\\n' +
-              'Kept ' + (pledgeData.data.survivingSurveyResponseCount || 0) + ' survey response(s).'
+              'Deleted ' + (data.data.purgedPhotoCount || 0) + ' photo(s)\\n' +
+              'Deleted ' + (data.data.purgedPledgeCount || 0) + ' email address(es)\\n' +
+              'Deleted ' + (data.data.purgedQueuedEmailCount || 0) + ' unsent email(s)\\n\\n' +
+              'Kept ' + (data.data.survivingSurveyResponseCount || 0) + ' survey response(s).'
             );
 
             loadEvents();
           } catch (err) {
-            alert('Error purging pledge data');
+            alert('Error purging participant data');
           }
         }
 
@@ -1452,6 +1475,7 @@ adminPortalRouter.get("/", (c) => {
           const venueCity = document.getElementById('eventVenueCity').value;
           const venueState = document.getElementById('eventVenueState').value;
           const eventDate = document.getElementById('eventDate').value;
+          const eventEndAtRaw = document.getElementById('eventEndAt').value;
           const overlayType = document.getElementById('eventOverlay').value;
           const status = document.getElementById('eventStatus').value;
           const picturePledgeEnabled = document.getElementById('eventPicturePledge').checked;
@@ -1475,6 +1499,9 @@ adminPortalRouter.get("/", (c) => {
               venueCity,
               venueState,
               eventDate,
+              // Sent as a full ISO timestamp so the server stores the same
+              // instant the staff member picked, not a UTC-shifted one.
+              eventEndAt: eventEndAtRaw ? new Date(eventEndAtRaw).toISOString() : null,
               overlayType,
               surveyTypes,
               picturePledgeEnabled
@@ -1986,19 +2013,24 @@ adminPortalRouter.get("/", (c) => {
               };
             });
 
-            // Calculate total for percentages
-            const optionTotal = aggregatedOptions.reduce((sum, opt) => sum + opt.count, 0);
+            // Percentages are out of the number of PEOPLE who answered this
+            // question, not the number of taps. On a multiple-choice question
+            // one person can pick three options, so summing the option counts
+            // would push the total past 100%.
+            const respondentTotal = validResults.reduce((sum, result) => {
+              const question = result.questionResults[qIndex];
+              return sum + (question ? question.totalResponses || 0 : 0);
+            }, 0);
 
-            // Update percentages
             aggregatedOptions.forEach(opt => {
-              opt.percentage = optionTotal > 0 ? Math.round((opt.count / optionTotal) * 100) : 0;
+              opt.percentage = respondentTotal > 0 ? Math.round((opt.count / respondentTotal) * 100) : 0;
             });
 
             return {
               questionId: templateQuestion.questionId,
               orderIndex: templateQuestion.orderIndex,
               questionText: templateQuestion.questionText,
-              totalResponses: optionTotal,
+              totalResponses: respondentTotal,
               options: aggregatedOptions
             };
           });
@@ -2287,6 +2319,9 @@ adminPortalRouter.get("/", (c) => {
           const questionText = existingQuestion ? existingQuestion.questionText : '';
           const options = existingQuestion ? existingQuestion.options : ['', ''];
           const isRequired = existingQuestion ? existingQuestion.isRequired : true;
+          const answerType = existingQuestion && existingQuestion.answerType === 'multi_select'
+            ? 'multi_select'
+            : 'single_choice';
 
           questionDiv.innerHTML = \`
             <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 12px;">
@@ -2296,6 +2331,17 @@ adminPortalRouter.get("/", (c) => {
             <div class="form-group" style="margin-bottom: 12px;">
               <label>Question Text</label>
               <input type="text" class="question-text" value="\${escapeHtml(questionText)}" placeholder="Enter your question" required>
+            </div>
+            <div class="form-group" style="margin-bottom: 12px;">
+              <label>Answer Type</label>
+              <select class="question-answer-type">
+                <option value="single_choice" \${answerType === 'single_choice' ? 'selected' : ''}>Single choice — pick one answer</option>
+                <option value="multi_select" \${answerType === 'multi_select' ? 'selected' : ''}>Multiple choice — pick any number of answers</option>
+              </select>
+              <small style="color: #888; display: block; margin-top: 4px;">
+                Single choice moves to the next question as soon as the guest taps an answer.
+                Multiple choice lets them tap several answers and then press Continue.
+              </small>
             </div>
             <div class="form-group" style="margin-bottom: 12px;">
               <label>Options</label>
@@ -2374,6 +2420,7 @@ adminPortalRouter.get("/", (c) => {
             const qEl = questionElements[i];
             const questionText = qEl.querySelector('.question-text').value;
             const isRequired = qEl.querySelector('.question-required').checked;
+            const answerType = qEl.querySelector('.question-answer-type').value;
             const optionInputs = qEl.querySelectorAll('.option-input');
             const options = Array.from(optionInputs).map(inp => inp.value).filter(v => v.trim() !== '');
 
@@ -2385,7 +2432,7 @@ adminPortalRouter.get("/", (c) => {
             questions.push({
               orderIndex: i + 1,
               questionText,
-              answerType: 'single_choice',
+              answerType,
               options,
               isRequired
             });

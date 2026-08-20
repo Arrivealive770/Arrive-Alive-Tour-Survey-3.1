@@ -1,5 +1,6 @@
 import { prisma } from "../prisma";
 import { emailService } from "./email-service";
+import { scrubPledgeAfterSend } from "./pledge-privacy";
 import type { EmailQueue } from "@prisma/client";
 
 export interface ProcessResult {
@@ -132,24 +133,21 @@ class EmailQueueProcessor {
       });
 
       if (sendResult.success) {
-        // Update queue item status to 'sent'
-        await prisma.emailQueue.update({
-          where: { id: queueItem.id },
-          data: {
-            status: "sent",
-            processedAt: new Date(),
-          },
+        // Delivered. Erase the participant's data straight away: the queue row
+        // (holds a copy of the address), the address on the pledge, and the
+        // photo itself when it was attached to the email rather than linked.
+        const scrub = await scrubPledgeAfterSend({
+          pledgeId: queueItem.pledgeId,
+          emailQueueId: queueItem.id,
+          photoWasEmbedded: sendResult.photoEmbedded,
         });
 
-        // Update the pledge email status
-        await prisma.pledge.update({
-          where: { id: queueItem.pledgeId },
-          data: {
-            emailStatus: "sent",
-            emailSentAt: new Date(),
-            emailError: null,
-          },
-        });
+        console.log(
+          `[EmailQueue] Delivered pledge ${queueItem.pledgeId}: address erased` +
+            (scrub.photoDeleted
+              ? ", photo deleted"
+              : ", photo kept until end-of-event purge (not attachable)")
+        );
 
         return true;
       } else {

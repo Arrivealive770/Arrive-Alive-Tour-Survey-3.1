@@ -7,6 +7,7 @@ import { auth } from "./auth";
 import { TAILSCALE_ORIGIN_REGEX, localNetworkOrigins, localIPv4Addresses } from "./lib/origins";
 import { emailService } from "./lib/email-service";
 import { emailQueueProcessor } from "./lib/email-queue-processor";
+import { eventPurgeScheduler } from "./lib/event-purge";
 import { sampleRouter } from "./routes/sample";
 import { teamsRouter } from "./routes/teams";
 import { devicesRouter } from "./routes/devices";
@@ -113,6 +114,11 @@ app.route("/admin", adminPortalRouter);
 // emails are drained automatically once a key is added and the server restarts.
 emailService.initialize();
 emailQueueProcessor.start();
+
+// Start the end-of-event purge. Deletes every photo and every participant
+// email address for any event whose designated end time has passed. Survey
+// answers are never touched.
+eventPurgeScheduler.start();
 
 const port = Number(process.env.PORT) || 3000;
 

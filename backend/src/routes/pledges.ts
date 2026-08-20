@@ -2,6 +2,7 @@ import { Hono } from "hono";
 import { zValidator } from "@hono/zod-validator";
 import { z } from "zod";
 import { prisma } from "../prisma";
+import { purgeEventPledgeEmails } from "../lib/pledge-privacy";
 
 const pledgesRouter = new Hono();
 
@@ -40,7 +41,8 @@ const createPledgeSchema = z.object({
   teamId: z.string().min(1, "Team ID is required"),
   eventId: z.string().min(1, "Event ID is required"),
   email: z.string().email("Valid email is required"),
-  surveyResponseId: z.string().optional(),
+  // No survey link is accepted: pledges carry an email address and surveys are
+  // anonymous, so the two are never joined. See the note on SurveyResponse.
   photoId: z.string().optional(),
   createdAt: z.string().transform((str) => new Date(str)).optional(),
 });
@@ -85,7 +87,6 @@ pledgesRouter.post(
         teamId: data.teamId,
         eventId: data.eventId,
         email: data.email,
-        surveyResponseId: data.surveyResponseId,
         photoId: data.photoId,
         emailStatus: "pending",
         createdAt: data.createdAt || new Date(),
@@ -157,10 +158,9 @@ pledgesRouter.put(
 // ADDRESSES live. EmailQueue rows cascade automatically (EmailQueue.pledge is
 // onDelete: Cascade), so nothing is left queued to send afterwards.
 //
-// SurveyResponse rows are deliberately NOT touched. The foreign key lives on
-// Pledge (pledge.surveyResponseId -> SurveyResponse), so deleting pledges
-// cannot cascade into survey data — the survey answers and age ranges that
-// reporting depends on survive the purge.
+// SurveyResponse rows are deliberately NOT touched, and cannot be: no foreign
+// key connects the two models, so the survey answers and age ranges reporting
+// depends on survive the purge.
 //
 // Photos are a separate concern: DELETE /api/photos/purge/:eventId unlinks the
 // image files and marks the rows deleted so the phone and both tablets drop
@@ -177,27 +177,9 @@ pledgesRouter.delete("/purge/:eventId", async (c) => {
     return c.json({ error: { message: "Event not found", code: "NOT_FOUND" } }, 404);
   }
 
-  // Counted before deleting so the response reports what was actually removed.
-  const queuedEmailCount = await prisma.emailQueue.count({
-    where: { pledge: { eventId } },
-  });
+  const result = await purgeEventPledgeEmails(eventId);
 
-  const result = await prisma.pledge.deleteMany({
-    where: { eventId },
-  });
-
-  // Proof for the caller that the purge kept what it was supposed to keep.
-  const survivingSurveyResponses = await prisma.surveyResponse.count({
-    where: { eventId },
-  });
-
-  return c.json({
-    data: {
-      purgedPledgeCount: result.count,
-      purgedQueuedEmailCount: queuedEmailCount,
-      survivingSurveyResponseCount: survivingSurveyResponses,
-    },
-  });
+  return c.json({ data: result });
 });
 
 export { pledgesRouter };

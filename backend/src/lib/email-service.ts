@@ -9,7 +9,27 @@ export interface SendPledgeEmailParams {
 export interface SendEmailResult {
   success: boolean;
   error?: string;
+  /**
+   * True when the participant's photo travelled INSIDE the email (as an
+   * attachment), so their copy does not depend on our server keeping the file.
+   * Only then is it safe to delete the photo immediately after sending.
+   * False means the email links to the photo and the file must be kept until
+   * the end-of-event purge.
+   */
+  photoEmbedded: boolean;
 }
+
+interface PhotoAttachment {
+  filename: string;
+  contentType: string;
+  base64: string;
+}
+
+/** Inline reference used in the HTML body when the image is attached. */
+const PHOTO_CONTENT_ID = "pledgephoto";
+
+/** Refuse to inline anything absurd; email providers reject large payloads. */
+const MAX_ATTACHMENT_BYTES = 8 * 1024 * 1024;
 
 type Provider = "resend" | "sendgrid" | null;
 
@@ -59,36 +79,107 @@ class EmailService {
       return {
         success: false,
         error: "Email service not configured - set RESEND_API_KEY or SENDGRID_API_KEY",
+        photoEmbedded: false,
       };
     }
 
     const { to, photoUrl } = params;
     const subject = "Your S.A.F.E. Pledge Photo";
-    const html = this.generatePledgeEmailHtml({ photoUrl });
+
+    // Attach the photo rather than linking it. The tour deletes its copy as
+    // soon as this email is delivered, so a linked image would turn into a
+    // broken image in the participant's inbox.
+    const attachment = await this.fetchPhotoAttachment(photoUrl);
+    const html = this.generatePledgeEmailHtml({
+      photoUrl,
+      attached: attachment !== null,
+    });
 
     try {
       if (this.provider === "resend") {
-        await this.sendViaResend({ to, subject, html });
+        await this.sendViaResend({ to, subject, html, attachment });
       } else {
-        await this.sendViaSendGrid({ to, subject, html });
+        await this.sendViaSendGrid({ to, subject, html, attachment });
       }
 
-      console.log(`Pledge email sent successfully to ${to} via ${this.provider}`);
-      return { success: true };
+      console.log(
+        `Pledge email sent successfully to ${to} via ${this.provider}` +
+          (attachment ? " (photo attached)" : " (no photo attached)")
+      );
+      return { success: true, photoEmbedded: attachment !== null };
     } catch (error) {
       const errorMessage = error instanceof Error ? error.message : "Unknown error";
       console.error(`Failed to send pledge email to ${to}:`, errorMessage);
       return {
         success: false,
         error: errorMessage,
+        photoEmbedded: false,
       };
     }
   }
 
   /**
+   * Download the pledge photo so it can be attached to the email.
+   *
+   * Returns null when there is no photo, when it cannot be downloaded, or when
+   * it is too large to attach. Callers treat null as "the photo is NOT in the
+   * participant's hands yet" and keep the server copy alive.
+   */
+  private async fetchPhotoAttachment(photoUrl?: string): Promise<PhotoAttachment | null> {
+    const absoluteUrl = this.toAbsoluteUrl(photoUrl);
+    if (!absoluteUrl) return null;
+
+    try {
+      const response = await fetch(absoluteUrl);
+      if (!response.ok) {
+        console.error(
+          `[EmailService] Could not download pledge photo (HTTP ${response.status}): ${absoluteUrl}`
+        );
+        return null;
+      }
+
+      const bytes = new Uint8Array(await response.arrayBuffer());
+      if (bytes.byteLength === 0 || bytes.byteLength > MAX_ATTACHMENT_BYTES) {
+        console.error(
+          `[EmailService] Pledge photo not attachable (${bytes.byteLength} bytes): ${absoluteUrl}`
+        );
+        return null;
+      }
+
+      const contentType = response.headers.get("content-type") || "image/jpeg";
+      const extension = contentType.includes("png") ? "png" : "jpg";
+
+      return {
+        filename: `arrive-alive-pledge.${extension}`,
+        contentType,
+        base64: Buffer.from(bytes).toString("base64"),
+      };
+    } catch (error) {
+      console.error(`[EmailService] Error downloading pledge photo ${absoluteUrl}:`, error);
+      return null;
+    }
+  }
+
+  /**
+   * Composited pledge photos are absolute CDN URLs, but the fallback path
+   * stores a server-relative one (/uploads/...).
+   */
+  private toAbsoluteUrl(photoUrl?: string): string | undefined {
+    if (!photoUrl) return undefined;
+    return photoUrl.startsWith("/")
+      ? `${env.BACKEND_URL.replace(/\/$/, "")}${photoUrl}`
+      : photoUrl;
+  }
+
+  /**
    * Send via Resend REST API (https://resend.com)
    */
-  private async sendViaResend(params: { to: string; subject: string; html: string }): Promise<void> {
+  private async sendViaResend(params: {
+    to: string;
+    subject: string;
+    html: string;
+    attachment: PhotoAttachment | null;
+  }): Promise<void> {
     const response = await fetch("https://api.resend.com/emails", {
       method: "POST",
       headers: {
@@ -100,6 +191,16 @@ class EmailService {
         to: [params.to],
         subject: params.subject,
         html: params.html,
+        ...(params.attachment && {
+          attachments: [
+            {
+              filename: params.attachment.filename,
+              content: params.attachment.base64,
+              content_type: params.attachment.contentType,
+              content_id: PHOTO_CONTENT_ID,
+            },
+          ],
+        }),
       }),
     });
 
@@ -112,7 +213,12 @@ class EmailService {
   /**
    * Send via SendGrid REST API (https://sendgrid.com)
    */
-  private async sendViaSendGrid(params: { to: string; subject: string; html: string }): Promise<void> {
+  private async sendViaSendGrid(params: {
+    to: string;
+    subject: string;
+    html: string;
+    attachment: PhotoAttachment | null;
+  }): Promise<void> {
     const response = await fetch("https://api.sendgrid.com/v3/mail/send", {
       method: "POST",
       headers: {
@@ -124,6 +230,17 @@ class EmailService {
         from: { email: env.EMAIL_FROM_ADDRESS, name: env.EMAIL_FROM_NAME },
         subject: params.subject,
         content: [{ type: "text/html", value: params.html }],
+        ...(params.attachment && {
+          attachments: [
+            {
+              content: params.attachment.base64,
+              filename: params.attachment.filename,
+              type: params.attachment.contentType,
+              disposition: "inline",
+              content_id: PHOTO_CONTENT_ID,
+            },
+          ],
+        }),
       }),
     });
 
@@ -136,20 +253,22 @@ class EmailService {
   /**
    * Generate the HTML body for the pledge email
    */
-  generatePledgeEmailHtml(params: { photoUrl?: string }): string {
-    const { photoUrl } = params;
+  generatePledgeEmailHtml(params: { photoUrl?: string; attached?: boolean }): string {
+    const { photoUrl, attached = false } = params;
 
-    // Composited pledge photos are absolute CDN URLs, but the fallback path
-    // stores a server-relative one (/uploads/...). Email clients cannot
-    // resolve relative paths, so make it absolute or the recipient just sees
-    // a broken image.
-    const absolutePhotoUrl = photoUrl?.startsWith("/")
-      ? `${env.BACKEND_URL.replace(/\/$/, "")}${photoUrl}`
-      : photoUrl;
+    // When the photo travels with the email we point at the attachment, so the
+    // image keeps working after the tour deletes its copy. Only if the photo
+    // could not be attached do we fall back to linking it — and in that case
+    // the file is kept until the end-of-event purge. Email clients cannot
+    // resolve relative paths, so the fallback link must be absolute.
+    const absolutePhotoUrl = this.toAbsoluteUrl(photoUrl);
 
-    const photoSection = absolutePhotoUrl
-      ? `<p><img src="${absolutePhotoUrl}" alt="Your Pledge Photo" style="max-width: 100%; height: auto;" /></p>`
-      : "";
+    const photoSection = attached
+      ? `<p><img src="cid:${PHOTO_CONTENT_ID}" alt="Your Pledge Photo" style="max-width: 100%; height: auto;" /></p>
+  <p style="color: #666; font-size: 13px;">Your pledge photo is attached to this email — save it now, we do not keep a copy.</p>`
+      : absolutePhotoUrl
+        ? `<p><img src="${absolutePhotoUrl}" alt="Your Pledge Photo" style="max-width: 100%; height: auto;" /></p>`
+        : "";
 
     return `<!DOCTYPE html>
 <html>

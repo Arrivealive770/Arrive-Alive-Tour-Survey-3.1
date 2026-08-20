@@ -113,6 +113,14 @@ model Event {
   venueCity            String
   venueState           String
   eventDate            DateTime
+  // Designated end of the event. Once this time passes, the automatic purge
+  // (src/lib/event-purge.ts) deletes EVERY photo and every participant email
+  // address belonging to this event. Null = no scheduled purge; staff must run
+  // "Purge Now" from the admin portal instead.
+  eventEndAt           DateTime?
+  // Set by the purge once it has finished for this event. Also stops the purge
+  // from re-running against the same event every tick.
+  photosPurgedAt       DateTime?
   surveyTypes          String   // JSON string array of survey type slugs enabled for this event
   overlayType          String   // Legacy: photo overlay type slug for this event
   overlayId            String?  // Custom uploaded overlay assigned to this event
@@ -131,6 +139,7 @@ model Event {
 
   @@index([teamId])
   @@index([eventDate])
+  @@index([eventEndAt])
   @@index([status])
 }
 
@@ -152,9 +161,12 @@ model SurveyType {
 model SurveyQuestion {
   id           String   @id @default(cuid())
   surveyTypeId String
-  orderIndex   Int      // 1-11
+  orderIndex   Int      // 1-based position within the survey
   questionText String
-  answerType   String   @default("single_choice") // Currently only "single_choice"
+  // "single_choice" — pick exactly one option, kiosk auto-advances.
+  // "multi_select" — multiple choice: pick any number of options, kiosk shows
+  //                  a Continue button. The answer is stored as a JSON array.
+  answerType   String   @default("single_choice")
   options      String   // JSON array of answer options
   isRequired   Boolean  @default(true)
   createdAt    DateTime @default(now())
@@ -166,6 +178,14 @@ model SurveyQuestion {
   @@index([surveyTypeId])
 }
 
+// Anonymous survey submission.
+//
+// PRIVACY RULE: this model must never carry anything that identifies the
+// participant, and nothing may point at it from a model that does. There is
+// deliberately NO relation to Pledge — a pledge holds an email address, so a
+// pledge -> survey foreign key would turn every survey answer into identified
+// data. Do not add one back. `deviceId` identifies the tablet, not a person,
+// and is only kept so a mis-syncing device can be found.
 model SurveyResponse {
   id              String    @id @default(cuid())
   localId         String    @unique // Unique ID from device for deduplication
@@ -179,11 +199,10 @@ model SurveyResponse {
   syncedAt        DateTime?
   durationSeconds Int?      // Time taken to complete survey
 
-  // Relations
+  // Relations (no Pledge relation on purpose — see the note above)
   team    Team     @relation(fields: [teamId], references: [id], onDelete: Cascade)
   event   Event    @relation(fields: [eventId], references: [id], onDelete: Cascade)
   device  Device?  @relation(fields: [deviceId], references: [id], onDelete: SetNull)
-  pledges Pledge[]
 
   @@index([localId])
   @@index([teamId])
@@ -192,22 +211,30 @@ model SurveyResponse {
   @@index([completedAt])
 }
 
+// A participant's picture pledge.
+//
+// This is the ONLY model that holds a participant email address, and it holds
+// it for as long as it takes to send them their photo — no longer. Once the
+// email is delivered, `email` is blanked and `emailPurgedAt` is stamped by
+// scrubPledgeAfterSend() in src/lib/pledge-privacy.ts. The empty row is kept so
+// the pledge still counts in reporting.
+//
+// There is intentionally NO link to SurveyResponse. See the note on that model.
 model Pledge {
   id               String    @id @default(cuid())
   localId          String    @unique // Unique ID from device for deduplication
-  surveyResponseId String?   // Optional link to survey response
   teamId           String
   eventId          String
-  email            String
+  email            String    // Blanked to "" once the photo email has been sent
+  emailPurgedAt    DateTime? // When the address was erased from this row
   photoId          String?   // Optional link to photo
-  emailStatus      String    @default("pending") // "pending" | "queued" | "sent" | "failed"
+  emailStatus      String    @default("pending") // "pending" | "queued" | "sent" | "failed" | "skipped"
   emailSentAt      DateTime?
   emailError       String?
   createdAt        DateTime  @default(now())
   syncedAt         DateTime?
 
   // Relations
-  surveyResponse SurveyResponse? @relation(fields: [surveyResponseId], references: [id], onDelete: SetNull)
   team           Team            @relation(fields: [teamId], references: [id], onDelete: Cascade)
   event          Event           @relation(fields: [eventId], references: [id], onDelete: Cascade)
   photo          Photo?          @relation(fields: [photoId], references: [id], onDelete: SetNull)
@@ -281,6 +308,11 @@ model PhotoReceipt {
   @@index([deviceId])
 }
 
+// Outbound pledge email waiting to be sent.
+//
+// PRIVACY: `toEmail` is a participant address, so a queue row is DELETED the
+// moment the send succeeds (see EmailQueueProcessor.processEmail). Rows only
+// linger while an email is pending or has permanently failed.
 model EmailQueue {
   id          String    @id @default(cuid())
   pledgeId    String
