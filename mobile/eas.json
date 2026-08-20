@@ -11,9 +11,16 @@
       "distribution": "internal",
       "android": {
         "buildType": "apk"
+      },
+      "env": {
+        "EXPO_PUBLIC_BACKEND_URL": "https://arrivealive.tail04a318.ts.net"
       }
     },
-    "production": {}
+    "production": {
+      "env": {
+        "EXPO_PUBLIC_BACKEND_URL": "https://arrivealive.tail04a318.ts.net"
+      }
+    }
   },
   "submit": {
     "production": {}
