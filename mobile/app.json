@@ -2,6 +2,7 @@
   "expo": {
     "name": "Arrive Alive Survey",
     "slug": "arrive-alive-survey",
+    "owner": "unitecorp",
     "scheme": "arrivealive",
     "version": "1.0.0",
     "orientation": "portrait",
@@ -38,6 +39,11 @@
     ],
     "experiments": {
       "typedRoutes": true
+    },
+    "extra": {
+      "eas": {
+        "projectId": "95302b97-1158-4b62-956f-d97963cab980"
+      }
     }
   }
 }
