@@ -32,6 +32,8 @@ import type {
 const AnimatedPressable = Animated.createAnimatedComponent(Pressable);
 
 const IDLE_TIMEOUT = 60000; // 60 seconds
+// How often the grid re-checks for photos just taken on the phone.
+const PHOTO_POLL_INTERVAL_MS = 5000;
 
 export default function PhotoSelectionScreen() {
   const router = useRouter();
@@ -75,9 +77,18 @@ export default function PhotoSelectionScreen() {
     }
   }, [teamId, eventId]);
 
+  // Keep the grid live. Photos arrive from the roaming phone at any moment, and
+  // the other tablet can take one at any moment too, so re-check on a short
+  // timer instead of making guests hunt for the Refresh button. Polling pauses
+  // once a photo is picked (the preview shouldn't flicker underneath them).
   useEffect(() => {
     loadPhotos();
-  }, [loadPhotos]);
+
+    if (selectedPhotoId) return;
+
+    const interval = setInterval(loadPhotos, PHOTO_POLL_INTERVAL_MS);
+    return () => clearInterval(interval);
+  }, [loadPhotos, selectedPhotoId]);
 
   const showToast = useCallback((message: string) => {
     setToast(message);

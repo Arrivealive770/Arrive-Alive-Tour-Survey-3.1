@@ -73,10 +73,29 @@ export interface CreateEventRequest {
 }
 
 // Overlay
+/**
+ * How an overlay is applied to a pledge photo:
+ * - 'frame'   the artwork is a polaroid-style frame and the photo goes inside
+ *             its window (this is what a JPG always is — it can't be see-through)
+ * - 'overlay' the artwork is laid on top of the photo (needs transparency)
+ * - 'auto'    decided by the backend from the image itself
+ */
+export type OverlayMode = 'auto' | 'overlay' | 'frame';
+
 export interface Overlay {
   id: string;
   name: string;
-  imageUrl: string;
+  url: string;
+  filename: string;
+  contentType: string;
+  sizeBytes: number;
+  isActive: boolean;
+  mode: OverlayMode;
+  /** Window rect for frame mode, as fractions (0-1) of the frame image. */
+  windowX: number | null;
+  windowY: number | null;
+  windowW: number | null;
+  windowH: number | null;
   createdAt: string;
 }
 

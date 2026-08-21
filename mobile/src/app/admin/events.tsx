@@ -10,7 +10,18 @@ import {
   Alert,
   ActivityIndicator,
 } from 'react-native';
-import { Plus, X, MapPin, Check, Calendar, Image as ImageIcon, Trash2 } from 'lucide-react-native';
+import {
+  Plus,
+  X,
+  MapPin,
+  Check,
+  Calendar,
+  Image as ImageIcon,
+  Trash2,
+  Upload,
+} from 'lucide-react-native';
+import { Image } from 'expo-image';
+import * as ImagePicker from 'expo-image-picker';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { EventCard } from '@/components/admin/EventCard';
 import { useDeviceStore } from '@/lib/state/device-store';
@@ -110,6 +121,72 @@ export default function EventsScreen() {
       Alert.alert('Error', error.message || 'Failed to assign overlay');
     },
   });
+
+  // Upload a new overlay image (JPG frame or transparent PNG) from this device.
+  const uploadOverlayMutation = useMutation({
+    mutationFn: async ({ uri, name, fileName }: { uri: string; name: string; fileName: string }) => {
+      const formData = new FormData();
+      // React Native's FormData takes a { uri, name, type } descriptor.
+      formData.append('file', {
+        uri,
+        name: fileName,
+        type: fileName.toLowerCase().endsWith('.png') ? 'image/png' : 'image/jpeg',
+      } as unknown as Blob);
+      formData.append('name', name);
+
+      const response = await fetch(`${process.env.EXPO_PUBLIC_BACKEND_URL}/api/overlays`, {
+        method: 'POST',
+        body: formData,
+      });
+      const body = (await response.json()) as {
+        data?: Overlay;
+        error?: { message?: string };
+      };
+      if (!response.ok || !body.data) {
+        throw new Error(body.error?.message ?? 'Upload failed');
+      }
+      return body.data;
+    },
+    onSuccess: (overlay) => {
+      queryClient.invalidateQueries({ queryKey: ['overlays'] });
+      Alert.alert(
+        'Overlay Uploaded',
+        overlay.mode === 'frame'
+          ? `"${overlay.name}" was added as a photo frame — pledge photos will sit inside it, like a polaroid. Tap it below to use it for this event.`
+          : `"${overlay.name}" was added and will be laid over pledge photos. Tap it below to use it for this event.`
+      );
+    },
+    onError: (error: Error) => {
+      Alert.alert('Upload Failed', error.message || 'Could not upload that image');
+    },
+  });
+
+  const handleUploadOverlay = async () => {
+    const permission = await ImagePicker.requestMediaLibraryPermissionsAsync();
+    if (!permission.granted) {
+      Alert.alert(
+        'Photo Access Needed',
+        'Allow photo access so you can pick an overlay image from this device.'
+      );
+      return;
+    }
+
+    const result = await ImagePicker.launchImageLibraryAsync({
+      mediaTypes: ['images'],
+      quality: 1,
+      allowsMultipleSelection: false,
+    });
+    if (result.canceled || !result.assets[0]) return;
+
+    const asset = result.assets[0];
+    const fileName = asset.fileName ?? `overlay-${Date.now()}.jpg`;
+    // Name it after the current event so it's easy to find later.
+    const name = selectedEvent
+      ? `${selectedEvent.venueName} Frame`
+      : fileName.replace(/\.[^.]+$/, '');
+
+    uploadOverlayMutation.mutate({ uri: asset.uri, name, fileName });
+  };
 
   // Post-event photo purge (propagates deletion to phone + both tablets)
   const purgePhotosMutation = useMutation({
@@ -361,6 +438,50 @@ export default function EventsScreen() {
                       ? `Current: ${selectedEvent.overlay.name}`
                       : 'No overlay assigned yet. Pick one to apply to pledge photos.'}
                   </Text>
+
+                  {/* Live preview of how a pledge photo will come out */}
+                  {selectedEvent.overlayId ? (
+                    <View className="items-center mb-3">
+                      <Image
+                        source={{
+                          uri: `${process.env.EXPO_PUBLIC_BACKEND_URL}/api/overlays/${selectedEvent.overlayId}/preview`,
+                        }}
+                        style={{
+                          width: 150,
+                          height: 190,
+                          borderRadius: 8,
+                          backgroundColor: '#18181b',
+                        }}
+                        contentFit="contain"
+                      />
+                      <Text className="text-zinc-600 text-xs mt-1">
+                        Sample of how photos will look
+                      </Text>
+                    </View>
+                  ) : null}
+
+                  {/* Upload a frame straight from this device */}
+                  <Pressable
+                    onPress={handleUploadOverlay}
+                    disabled={uploadOverlayMutation.isPending}
+                    className="flex-row items-center justify-center bg-zinc-700 py-3 rounded-lg mb-3 active:bg-zinc-600"
+                  >
+                    {uploadOverlayMutation.isPending ? (
+                      <ActivityIndicator size="small" color="#fff" />
+                    ) : (
+                      <>
+                        <Upload size={16} color="#a78bfa" />
+                        <Text className="text-zinc-200 text-sm font-semibold ml-2">
+                          Upload a JPG frame
+                        </Text>
+                      </>
+                    )}
+                  </Pressable>
+                  <Text className="text-zinc-600 text-xs mb-3">
+                    A JPG works like a polaroid — the photo goes inside the window in your artwork.
+                    A see-through PNG is laid over the photo instead.
+                  </Text>
+
                   {overlays && overlays.length > 0 ? (
                     <View className="flex-row flex-wrap gap-2">
                       {overlays.map((overlay) => {

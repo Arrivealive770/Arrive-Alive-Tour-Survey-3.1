@@ -24,6 +24,10 @@ const PHOTO_BATCH_SIZE = 10;
 // How often to poll the backend for photos that were deleted elsewhere so we
 // can remove the matching local files from this phone / tablet.
 const DELETION_POLL_INTERVAL_MS = 20000;
+// How often to retry anything still waiting on this device (photos taken while
+// the signal was down, surveys, pledges). Without this a photo could sit in the
+// phone's queue until the app was backgrounded and reopened.
+const PENDING_SYNC_INTERVAL_MS = 15000;
 
 class SyncService {
   private syncInProgress = false;
@@ -31,6 +35,7 @@ class SyncService {
   private netInfoUnsubscribe: (() => void) | null = null;
   private appStateSubscription: { remove: () => void } | null = null;
   private deletionPollTimer: ReturnType<typeof setInterval> | null = null;
+  private pendingSyncTimer: ReturnType<typeof setInterval> | null = null;
   private isInitialized = false;
   private baseUrl: string;
 
@@ -76,6 +81,10 @@ class SyncService {
     // Start polling for remote deletions so finished/purged photos are cleaned
     // off this device (phone photo_queue + tablet photo_cache).
     this.startDeletionPolling();
+
+    // Keep retrying anything still queued on this device so photos reach the
+    // tablets without anyone having to press anything.
+    this.startPendingSyncPolling();
 
     this.isInitialized = true;
     console.log('[SyncService] Initialized successfully');
@@ -747,6 +756,44 @@ class SyncService {
   }
 
   /**
+   * Periodically push anything still waiting on this device. A phone at a busy
+   * event can take photos faster than a flaky venue wifi uploads them, and the
+   * kiosk tablets can only show a photo once it has landed on the server, so we
+   * keep trying on a timer rather than only on app-foreground / network-change.
+   *
+   * Cheap when idle: it reads the local SQLite counts first and does nothing at
+   * all when there's no backlog.
+   */
+  private startPendingSyncPolling(): void {
+    if (this.pendingSyncTimer) return;
+
+    const tick = async () => {
+      try {
+        if (this.syncInProgress) return;
+
+        const db = getDatabaseSafe();
+        if (!db) return;
+
+        const [surveyCount, pledgeCount, photoCount] = await Promise.all([
+          db.getSurveyQueueCount(),
+          db.getPledgeQueueCount(),
+          db.getPhotoQueueCount(),
+        ]);
+
+        const pending = surveyCount.pending + surveyCount.failed + pledgeCount + photoCount;
+        if (pending === 0) return;
+
+        console.log(`[SyncService] ${pending} item(s) still queued, syncing`);
+        await this.syncAll();
+      } catch (error) {
+        console.error('[SyncService] Pending-sync poll failed:', error);
+      }
+    };
+
+    this.pendingSyncTimer = setInterval(tick, PENDING_SYNC_INTERVAL_MS);
+  }
+
+  /**
    * PHONE ONLY. Poll for this phone's captured originals that all active tablets
    * have now received. For each, delete the local original file + its
    * photo_queue row, then confirm via PUT /phone-deleted so it stops being
@@ -1019,6 +1066,12 @@ class SyncService {
     if (this.deletionPollTimer) {
       clearInterval(this.deletionPollTimer);
       this.deletionPollTimer = null;
+    }
+
+    // Stop pending-work polling
+    if (this.pendingSyncTimer) {
+      clearInterval(this.pendingSyncTimer);
+      this.pendingSyncTimer = null;
     }
 
     // Unsubscribe from network info

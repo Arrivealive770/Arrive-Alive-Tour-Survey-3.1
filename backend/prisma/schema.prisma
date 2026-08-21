@@ -367,6 +367,21 @@ model Overlay {
   contentType String
   sizeBytes   Int
   isActive    Boolean  @default(true)
+
+  // How the overlay is applied to a pledge photo:
+  //   "auto"    -> transparent images are laid on top, opaque ones (JPG) are
+  //                treated as a polaroid-style frame
+  //   "overlay" -> always stretched on top of the photo (needs transparency)
+  //   "frame"   -> photo is placed inside the window rect below (polaroid)
+  mode String @default("auto")
+
+  // Window rect for frame mode, as fractions (0-1) of the frame image.
+  // Detected automatically on upload; admins can fine-tune it.
+  windowX Float?
+  windowY Float?
+  windowW Float?
+  windowH Float?
+
   createdAt   DateTime @default(now())
   updatedAt   DateTime @updatedAt
 

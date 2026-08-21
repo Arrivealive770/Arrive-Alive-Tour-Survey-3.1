@@ -9,6 +9,11 @@ import { randomUUID } from "crypto";
 import sharp from "sharp";
 import { getDeletablePhoneOriginals } from "../lib/photo-cleanup";
 import { deleteFromRemoteStorage, purgeEventPhotos } from "../lib/pledge-privacy";
+import {
+  compositePhoto,
+  windowFromOverlay,
+  type OverlayMode,
+} from "../lib/overlay-frame";
 
 const photosRouter = new Hono();
 
@@ -318,29 +323,34 @@ photosRouter.post(
       }
       const overlayBuffer = Buffer.from(await overlayResponse.arrayBuffer());
 
-      // Get the dimensions of the original photo
-      const photoMetadata = await sharp(photoBuffer).metadata();
-      const photoWidth = photoMetadata.width || 1080;
-      const photoHeight = photoMetadata.height || 1080;
+      // Transparent overlays go on top of the photo; opaque ones (JPG) are
+      // treated as a polaroid frame with the photo dropped into its window.
+      const {
+        buffer: compositedImage,
+        mode: appliedMode,
+        window: appliedWindow,
+      } = await compositePhoto({
+        photoBuffer,
+        overlayBuffer,
+        mode: (overlay.mode as OverlayMode) ?? "auto",
+        window: windowFromOverlay(overlay),
+      });
 
-      // Resize overlay to match photo dimensions
-      const resizedOverlay = await sharp(overlayBuffer)
-        .resize(photoWidth, photoHeight, {
-          fit: "fill",
-        })
-        .toBuffer();
-
-      // Composite the overlay on top of the photo
-      const compositedImage = await sharp(photoBuffer)
-        .composite([
-          {
-            input: resizedOverlay,
-            top: 0,
-            left: 0,
-          },
-        ])
-        .png()
-        .toBuffer();
+      // Remember a window we had to detect on the fly so the next photo (and
+      // the admin portal editor) reuses it instead of re-detecting.
+      if (appliedMode === "frame" && appliedWindow && !windowFromOverlay(overlay)) {
+        await prisma.overlay
+          .update({
+            where: { id: overlay.id },
+            data: {
+              windowX: appliedWindow.x,
+              windowY: appliedWindow.y,
+              windowW: appliedWindow.w,
+              windowH: appliedWindow.h,
+            },
+          })
+          .catch((err) => console.error("[Composite] Failed to cache window:", err));
+      }
 
       // Upload the composited image to storage.vibecodeapp.com
       const filename = `composited-${randomUUID()}.png`;
@@ -389,6 +399,7 @@ photosRouter.post(
           originalPhotoUrl: photoUrl,
           overlayId: overlay.id,
           overlayName: overlay.name,
+          mode: appliedMode,
         },
       });
     } catch (error) {

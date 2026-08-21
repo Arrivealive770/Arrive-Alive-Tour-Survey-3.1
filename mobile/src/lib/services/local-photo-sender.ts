@@ -1,22 +1,30 @@
-// Local Photo Sender Service
-// Runs on PHONE devices to send photos directly to a tablet via local hotspot network
-// Handles offline/connection failures gracefully with queuing and retry logic
+// Photo Sender Service
+// Runs on PHONE devices (Photo Hub) to push a freshly-taken photo to the
+// backend straight away, so the tablets running the pledge kiosk can see it
+// within seconds instead of waiting for the next background sync.
+//
+// It uploads to the same endpoint the background sync uses
+// (POST /api/photos/upload), which is idempotent on localId — so a photo that
+// gets sent by both paths is only ever stored once.
+//
+// If the upload fails (no signal, venue wifi dropped) the photo is queued to
+// disk and retried with exponential backoff. Nothing is ever lost: the photo
+// also sits in the phone's SQLite photo queue as a backstop.
 
 import * as FileSystem from 'expo-file-system/legacy';
 import { Platform } from 'react-native';
 import { useDeviceStore } from '@/lib/state/device-store';
-import type { PhotoReceiverResponse } from './local-photo-receiver';
+import { getDatabaseSafe } from '@/lib/db/database';
 
-// Directory where queued photos for local transfer are stored
+// Directory where queued photos for transfer are tracked
 const LOCAL_SEND_QUEUE_DIR = 'local_send_queue/';
 
-// Photo data format for local transfer
-export interface LocalPhotoData {
+// Metadata that travels with a photo
+export interface PhotoSendMetadata {
   localId: string;
   teamId: string;
   eventId: string;
   overlayType: string;
-  photoBase64: string; // Base64 encoded JPEG
 }
 
 // Queue item stored locally when transfer fails
@@ -36,6 +44,7 @@ export interface QueuedPhotoItem {
 export interface LocalSendResult {
   success: boolean;
   localId: string;
+  remoteUrl?: string | null;
   error?: string;
 }
 
@@ -49,6 +58,18 @@ const DEFAULT_RETRY_CONFIG = {
   multiplier: 2,
 };
 
+// Photos can be a couple of MB over venue wifi — give them room.
+const UPLOAD_TIMEOUT_MS = 60000;
+
+interface PhotoUploadApiResponse {
+  data?: {
+    success?: boolean;
+    localId?: string;
+    remoteUrl?: string | null;
+  };
+  error?: { message?: string; code?: string };
+}
+
 class LocalPhotoSenderService {
   private status: SenderStatus = 'stopped';
   private sentCount = 0;
@@ -58,6 +79,10 @@ class LocalPhotoSenderService {
   private sendQueue: Map<string, QueuedPhotoItem> = new Map();
   private retryTimeout: ReturnType<typeof setTimeout> | null = null;
   private autoRetryEnabled = true;
+
+  private get baseUrl(): string {
+    return process.env.EXPO_PUBLIC_BACKEND_URL || '';
+  }
 
   /**
    * Initialize the sender service
@@ -156,13 +181,6 @@ class LocalPhotoSenderService {
       return;
     }
 
-    // Check if local photo transfer is enabled
-    const localPhotoTransferEnabled = useDeviceStore.getState().localPhotoTransferEnabled;
-    if (!localPhotoTransferEnabled) {
-      console.log('[LocalPhotoSender] Local photo transfer is not enabled');
-      return;
-    }
-
     if (this.status === 'running' || this.status === 'sending') {
       console.log('[LocalPhotoSender] Sender already running');
       return;
@@ -174,12 +192,7 @@ class LocalPhotoSenderService {
       this.status = 'running';
       this.lastError = null;
 
-      const tabletIp = useDeviceStore.getState().tabletLocalIp;
-      const tabletPort = useDeviceStore.getState().tabletLocalPort;
-
-      console.log('[LocalPhotoSender] Sender started');
-      console.log('[LocalPhotoSender] Target tablet IP:', tabletIp || 'Not configured');
-      console.log('[LocalPhotoSender] Target tablet port:', tabletPort);
+      console.log('[LocalPhotoSender] Sender started, target:', this.baseUrl);
 
       // Start processing queue if there are pending items
       if (this.sendQueue.size > 0) {
@@ -215,67 +228,46 @@ class LocalPhotoSenderService {
   }
 
   /**
-   * Check if the tablet is reachable
+   * Check that the backend (the thing the tablets read from) is reachable.
    */
-  async checkTabletConnection(): Promise<boolean> {
-    const tabletIp = useDeviceStore.getState().tabletLocalIp;
-    const tabletPort = useDeviceStore.getState().tabletLocalPort;
-
-    if (!tabletIp) {
-      console.log('[LocalPhotoSender] Tablet IP not configured');
+  async checkConnection(): Promise<boolean> {
+    if (!this.baseUrl) {
+      console.log('[LocalPhotoSender] Backend URL not configured');
       return false;
     }
-
-    const tabletUrl = `http://${tabletIp}:${tabletPort}/api/local-photos/health`;
-
-    console.log('[LocalPhotoSender] Checking tablet connection:', tabletUrl);
 
     try {
       const controller = new AbortController();
       const timeout = setTimeout(() => controller.abort(), 5000);
 
-      const response = await fetch(tabletUrl, {
+      const response = await fetch(`${this.baseUrl}/health`, {
         method: 'GET',
         signal: controller.signal,
       });
 
       clearTimeout(timeout);
-
-      const isReachable = response.ok;
-      console.log('[LocalPhotoSender] Tablet reachable:', isReachable);
-      return isReachable;
+      return response.ok;
     } catch (error) {
-      console.log('[LocalPhotoSender] Tablet not reachable:', error instanceof Error ? error.message : 'Unknown error');
+      console.log(
+        '[LocalPhotoSender] Backend not reachable:',
+        error instanceof Error ? error.message : 'Unknown error'
+      );
       return false;
     }
   }
 
   /**
-   * Send a photo directly from a file path
+   * Send a photo so the tablets can pick it up.
    *
    * @param localPath - Path to the photo file
    * @param metadata - Photo metadata (localId, teamId, eventId, overlayType)
-   * @returns Result of the send operation
    */
   async sendPhotoFromPath(
     localPath: string,
-    metadata: Omit<LocalPhotoData, 'photoBase64'>
+    metadata: PhotoSendMetadata
   ): Promise<LocalSendResult> {
-    console.log('[LocalPhotoSender] Sending photo from path:', localPath);
-    console.log('[LocalPhotoSender] Photo metadata:', metadata);
+    console.log('[LocalPhotoSender] Sending photo:', metadata.localId);
 
-    // Check if local transfer is enabled
-    const localPhotoTransferEnabled = useDeviceStore.getState().localPhotoTransferEnabled;
-    if (!localPhotoTransferEnabled) {
-      console.log('[LocalPhotoSender] Local photo transfer not enabled, skipping');
-      return {
-        success: false,
-        localId: metadata.localId,
-        error: 'Local photo transfer is not enabled',
-      };
-    }
-
-    // Skip on web platform
     if (Platform.OS === 'web') {
       return {
         success: false,
@@ -284,124 +276,82 @@ class LocalPhotoSenderService {
       };
     }
 
+    if (!this.baseUrl) {
+      const error = 'Backend URL is not configured';
+      console.error('[LocalPhotoSender]', error);
+      await this.queuePhoto(localPath, metadata, error);
+      return { success: false, localId: metadata.localId, error };
+    }
+
+    this.status = 'sending';
+
     try {
-      // Read the photo file as base64
       const fileInfo = await FileSystem.getInfoAsync(localPath);
       if (!fileInfo.exists) {
         throw new Error('Photo file not found at path: ' + localPath);
       }
 
-      const photoBase64 = await FileSystem.readAsStringAsync(localPath, {
-        encoding: FileSystem.EncodingType.Base64,
-      });
+      const deviceId = useDeviceStore.getState().deviceId;
 
-      console.log('[LocalPhotoSender] Read photo file, base64 length:', photoBase64.length);
+      // Stream the file itself rather than base64 — a 4MB photo becomes a
+      // ~5.5MB string otherwise, which is slow and memory-hungry on a phone.
+      const formData = new FormData();
+      formData.append('file', {
+        uri: localPath,
+        type: 'image/jpeg',
+        name: `${metadata.localId}.jpg`,
+      } as unknown as Blob);
+      formData.append('localId', metadata.localId);
+      formData.append('teamId', metadata.teamId);
+      formData.append('eventId', metadata.eventId);
+      formData.append('overlayType', metadata.overlayType);
+      // Lets the backend know which phone to let clean up its original later.
+      if (deviceId) {
+        formData.append('deviceId', deviceId);
+      }
 
-      // Send the photo
-      return this.sendPhoto({
-        ...metadata,
-        photoBase64,
-      });
-    } catch (error) {
-      const errorMessage = error instanceof Error ? error.message : 'Unknown error';
-      console.error('[LocalPhotoSender] Failed to read photo file:', errorMessage);
-
-      // Queue for retry
-      await this.queuePhoto(localPath, metadata, errorMessage);
-
-      return {
-        success: false,
-        localId: metadata.localId,
-        error: errorMessage,
-      };
-    }
-  }
-
-  /**
-   * Send a photo to the tablet
-   *
-   * @param photoData - The photo data including base64 encoded image
-   * @returns Result of the send operation
-   */
-  async sendPhoto(photoData: LocalPhotoData): Promise<LocalSendResult> {
-    console.log('[LocalPhotoSender] Attempting to send photo:', photoData.localId);
-
-    // Check if local transfer is enabled
-    const localPhotoTransferEnabled = useDeviceStore.getState().localPhotoTransferEnabled;
-    if (!localPhotoTransferEnabled) {
-      console.log('[LocalPhotoSender] Local photo transfer not enabled, skipping');
-      return {
-        success: false,
-        localId: photoData.localId,
-        error: 'Local photo transfer is not enabled',
-      };
-    }
-
-    const tabletIp = useDeviceStore.getState().tabletLocalIp;
-    const tabletPort = useDeviceStore.getState().tabletLocalPort;
-
-    if (!tabletIp) {
-      const error = 'Tablet IP address not configured';
-      console.error('[LocalPhotoSender]', error);
-      return {
-        success: false,
-        localId: photoData.localId,
-        error,
-      };
-    }
-
-    const tabletUrl = `http://${tabletIp}:${tabletPort}/api/local-photos/receive`;
-
-    console.log('[LocalPhotoSender] Sending to:', tabletUrl);
-    console.log('[LocalPhotoSender] Photo base64 length:', photoData.photoBase64.length);
-
-    this.status = 'sending';
-
-    try {
       const controller = new AbortController();
-      const timeout = setTimeout(() => controller.abort(), 30000); // 30 second timeout for photo upload
+      const timeout = setTimeout(() => controller.abort(), UPLOAD_TIMEOUT_MS);
 
-      const response = await fetch(tabletUrl, {
+      const response = await fetch(`${this.baseUrl}/api/photos/upload`, {
         method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify({
-          localId: photoData.localId,
-          teamId: photoData.teamId,
-          eventId: photoData.eventId,
-          overlayType: photoData.overlayType,
-          photoBase64: photoData.photoBase64,
-        }),
+        body: formData,
         signal: controller.signal,
       });
 
       clearTimeout(timeout);
 
-      if (!response.ok) {
-        throw new Error(`Server responded with status: ${response.status}`);
+      const payload = (await response.json().catch(() => null)) as PhotoUploadApiResponse | null;
+
+      if (!response.ok || payload?.data?.success !== true) {
+        throw new Error(
+          payload?.error?.message ?? `Server responded with status: ${response.status}`
+        );
       }
 
-      const result = (await response.json()) as PhotoReceiverResponse;
+      const remoteUrl = payload?.data?.remoteUrl ?? null;
+      console.log('[LocalPhotoSender] Photo delivered:', metadata.localId);
+      this.sentCount++;
 
-      if (result.success) {
-        console.log('[LocalPhotoSender] Photo sent successfully:', photoData.localId);
-        this.sentCount++;
-
-        // Remove from queue if it was queued
-        if (this.sendQueue.has(photoData.localId)) {
-          this.sendQueue.delete(photoData.localId);
-          await this.saveQueueToDisk();
+      // Mark it uploaded locally so the background sync doesn't queue it again
+      // and the "waiting to send" badge on the phone clears right away.
+      try {
+        const db = getDatabaseSafe();
+        if (db && remoteUrl) {
+          await db.markPhotoUploaded(metadata.localId, remoteUrl);
         }
-
-        this.status = 'running';
-        return {
-          success: true,
-          localId: photoData.localId,
-        };
-      } else {
-        throw new Error(result.error || 'Tablet reported failure');
+      } catch (dbError) {
+        console.error('[LocalPhotoSender] Could not mark photo uploaded:', dbError);
       }
+
+      // Remove from retry queue if it was queued
+      if (this.sendQueue.has(metadata.localId)) {
+        this.sendQueue.delete(metadata.localId);
+        await this.saveQueueToDisk();
+      }
+
+      this.status = 'running';
+      return { success: true, localId: metadata.localId, remoteUrl };
     } catch (error) {
       const errorMessage = error instanceof Error ? error.message : 'Unknown error';
       console.error('[LocalPhotoSender] Failed to send photo:', errorMessage);
@@ -410,11 +360,10 @@ class LocalPhotoSenderService {
       this.lastError = errorMessage;
       this.status = 'running';
 
-      return {
-        success: false,
-        localId: photoData.localId,
-        error: errorMessage,
-      };
+      // Queue for retry — the photo is still safe in the phone's SQLite queue.
+      await this.queuePhoto(localPath, metadata, errorMessage);
+
+      return { success: false, localId: metadata.localId, error: errorMessage };
     }
   }
 
@@ -423,7 +372,7 @@ class LocalPhotoSenderService {
    */
   private async queuePhoto(
     localPath: string,
-    metadata: Omit<LocalPhotoData, 'photoBase64'>,
+    metadata: PhotoSendMetadata,
     error: string
   ): Promise<void> {
     const existingItem = this.sendQueue.get(metadata.localId);
@@ -483,25 +432,14 @@ class LocalPhotoSenderService {
     console.log('[LocalPhotoSender] Processing queued photos. Queue size:', this.sendQueue.size);
 
     if (this.sendQueue.size === 0) {
-      console.log('[LocalPhotoSender] No photos in queue');
       return { sent: 0, failed: 0, remaining: 0 };
     }
 
-    // Check if local transfer is enabled
-    const localPhotoTransferEnabled = useDeviceStore.getState().localPhotoTransferEnabled;
-    if (!localPhotoTransferEnabled) {
-      console.log('[LocalPhotoSender] Local photo transfer not enabled, skipping queue processing');
-      return { sent: 0, failed: 0, remaining: this.sendQueue.size };
-    }
-
-    // Check tablet connection first
-    const isConnected = await this.checkTabletConnection();
+    // Don't burn through retry attempts while there's no connection at all.
+    const isConnected = await this.checkConnection();
     if (!isConnected) {
-      console.log('[LocalPhotoSender] Tablet not reachable, will retry later');
-
-      // Schedule retry
+      console.log('[LocalPhotoSender] Backend not reachable, will retry later');
       this.scheduleQueueProcessing(DEFAULT_RETRY_CONFIG.baseDelayMs);
-
       return { sent: 0, failed: 0, remaining: this.sendQueue.size };
     }
 
@@ -510,9 +448,18 @@ class LocalPhotoSenderService {
     const itemsToRemove: string[] = [];
 
     for (const [localId, item] of this.sendQueue) {
-      // Skip items that have exceeded max attempts
+      // Give up on items that have exceeded max attempts — the background sync
+      // service still has them in the SQLite queue and keeps trying.
       if (item.attempts >= DEFAULT_RETRY_CONFIG.maxAttempts) {
-        console.log('[LocalPhotoSender] Photo exceeded max attempts, removing:', localId);
+        console.log('[LocalPhotoSender] Photo exceeded max attempts, handing off to background sync:', localId);
+        itemsToRemove.push(localId);
+        failed++;
+        continue;
+      }
+
+      const fileInfo = await FileSystem.getInfoAsync(item.localPath);
+      if (!fileInfo.exists) {
+        console.log('[LocalPhotoSender] Photo file no longer exists:', localId);
         itemsToRemove.push(localId);
         failed++;
         continue;
@@ -520,58 +467,19 @@ class LocalPhotoSenderService {
 
       console.log('[LocalPhotoSender] Retrying photo:', localId, 'Attempt:', item.attempts + 1);
 
-      try {
-        // Read the photo file
-        const fileInfo = await FileSystem.getInfoAsync(item.localPath);
-        if (!fileInfo.exists) {
-          console.log('[LocalPhotoSender] Photo file no longer exists:', localId);
-          itemsToRemove.push(localId);
-          failed++;
-          continue;
-        }
+      // sendPhotoFromPath re-queues (and bumps attempts) on failure, and
+      // removes the item from the queue on success.
+      const result = await this.sendPhotoFromPath(item.localPath, {
+        localId: item.localId,
+        teamId: item.teamId,
+        eventId: item.eventId,
+        overlayType: item.overlayType,
+      });
 
-        const photoBase64 = await FileSystem.readAsStringAsync(item.localPath, {
-          encoding: FileSystem.EncodingType.Base64,
-        });
-
-        // Update attempt count before sending
-        item.attempts++;
-        item.lastAttempt = new Date().toISOString();
-        this.sendQueue.set(localId, item);
-
-        // Try to send
-        const result = await this.sendPhoto({
-          localId: item.localId,
-          teamId: item.teamId,
-          eventId: item.eventId,
-          overlayType: item.overlayType,
-          photoBase64,
-        });
-
-        if (result.success) {
-          sent++;
-          // sendPhoto already removes from queue on success
-        } else {
-          item.lastError = result.error || 'Unknown error';
-          this.sendQueue.set(localId, item);
-
-          if (item.attempts >= DEFAULT_RETRY_CONFIG.maxAttempts) {
-            console.log('[LocalPhotoSender] Photo reached max attempts:', localId);
-            itemsToRemove.push(localId);
-            failed++;
-          }
-        }
-      } catch (error) {
-        const errorMessage = error instanceof Error ? error.message : 'Unknown error';
-        console.error('[LocalPhotoSender] Error processing queued photo:', errorMessage);
-        item.lastError = errorMessage;
-        item.attempts++;
-        this.sendQueue.set(localId, item);
-
-        if (item.attempts >= DEFAULT_RETRY_CONFIG.maxAttempts) {
-          itemsToRemove.push(localId);
-          failed++;
-        }
+      if (result.success) {
+        sent++;
+      } else {
+        failed++;
       }
     }
 
@@ -584,11 +492,6 @@ class LocalPhotoSenderService {
 
     const remaining = this.sendQueue.size;
     console.log('[LocalPhotoSender] Queue processing complete. Sent:', sent, 'Failed:', failed, 'Remaining:', remaining);
-
-    // Schedule another retry if there are remaining items
-    if (remaining > 0 && this.autoRetryEnabled) {
-      this.scheduleQueueProcessing(DEFAULT_RETRY_CONFIG.baseDelayMs);
-    }
 
     return { sent, failed, remaining };
   }

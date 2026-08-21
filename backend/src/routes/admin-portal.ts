@@ -552,6 +552,7 @@ adminPortalRouter.get("/", (c) => {
                     <th>Preview</th>
                     <th>Name</th>
                     <th>Filename</th>
+                    <th>Type</th>
                     <th>Size</th>
                     <th>Status</th>
                     <th>Created</th>
@@ -865,7 +866,12 @@ adminPortalRouter.get("/", (c) => {
             <div class="form-group">
               <label for="overlayFile">Overlay Image</label>
               <input type="file" id="overlayFile" accept="image/png,image/jpeg,image/jpg,image/gif,image/webp" required style="padding: 8px;">
-              <p style="font-size: 12px; color: #888; margin-top: 8px;">Accepted formats: PNG, JPG, GIF, WebP</p>
+              <p style="font-size: 12px; color: #888; margin-top: 8px;">
+                Accepted formats: PNG, JPG, GIF, WebP.<br>
+                A <strong>JPG</strong> is used as a polaroid-style frame — the pledge photo is placed
+                inside the window in your artwork. A <strong>see-through PNG</strong> is laid on top of
+                the photo instead. After uploading a JPG you can check and nudge the window.
+              </p>
             </div>
             <div id="overlayPreview" style="display: none; margin-bottom: 20px;">
               <label>Preview</label>
@@ -882,6 +888,62 @@ adminPortalRouter.get("/", (c) => {
               <button type="submit" class="btn btn-primary" id="overlaySubmitBtn">Upload Overlay</button>
             </div>
           </form>
+        </div>
+      </div>
+
+      <!-- Frame Window Modal -->
+      <div class="modal" id="frameModal">
+        <div class="modal-content" style="max-width: 900px;">
+          <div class="modal-header">
+            <h2>Preview / Adjust Overlay</h2>
+            <button class="modal-close" onclick="closeFrameModal()">&times;</button>
+          </div>
+          <p style="font-size: 13px; color: #888; margin-bottom: 16px;">
+            A JPG can't be see-through, so it is used as a <strong>frame</strong>: the pledge photo is
+            placed inside the window below, like a polaroid. Transparent PNGs are laid on top of the
+            photo instead. Drag the sliders until the sample photo lines up with your artwork.
+          </p>
+          <div style="display: flex; gap: 24px; flex-wrap: wrap;">
+            <div style="flex: 1; min-width: 260px;">
+              <img id="framePreviewImg" src="" alt="Preview"
+                   style="width: 100%; border-radius: 8px; border: 1px solid #333; background: #111;">
+            </div>
+            <div style="flex: 1; min-width: 260px;">
+              <div class="form-group">
+                <label for="frameMode">How to apply</label>
+                <select id="frameMode" onchange="onFrameModeChange()">
+                  <option value="auto">Automatic (recommended)</option>
+                  <option value="frame">Frame — photo goes inside the window</option>
+                  <option value="overlay">Overlay — stretched on top of the photo</option>
+                </select>
+              </div>
+              <div id="frameWindowControls">
+                <div class="form-group">
+                  <label>Left edge — <span id="frameXVal"></span>%</label>
+                  <input type="range" id="frameX" min="0" max="90" step="0.5" oninput="onFrameSliderChange()" style="width: 100%;">
+                </div>
+                <div class="form-group">
+                  <label>Top edge — <span id="frameYVal"></span>%</label>
+                  <input type="range" id="frameY" min="0" max="90" step="0.5" oninput="onFrameSliderChange()" style="width: 100%;">
+                </div>
+                <div class="form-group">
+                  <label>Width — <span id="frameWVal"></span>%</label>
+                  <input type="range" id="frameW" min="5" max="100" step="0.5" oninput="onFrameSliderChange()" style="width: 100%;">
+                </div>
+                <div class="form-group">
+                  <label>Height — <span id="frameHVal"></span>%</label>
+                  <input type="range" id="frameH" min="5" max="100" step="0.5" oninput="onFrameSliderChange()" style="width: 100%;">
+                </div>
+                <button type="button" class="btn btn-secondary btn-sm" onclick="redetectFrameWindow()">
+                  Find the window for me
+                </button>
+              </div>
+            </div>
+          </div>
+          <div class="modal-footer">
+            <button type="button" class="btn btn-secondary" onclick="closeFrameModal()">Close</button>
+            <button type="button" class="btn btn-primary" id="frameSaveBtn" onclick="saveFrameWindow()">Save</button>
+          </div>
         </div>
       </div>
 
@@ -1562,6 +1624,11 @@ adminPortalRouter.get("/", (c) => {
                 </td>
                 <td>\${escapeHtml(overlay.name)}</td>
                 <td>\${escapeHtml(overlay.filename)}</td>
+                <td>
+                  <span class="badge \${isFrameOverlay(overlay) ? 'badge-info' : 'badge-warning'}">
+                    \${isFrameOverlay(overlay) ? 'Frame (photo inside)' : 'Overlay (on top)'}
+                  </span>
+                </td>
                 <td>\${formatFileSize(overlay.sizeBytes)}</td>
                 <td>
                   <span class="badge \${overlay.isActive ? 'badge-success' : 'badge-warning'}">
@@ -1570,6 +1637,7 @@ adminPortalRouter.get("/", (c) => {
                 </td>
                 <td>\${new Date(overlay.createdAt).toLocaleDateString()}</td>
                 <td class="actions">
+                  <button class="btn btn-secondary btn-sm" onclick="openFrameModal('\${overlay.id}')">Preview / Adjust</button>
                   <button class="btn btn-secondary btn-sm" onclick="toggleOverlayStatus('\${overlay.id}', \${!overlay.isActive})">
                     \${overlay.isActive ? 'Deactivate' : 'Activate'}
                   </button>
@@ -1613,6 +1681,133 @@ adminPortalRouter.get("/", (c) => {
           }
 
           select.value = currentValue;
+        }
+
+        // A JPG can't be transparent, so it is applied as a polaroid frame.
+        function isFrameOverlay(overlay) {
+          if (overlay.mode === 'frame') return true;
+          if (overlay.mode === 'overlay') return false;
+          return !/png|webp|gif/i.test(overlay.contentType || '');
+        }
+
+        // Frame window editor
+        let frameOverlay = null;
+        let framePreviewTimer = null;
+
+        function openFrameModal(id) {
+          frameOverlay = overlays.find(o => o.id === id);
+          if (!frameOverlay) return;
+
+          document.getElementById('frameMode').value = frameOverlay.mode || 'auto';
+          document.getElementById('frameX').value = (frameOverlay.windowX ?? 0.07) * 100;
+          document.getElementById('frameY').value = (frameOverlay.windowY ?? 0.06) * 100;
+          document.getElementById('frameW').value = (frameOverlay.windowW ?? 0.86) * 100;
+          document.getElementById('frameH').value = (frameOverlay.windowH ?? 0.72) * 100;
+
+          updateFrameLabels();
+          onFrameModeChange();
+          refreshFramePreview();
+          document.getElementById('frameModal').classList.add('active');
+        }
+
+        function closeFrameModal() {
+          document.getElementById('frameModal').classList.remove('active');
+          frameOverlay = null;
+        }
+
+        function frameWindowValues() {
+          return {
+            windowX: parseFloat(document.getElementById('frameX').value) / 100,
+            windowY: parseFloat(document.getElementById('frameY').value) / 100,
+            windowW: parseFloat(document.getElementById('frameW').value) / 100,
+            windowH: parseFloat(document.getElementById('frameH').value) / 100,
+          };
+        }
+
+        function updateFrameLabels() {
+          document.getElementById('frameXVal').textContent = document.getElementById('frameX').value;
+          document.getElementById('frameYVal').textContent = document.getElementById('frameY').value;
+          document.getElementById('frameWVal').textContent = document.getElementById('frameW').value;
+          document.getElementById('frameHVal').textContent = document.getElementById('frameH').value;
+        }
+
+        function onFrameModeChange() {
+          const mode = document.getElementById('frameMode').value;
+          const usesWindow = mode !== 'overlay' &&
+            (mode === 'frame' || (frameOverlay && isFrameOverlay(frameOverlay)));
+          document.getElementById('frameWindowControls').style.display = usesWindow ? 'block' : 'none';
+        }
+
+        // Sliders write to the server first, then reload the preview, so what
+        // you see is exactly what the pledge photo will look like.
+        function onFrameSliderChange() {
+          updateFrameLabels();
+          clearTimeout(framePreviewTimer);
+          framePreviewTimer = setTimeout(async () => {
+            await saveFrameWindow({ silent: true });
+            refreshFramePreview();
+          }, 350);
+        }
+
+        function refreshFramePreview() {
+          if (!frameOverlay) return;
+          document.getElementById('framePreviewImg').src =
+            API_BASE + '/overlays/' + frameOverlay.id + '/preview?t=' + Date.now();
+        }
+
+        async function saveFrameWindow(options) {
+          if (!frameOverlay) return;
+          const silent = options && options.silent;
+          const btn = document.getElementById('frameSaveBtn');
+          if (!silent) btn.disabled = true;
+
+          try {
+            const res = await fetch(API_BASE + '/overlays/' + frameOverlay.id, {
+              method: 'PUT',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({
+                mode: document.getElementById('frameMode').value,
+                ...frameWindowValues(),
+              }),
+            });
+            const data = await res.json();
+            if (data.error) throw new Error(data.error.message);
+
+            frameOverlay = data.data;
+            const idx = overlays.findIndex(o => o.id === frameOverlay.id);
+            if (idx !== -1) overlays[idx] = frameOverlay;
+
+            if (!silent) {
+              refreshFramePreview();
+              loadOverlays();
+            }
+          } catch (err) {
+            if (!silent) alert('Error saving overlay: ' + err.message);
+            console.error('Error saving overlay:', err);
+          } finally {
+            if (!silent) btn.disabled = false;
+          }
+        }
+
+        async function redetectFrameWindow() {
+          if (!frameOverlay) return;
+          try {
+            const res = await fetch(API_BASE + '/overlays/' + frameOverlay.id + '/redetect-window', {
+              method: 'POST',
+            });
+            const data = await res.json();
+            if (data.error) throw new Error(data.error.message);
+
+            frameOverlay = data.data;
+            document.getElementById('frameX').value = (frameOverlay.windowX ?? 0.07) * 100;
+            document.getElementById('frameY').value = (frameOverlay.windowY ?? 0.06) * 100;
+            document.getElementById('frameW').value = (frameOverlay.windowW ?? 0.86) * 100;
+            document.getElementById('frameH').value = (frameOverlay.windowH ?? 0.72) * 100;
+            updateFrameLabels();
+            refreshFramePreview();
+          } catch (err) {
+            alert('Could not find the window: ' + err.message);
+          }
         }
 
         function openOverlayModal() {
@@ -1683,9 +1878,16 @@ adminPortalRouter.get("/", (c) => {
 
             document.getElementById('overlayProgressBar').style.width = '100%';
 
-            setTimeout(() => {
+            const uploaded = data.data;
+
+            setTimeout(async () => {
               closeOverlayModal();
-              loadOverlays();
+              await loadOverlays();
+              // A JPG becomes a polaroid frame — open the editor straight away
+              // so the window can be checked against a sample photo.
+              if (uploaded && isFrameOverlay(uploaded)) {
+                openFrameModal(uploaded.id);
+              }
             }, 300);
           } catch (err) {
             alert('Error uploading overlay');

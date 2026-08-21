@@ -10,7 +10,6 @@ import {
 } from 'react-native';
 import {
   Users,
-  Tablet,
   Lock,
   RotateCcw,
   Trash2,
@@ -24,6 +23,7 @@ import { useRouter } from 'expo-router';
 import { useDeviceStore } from '@/lib/state/device-store';
 import { useSyncStore } from '@/lib/state/sync-store';
 import { getDatabase } from '@/lib/db/database';
+import { getSyncService } from '@/lib/services/sync-service';
 import { cn } from '@/lib/cn';
 
 // App version info
@@ -38,10 +38,8 @@ export default function SettingsScreen() {
   const [confirmPin, setConfirmPin] = useState('');
   const [pinError, setPinError] = useState('');
 
-  // Local transfer modal state
-  const [showLocalTransferModal, setShowLocalTransferModal] = useState(false);
-  const [editIp, setEditIp] = useState('');
-  const [editPort, setEditPort] = useState('');
+  // Manual "send now" state
+  const [isSendingNow, setIsSendingNow] = useState(false);
 
   // Device store
   const deviceId = useDeviceStore((s) => s.deviceId);
@@ -54,11 +52,6 @@ export default function SettingsScreen() {
   const setDeviceConfig = useDeviceStore((s) => s.setDeviceConfig);
   const enterKioskMode = useDeviceStore((s) => s.enterKioskMode);
   const resetDevice = useDeviceStore((s) => s.reset);
-
-  // Local photo transfer settings
-  const localPhotoTransferEnabled = useDeviceStore((s) => s.localPhotoTransferEnabled);
-  const tabletLocalIp = useDeviceStore((s) => s.tabletLocalIp);
-  const tabletLocalPort = useDeviceStore((s) => s.tabletLocalPort);
 
   // Sync store
   const pendingSurveys = useSyncStore((s) => s.pendingSurveys);
@@ -92,27 +85,34 @@ export default function SettingsScreen() {
     Alert.alert('Success', 'Admin PIN has been updated.');
   };
 
-  const handleSaveLocalTransfer = () => {
-    if (editIp && !/^\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3}$/.test(editIp)) {
-      Alert.alert('Invalid IP', 'Please enter a valid IP address');
-      return;
+  // Push everything waiting on this device up now, so the tablets can see it.
+  const handleSendNow = async () => {
+    if (isSendingNow) return;
+    setIsSendingNow(true);
+    try {
+      const result = await getSyncService().forceSync();
+      if (result.status === 'skipped') {
+        Alert.alert(
+          'No Connection',
+          'This device is offline right now. Photos are saved and will send automatically once it reconnects.'
+        );
+      } else if (result.status === 'error') {
+        Alert.alert(
+          'Could Not Send',
+          'Something went wrong sending. Photos are saved and will keep retrying automatically.'
+        );
+      } else {
+        const sentPhotos = result.photos?.synced ?? 0;
+        Alert.alert(
+          'Sent',
+          sentPhotos > 0
+            ? `${sentPhotos} photo${sentPhotos === 1 ? '' : 's'} sent. They should appear on the tablets within a few seconds.`
+            : 'Everything on this device is already sent.'
+        );
+      }
+    } finally {
+      setIsSendingNow(false);
     }
-    const port = parseInt(editPort, 10);
-    if (editPort && (isNaN(port) || port < 1 || port > 65535)) {
-      Alert.alert('Invalid Port', 'Please enter a valid port number (1-65535)');
-      return;
-    }
-
-    setDeviceConfig({
-      tabletLocalIp: editIp || null,
-      tabletLocalPort: port || 8082,
-    });
-    setShowLocalTransferModal(false);
-    Alert.alert('Saved', 'Local transfer settings updated');
-  };
-
-  const handleToggleLocalTransfer = () => {
-    setDeviceConfig({ localPhotoTransferEnabled: !localPhotoTransferEnabled });
   };
 
   const handleResetKioskMode = () => {
@@ -275,58 +275,33 @@ export default function SettingsScreen() {
         onPress={() => setShowPinModal(true)}
       />
 
-      {/* Local Photo Transfer */}
+      {/* Photo Delivery */}
       <Text className="text-zinc-500 text-sm uppercase tracking-wider mb-3 ml-1 mt-3">
-        Local Photo Transfer (Offline Mode)
+        Photo Delivery
       </Text>
 
-      {/* Enable/Disable Toggle */}
       <SettingRow
         icon={Wifi}
-        iconColor={localPhotoTransferEnabled ? '#22c55e' : '#71717a'}
-        title="Enable Local Transfer"
-        subtitle={localPhotoTransferEnabled ? 'Photos sent directly to tablet via hotspot' : 'Photos sync to cloud when online'}
-        onPress={handleToggleLocalTransfer}
-        rightElement={
-          <View className={cn(
-            'w-12 h-7 rounded-full items-center justify-center',
-            localPhotoTransferEnabled ? 'bg-green-500' : 'bg-zinc-700'
-          )}>
-            <View className={cn(
-              'w-5 h-5 rounded-full bg-white',
-              localPhotoTransferEnabled ? 'ml-auto mr-1' : 'mr-auto ml-1'
-            )} />
-          </View>
+        iconColor={pendingPhotos > 0 ? '#f59e0b' : '#22c55e'}
+        title={isSendingNow ? 'Sending...' : 'Send Photos Now'}
+        subtitle={
+          pendingPhotos > 0
+            ? `${pendingPhotos} photo${pendingPhotos === 1 ? '' : 's'} waiting to reach the tablets`
+            : 'All photos have reached the tablets'
         }
+        onPress={handleSendNow}
       />
 
-      {/* Tablet IP Configuration - only show when enabled */}
-      {localPhotoTransferEnabled ? (
-        <SettingRow
-          icon={Tablet}
-          iconColor="#3b82f6"
-          title="Tablet Address"
-          subtitle={tabletLocalIp ? `${tabletLocalIp}:${tabletLocalPort}` : 'Not configured - tap to set'}
-          onPress={() => {
-            setEditIp(tabletLocalIp || '');
-            setEditPort(String(tabletLocalPort));
-            setShowLocalTransferModal(true);
-          }}
-        />
-      ) : null}
-
-      {/* Info box about local transfer */}
-      {localPhotoTransferEnabled ? (
-        <View className="bg-blue-500/10 border border-blue-500/30 rounded-xl p-4 mb-3">
-          <Text className="text-blue-400 font-semibold mb-2">
-            Offline Mode Active
-          </Text>
-          <Text className="text-zinc-400 text-sm">
-            Photos will be sent directly to the tablet over the local hotspot network.
-            Make sure the phone is connected to the tablet's WiFi hotspot.
-          </Text>
-        </View>
-      ) : null}
+      <View className="bg-blue-500/10 border border-blue-500/30 rounded-xl p-4 mb-3">
+        <Text className="text-blue-400 font-semibold mb-2">
+          How photos get to the tablets
+        </Text>
+        <Text className="text-zinc-400 text-sm">
+          Every photo you take is sent the moment you keep it, and the tablets pick it up a
+          few seconds later. If the phone loses signal, photos are saved on the phone and
+          sent automatically as soon as it's back online — nothing is lost.
+        </Text>
+      </View>
 
       {/* Kiosk Mode */}
       <Text className="text-zinc-500 text-sm uppercase tracking-wider mb-3 ml-1 mt-3">
@@ -474,57 +449,6 @@ export default function SettingsScreen() {
         </View>
       </Modal>
 
-      {/* Local Transfer Settings Modal */}
-      <Modal
-        visible={showLocalTransferModal}
-        animationType="slide"
-        transparent
-        onRequestClose={() => setShowLocalTransferModal(false)}
-      >
-        <View className="flex-1 bg-black/80 justify-end">
-          <View className="bg-zinc-900 rounded-t-3xl">
-            <View className="flex-row items-center justify-between px-6 pt-6 pb-4 border-b border-zinc-800">
-              <Text className="text-xl font-bold text-white">Tablet Address</Text>
-              <Pressable onPress={() => setShowLocalTransferModal(false)} className="p-2">
-                <X size={24} color="#a1a1aa" />
-              </Pressable>
-            </View>
-
-            <View className="px-6 py-4">
-              <Text className="text-zinc-400 text-sm mb-2">Tablet IP Address</Text>
-              <TextInput
-                value={editIp}
-                onChangeText={setEditIp}
-                placeholder="e.g., 192.168.43.1"
-                placeholderTextColor="#52525b"
-                keyboardType="numeric"
-                className="bg-zinc-800 rounded-xl px-4 py-3 text-white text-lg mb-4"
-              />
-
-              <Text className="text-zinc-400 text-sm mb-2">Port</Text>
-              <TextInput
-                value={editPort}
-                onChangeText={setEditPort}
-                placeholder="8082"
-                placeholderTextColor="#52525b"
-                keyboardType="number-pad"
-                className="bg-zinc-800 rounded-xl px-4 py-3 text-white text-lg mb-4"
-              />
-
-              <Text className="text-zinc-500 text-sm mb-6">
-                Enter the tablet's local IP address. When the tablet creates a WiFi hotspot, it's usually 192.168.43.1
-              </Text>
-
-              <Pressable
-                onPress={handleSaveLocalTransfer}
-                className="bg-blue-600 py-4 rounded-xl items-center mb-6"
-              >
-                <Text className="text-white font-semibold">Save</Text>
-              </Pressable>
-            </View>
-          </View>
-        </View>
-      </Modal>
     </ScrollView>
   );
 }

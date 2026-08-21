@@ -27,10 +27,6 @@ interface DeviceState {
   isKioskMode: boolean;
   adminPin: string;
 
-  // Local photo transfer mode
-  localPhotoTransferEnabled: boolean;
-  tabletLocalIp: string | null;
-  tabletLocalPort: number;
 }
 
 interface DeviceActions {
@@ -60,9 +56,6 @@ const initialState: DeviceState = {
   currentEventOverlayId: null,
   isKioskMode: false,
   adminPin: '1234',
-  localPhotoTransferEnabled: false,
-  tabletLocalIp: null,
-  tabletLocalPort: 8082,
 };
 
 export const useDeviceStore = create<DeviceState & DeviceActions & DeviceHydration>()(
@@ -113,9 +106,6 @@ export const useDeviceStore = create<DeviceState & DeviceActions & DeviceHydrati
         teamCode: state.teamCode,
         codeType: state.codeType,
         adminPin: state.adminPin,
-        localPhotoTransferEnabled: state.localPhotoTransferEnabled,
-        tabletLocalIp: state.tabletLocalIp,
-        tabletLocalPort: state.tabletLocalPort,
         // The selected event must survive an app restart. Without it a relaunched
         // tablet/phone has no eventId, which silently drops pledges and blocks
         // photo capture. It mirrors the `current_event` row in SQLite.
@@ -144,6 +134,3 @@ export const useCurrentEventId = () => useDeviceStore((s) => s.currentEventId);
 export const useIsKioskMode = () => useDeviceStore((s) => s.isKioskMode);
 export const usePicturePledgeEnabled = () => useDeviceStore((s) => s.picturePledgeEnabled);
 export const useCurrentEventOverlayId = () => useDeviceStore((s) => s.currentEventOverlayId);
-export const useLocalPhotoTransferEnabled = () => useDeviceStore((s) => s.localPhotoTransferEnabled);
-export const useTabletLocalIp = () => useDeviceStore((s) => s.tabletLocalIp);
-export const useTabletLocalPort = () => useDeviceStore((s) => s.tabletLocalPort);

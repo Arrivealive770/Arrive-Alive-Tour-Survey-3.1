@@ -5,6 +5,7 @@ import { Images, Layers, Check, X, AlertCircle, Wifi } from 'lucide-react-native
 import { CameraCapture, OverlayPreview, type CameraCaptureRef } from '@/components/photo-hub';
 import { usePhotoStore, useSelectedOverlay, usePhotoQueueCount } from '@/lib/state/photo-store';
 import { useDeviceStore } from '@/lib/state/device-store';
+import { useSyncStore } from '@/lib/state/sync-store';
 import { useDatabase } from '@/providers/DatabaseProvider';
 import {
   applyOverlay,
@@ -18,7 +19,9 @@ export default function PhotoHubCamera() {
   const { db, isReady } = useDatabase();
   const teamId = useDeviceStore((s) => s.teamId);
   const eventId = useDeviceStore((s) => s.currentEventId);
-  const localPhotoTransferEnabled = useDeviceStore((s) => s.localPhotoTransferEnabled);
+  // Delivery state, so staff can see at a glance if photos are reaching the tablets
+  const pendingPhotos = useSyncStore((s) => s.pendingPhotos);
+  const isOnline = useSyncStore((s) => s.isOnline);
   const selectedOverlay = useSelectedOverlay();
   const addPhoto = usePhotoStore((s) => s.addPhoto);
   const queueCount = usePhotoQueueCount();
@@ -86,30 +89,28 @@ export default function PhotoHubCamera() {
       // Add to in-memory store
       addPhoto(previewUri, currentOverlay);
 
-      // If local transfer is enabled, also send directly to tablet
-      if (localPhotoTransferEnabled) {
-        try {
-          const sender = getLocalPhotoSenderService();
-          await sender.sendPhotoFromPath(previewUri, {
-            localId,
-            teamId,
-            eventId,
-            overlayType: currentOverlay,
-          });
-          console.log('[PhotoHubCamera] Photo sent to tablet locally');
-        } catch (localError) {
-          console.log('[PhotoHubCamera] Local transfer failed, photo queued for later:', localError);
-          // Don't show error to user - photo is still queued locally
-        }
-      }
-
-      // Close preview and return to camera
+      // Close the preview straight away — the staff member should be able to
+      // line up the next guest while this one uploads in the background.
       setShowPreview(false);
       setPreviewUri(null);
+
+      // Push it to the server now so the tablets can show it within seconds.
+      // On failure the sender queues it and retries, and the photo is still in
+      // the SQLite queue that the background sync works through.
+      getLocalPhotoSenderService()
+        .sendPhotoFromPath(previewUri, {
+          localId,
+          teamId,
+          eventId,
+          overlayType: currentOverlay,
+        })
+        .catch((sendError) => {
+          console.log('[PhotoHubCamera] Send failed, photo queued for retry:', sendError);
+        });
     } catch (error) {
       console.error('[PhotoHubCamera] Error saving photo:', error);
     }
-  }, [previewUri, db, teamId, eventId, currentOverlay, addPhoto, localPhotoTransferEnabled]);
+  }, [previewUri, db, teamId, eventId, currentOverlay, addPhoto]);
 
   const handleDiscardPhoto = useCallback(() => {
     setShowPreview(false);
@@ -154,17 +155,19 @@ export default function PhotoHubCamera() {
           </View>
         ) : null}
 
-        {/* Local Mode indicator - shows when local transfer is enabled */}
-        {localPhotoTransferEnabled ? (
+        {/* Delivery indicator - warns staff if photos aren't reaching the tablets */}
+        {pendingPhotos > 0 ? (
           <View
             style={{
               position: 'absolute',
               top: 70,
               left: '50%',
-              transform: [{ translateX: -50 }],
+              transform: [{ translateX: -70 }],
               flexDirection: 'row',
               alignItems: 'center',
-              backgroundColor: 'rgba(34, 197, 94, 0.85)',
+              backgroundColor: isOnline
+                ? 'rgba(245, 158, 11, 0.9)'
+                : 'rgba(239, 68, 68, 0.9)',
               paddingHorizontal: 12,
               paddingVertical: 6,
               borderRadius: 16,
@@ -173,7 +176,9 @@ export default function PhotoHubCamera() {
           >
             <Wifi size={14} color="#fff" />
             <Text style={{ color: '#fff', fontSize: 12, fontWeight: '600' }}>
-              Local Mode
+              {isOnline
+                ? `Sending ${pendingPhotos}...`
+                : `Offline - ${pendingPhotos} waiting`}
             </Text>
           </View>
         ) : null}
