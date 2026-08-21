@@ -865,9 +865,9 @@ adminPortalRouter.get("/", (c) => {
             </div>
             <div class="form-group">
               <label for="overlayFile">Overlay Image</label>
-              <input type="file" id="overlayFile" accept="image/png,image/jpeg,image/jpg,image/gif,image/webp" required style="padding: 8px;">
+              <input type="file" id="overlayFile" accept="image/*,.png,.jpg,.jpeg,.gif,.webp,.heic,.heif" required style="padding: 8px;">
               <p style="font-size: 12px; color: #888; margin-top: 8px;">
-                Accepted formats: PNG, JPG, GIF, WebP.<br>
+                Accepted formats: PNG, JPG, GIF, WebP. HEIC (iPhone) is not supported — export as PNG or JPG.<br>
                 A <strong>JPG</strong> is used as a polaroid-style frame — the pledge photo is placed
                 inside the window in your artwork. A <strong>see-through PNG</strong> is laid on top of
                 the photo instead. After uploading a JPG you can check and nudge the window.
@@ -1867,10 +1867,18 @@ adminPortalRouter.get("/", (c) => {
 
             document.getElementById('overlayProgressBar').style.width = '90%';
 
-            const data = await res.json();
+            // Read the body as text first: an upload rejected by a proxy comes
+            // back as HTML, and calling .json() on that hides the real reason.
+            const raw = await res.text();
+            let data = null;
+            try { data = JSON.parse(raw); } catch (parseErr) { data = null; }
 
-            if (data.error) {
-              alert(data.error.message);
+            if (!res.ok || !data || data.error || !data.data) {
+              const reason = (data && data.error && data.error.message)
+                || (raw ? raw.slice(0, 300) : '')
+                || ('The server returned ' + res.status + ' with no details.');
+              console.error('Overlay upload failed:', res.status, raw);
+              alert('Upload failed (' + res.status + '): ' + reason);
               document.getElementById('overlayUploadProgress').style.display = 'none';
               document.getElementById('overlaySubmitBtn').disabled = false;
               return;
@@ -1890,7 +1898,9 @@ adminPortalRouter.get("/", (c) => {
               }
             }, 300);
           } catch (err) {
-            alert('Error uploading overlay');
+            console.error('Overlay upload error:', err);
+            alert('Could not upload the overlay: ' + (err && err.message ? err.message : err)
+              + '\\n\\nIf this says "Failed to fetch", the connection dropped mid-upload — check your network and try again.');
             document.getElementById('overlayUploadProgress').style.display = 'none';
             document.getElementById('overlaySubmitBtn').disabled = false;
           }

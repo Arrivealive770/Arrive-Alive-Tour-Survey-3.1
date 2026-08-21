@@ -9,6 +9,7 @@ import {
   TextInput,
   Alert,
   ActivityIndicator,
+  Platform,
 } from 'react-native';
 import {
   Plus,
@@ -22,6 +23,7 @@ import {
 } from 'lucide-react-native';
 import { Image } from 'expo-image';
 import * as ImagePicker from 'expo-image-picker';
+import * as ImageManipulator from 'expo-image-manipulator';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { EventCard } from '@/components/admin/EventCard';
 import { useDeviceStore } from '@/lib/state/device-store';
@@ -48,6 +50,12 @@ interface EventWithCounts extends Event {
 export default function EventsScreen() {
   const [showNewEventModal, setShowNewEventModal] = useState(false);
   const [selectedEvent, setSelectedEvent] = useState<EventWithCounts | null>(null);
+  // Shown inline under the upload button. Alert.alert does nothing on web, so
+  // upload failures were invisible there.
+  const [uploadMessage, setUploadMessage] = useState<{
+    tone: 'success' | 'error';
+    text: string;
+  } | null>(null);
 
   // New event form state
   const [newVenueName, setNewVenueName] = useState('');
@@ -125,49 +133,76 @@ export default function EventsScreen() {
   // Upload a new overlay image (JPG frame or transparent PNG) from this device.
   const uploadOverlayMutation = useMutation({
     mutationFn: async ({ uri, name, fileName }: { uri: string; name: string; fileName: string }) => {
+      const contentType = fileName.toLowerCase().endsWith('.png') ? 'image/png' : 'image/jpeg';
       const formData = new FormData();
-      // React Native's FormData takes a { uri, name, type } descriptor.
-      formData.append('file', {
-        uri,
-        name: fileName,
-        type: fileName.toLowerCase().endsWith('.png') ? 'image/png' : 'image/jpeg',
-      } as unknown as Blob);
+
+      if (Platform.OS === 'web') {
+        // On web the { uri, name, type } descriptor is serialised as text and
+        // the image never reaches the server. Read the picked file into a real
+        // Blob first.
+        const fileResponse = await fetch(uri);
+        const blob = await fileResponse.blob();
+        formData.append('file', new File([blob], fileName, { type: blob.type || contentType }));
+      } else {
+        // React Native's FormData takes a { uri, name, type } descriptor.
+        formData.append('file', {
+          uri,
+          name: fileName,
+          type: contentType,
+        } as unknown as Blob);
+      }
       formData.append('name', name);
 
       const response = await fetch(`${process.env.EXPO_PUBLIC_BACKEND_URL}/api/overlays`, {
         method: 'POST',
         body: formData,
       });
-      const body = (await response.json()) as {
-        data?: Overlay;
-        error?: { message?: string };
-      };
-      if (!response.ok || !body.data) {
-        throw new Error(body.error?.message ?? 'Upload failed');
+
+      // Read as text first — a proxy error or crash returns HTML, and parsing
+      // that as JSON throws away the real reason for the failure.
+      const raw = await response.text();
+      let body: { data?: Overlay; error?: { message?: string } } | null = null;
+      try {
+        body = JSON.parse(raw) as { data?: Overlay; error?: { message?: string } };
+      } catch {
+        body = null;
+      }
+
+      if (!response.ok || !body?.data) {
+        const reason =
+          body?.error?.message ??
+          (raw ? raw.slice(0, 200) : `Server returned ${response.status} with no details`);
+        throw new Error(`(${response.status}) ${reason}`);
       }
       return body.data;
     },
     onSuccess: (overlay) => {
       queryClient.invalidateQueries({ queryKey: ['overlays'] });
-      Alert.alert(
-        'Overlay Uploaded',
-        overlay.mode === 'frame'
-          ? `"${overlay.name}" was added as a photo frame — pledge photos will sit inside it, like a polaroid. Tap it below to use it for this event.`
-          : `"${overlay.name}" was added and will be laid over pledge photos. Tap it below to use it for this event.`
-      );
+      setUploadMessage({
+        tone: 'success',
+        text:
+          overlay.mode === 'frame'
+            ? `"${overlay.name}" was added as a photo frame — pledge photos sit inside it, like a polaroid. Tap it below to use it for this event.`
+            : `"${overlay.name}" was added and will be laid over pledge photos. Tap it below to use it for this event.`,
+      });
     },
     onError: (error: Error) => {
-      Alert.alert('Upload Failed', error.message || 'Could not upload that image');
+      setUploadMessage({
+        tone: 'error',
+        text: error.message || 'Could not upload that image',
+      });
     },
   });
 
   const handleUploadOverlay = async () => {
+    setUploadMessage(null);
+
     const permission = await ImagePicker.requestMediaLibraryPermissionsAsync();
     if (!permission.granted) {
-      Alert.alert(
-        'Photo Access Needed',
-        'Allow photo access so you can pick an overlay image from this device.'
-      );
+      setUploadMessage({
+        tone: 'error',
+        text: 'Photo access is off for this app. Turn it on in Settings, then try again.',
+      });
       return;
     }
 
@@ -179,13 +214,40 @@ export default function EventsScreen() {
     if (result.canceled || !result.assets[0]) return;
 
     const asset = result.assets[0];
-    const fileName = asset.fileName ?? `overlay-${Date.now()}.jpg`;
-    // Name it after the current event so it's easy to find later.
-    const name = selectedEvent
-      ? `${selectedEvent.venueName} Frame`
-      : fileName.replace(/\.[^.]+$/, '');
+    const pickedName = asset.fileName ?? `overlay-${Date.now()}.jpg`;
+    const baseName = pickedName.replace(/\.[^.]+$/, '');
+    // Trust the actual file on disk over the library's filename — iPhone
+    // photos often report ".HEIC" for a file the picker already converted.
+    const uriExtension = asset.uri.split('?')[0].split('.').pop()?.toLowerCase() ?? '';
 
-    uploadOverlayMutation.mutate({ uri: asset.uri, name, fileName });
+    let uri = asset.uri;
+    let fileName = `${baseName}.${uriExtension || 'jpg'}`;
+
+    // PNGs go up untouched so transparency survives. Anything else (HEIC in
+    // particular, which the server can't read) is re-encoded as a JPEG.
+    if (uriExtension !== 'png') {
+      try {
+        const converted = await ImageManipulator.manipulateAsync(asset.uri, [], {
+          compress: 0.95,
+          format: ImageManipulator.SaveFormat.JPEG,
+        });
+        uri = converted.uri;
+        fileName = `${baseName}.jpg`;
+      } catch (conversionError) {
+        setUploadMessage({
+          tone: 'error',
+          text: `Could not read that image (${
+            conversionError instanceof Error ? conversionError.message : 'unknown error'
+          }). Try exporting it as a PNG or JPG.`,
+        });
+        return;
+      }
+    }
+
+    // Name it after the current event so it's easy to find later.
+    const name = selectedEvent ? `${selectedEvent.venueName} Frame` : baseName;
+
+    uploadOverlayMutation.mutate({ uri, name, fileName });
   };
 
   // Post-event photo purge (propagates deletion to phone + both tablets)
@@ -477,6 +539,27 @@ export default function EventsScreen() {
                       </>
                     )}
                   </Pressable>
+                  {uploadMessage ? (
+                    <View
+                      className={cn(
+                        'rounded-lg p-3 mb-3',
+                        uploadMessage.tone === 'error' ? 'bg-red-950' : 'bg-emerald-950'
+                      )}
+                    >
+                      <Text
+                        className={cn(
+                          'text-xs',
+                          uploadMessage.tone === 'error' ? 'text-red-200' : 'text-emerald-200'
+                        )}
+                      >
+                        {uploadMessage.text}
+                      </Text>
+                      <Pressable onPress={() => setUploadMessage(null)} className="mt-2">
+                        <Text className="text-zinc-400 text-xs font-semibold">Dismiss</Text>
+                      </Pressable>
+                    </View>
+                  ) : null}
+
                   <Text className="text-zinc-600 text-xs mb-3">
                     A JPG works like a polaroid — the photo goes inside the window in your artwork.
                     A see-through PNG is laid over the photo instead.
