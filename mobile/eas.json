@@ -16,6 +16,15 @@
         "EXPO_PUBLIC_BACKEND_URL": "https://arrivealive.tail04a318.ts.net"
       }
     },
+    "preview-public": {
+      "distribution": "internal",
+      "android": {
+        "buildType": "apk"
+      },
+      "env": {
+        "EXPO_PUBLIC_BACKEND_URL": "https://preview-fopohpplspve.dev.vibecode.run"
+      }
+    },
     "production": {
       "env": {
         "EXPO_PUBLIC_BACKEND_URL": "https://arrivealive.tail04a318.ts.net"
