@@ -7,6 +7,22 @@ import { eventPurgeScheduler } from "../lib/event-purge";
 
 const eventsRouter = new Hono();
 
+/**
+ * surveyTypes is stored as a JSON string but every client expects an array.
+ * Run this on every event that goes out, so a single event never has a
+ * different shape from one in a list.
+ */
+function withParsedSurveyTypes<T extends { surveyTypes: string }>(event: T) {
+  let surveyTypes: string[] = [];
+  try {
+    const parsed = JSON.parse(event.surveyTypes);
+    surveyTypes = Array.isArray(parsed) ? parsed.map(String) : [];
+  } catch {
+    console.error("[Events] Stored surveyTypes is not valid JSON:", event.surveyTypes);
+  }
+  return { ...event, surveyTypes };
+}
+
 // GET /api/events - List events (filter by teamId, status query params)
 eventsRouter.get("/", async (c) => {
   const teamId = c.req.query("teamId");
@@ -32,13 +48,7 @@ eventsRouter.get("/", async (c) => {
     orderBy: { eventDate: "desc" },
   });
 
-  // Parse surveyTypes JSON string to array
-  const parsedEvents = events.map(event => ({
-    ...event,
-    surveyTypes: JSON.parse(event.surveyTypes),
-  }));
-
-  return c.json({ data: parsedEvents });
+  return c.json({ data: events.map(withParsedSurveyTypes) });
 });
 
 // GET /api/events/:id - Get event by ID
@@ -64,7 +74,7 @@ eventsRouter.get("/:id", async (c) => {
     return c.json({ error: { message: "Event not found", code: "NOT_FOUND" } }, 404);
   }
 
-  return c.json({ data: event });
+  return c.json({ data: withParsedSurveyTypes(event) });
 });
 
 // GET /api/events/active/:teamId - Get active event for team
@@ -95,7 +105,7 @@ eventsRouter.get("/active/:teamId", async (c) => {
     return c.json({ error: { message: "No active event found for this team", code: "NO_ACTIVE_EVENT" } }, 404);
   }
 
-  return c.json({ data: event });
+  return c.json({ data: withParsedSurveyTypes(event) });
 });
 
 // POST /api/events - Create event
@@ -156,7 +166,7 @@ eventsRouter.post(
       },
     });
 
-    return c.json({ data: event }, 201);
+    return c.json({ data: withParsedSurveyTypes(event) }, 201);
   }
 );
 
@@ -229,7 +239,7 @@ eventsRouter.put(
       },
     });
 
-    return c.json({ data: event });
+    return c.json({ data: withParsedSurveyTypes(event) });
   }
 );
 
@@ -312,7 +322,7 @@ eventsRouter.post("/:id/overlay", async (c) => {
       },
     });
 
-    return c.json({ data: { event, overlay } }, 201);
+    return c.json({ data: { event: withParsedSurveyTypes(event), overlay } }, 201);
   } catch (error) {
     console.error("Error uploading event overlay:", error);
     return c.json(
@@ -353,7 +363,7 @@ eventsRouter.put("/:id/complete", async (c) => {
     },
   });
 
-  return c.json({ data: event });
+  return c.json({ data: withParsedSurveyTypes(event) });
 });
 
 // POST /api/events/:id/purge - Delete every photo and every participant email

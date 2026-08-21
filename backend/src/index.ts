@@ -109,6 +109,34 @@ app.route("/api/admin-users", adminUsersRouter);
 app.route("/api/external-surveys", externalSurveysRouter);
 app.route("/admin", adminPortalRouter);
 
+// Anything that escapes a route handler still answers in the standard JSON
+// envelope. Without this, clients get plain-text "Internal Server Error",
+// their response parsing blows up, and the real reason never reaches the user.
+app.onError((err, c) => {
+  console.error(`[Unhandled] ${c.req.method} ${c.req.path}:`, err);
+  return c.json(
+    {
+      error: {
+        message: err instanceof Error ? err.message : "Unexpected server error",
+        code: "INTERNAL_ERROR",
+      },
+    },
+    500
+  );
+});
+
+app.notFound((c) =>
+  c.json(
+    {
+      error: {
+        message: `No route for ${c.req.method} ${c.req.path}`,
+        code: "NOT_FOUND",
+      },
+    },
+    404
+  )
+);
+
 // Start the background email queue processor.
 // If no email API key is set it logs a warning and stays idle; queued pledge
 // emails are drained automatically once a key is added and the server restarts.

@@ -5,6 +5,7 @@ import { prisma } from "../prisma";
 import sharp from "sharp";
 import {
   detectFrameWindow,
+  detectMode,
   compositePhoto,
   windowFromOverlay,
   DEFAULT_WINDOW,
@@ -21,6 +22,10 @@ const VALID_IMAGE_TYPES = [
   "image/webp",
 ];
 const VALID_IMAGE_EXTENSIONS = ["png", "jpg", "jpeg", "gif", "webp"];
+
+// iPhone photos are often HEIC. We can't decode or display those, so say so
+// plainly instead of failing with a vague "invalid file type".
+const HEIC_EXTENSIONS = ["heic", "heif"];
 
 // Some clients (React Native's FormData in particular) send an empty or
 // generic content type, so fall back to the filename extension before
@@ -66,23 +71,77 @@ overlaysRouter.get("/:id", async (c) => {
 
 // POST /api/overlays - Upload a new overlay
 overlaysRouter.post("/", async (c) => {
-  const formData = await c.req.formData();
-  const file = formData.get("file") as File | null;
+  // Parsing can throw on its own (truncated upload, malformed multipart body).
+  // Catch it here so the client gets a JSON reason rather than a bare 500.
+  let formData: FormData;
+  try {
+    formData = await c.req.formData();
+  } catch (parseError) {
+    console.error("[Overlay] Could not read the upload:", parseError);
+    return c.json({
+      error: {
+        message:
+          "Could not read the uploaded file. The upload may have been interrupted — check the connection and try again.",
+        code: "FORM_PARSE_FAILED",
+      },
+    }, 400);
+  }
+
+  const rawFile = formData.get("file");
   const name = formData.get("name") as string | null;
 
-  if (!file) {
+  if (rawFile === null) {
     return c.json({ error: { message: "File is required", code: "FILE_REQUIRED" } }, 400);
   }
 
+  // Some clients (React Native on web, mis-built form posts) send the file
+  // descriptor as text instead of the actual file. Without this check it looks
+  // like an invalid image, which sends people hunting the wrong problem.
+  if (typeof rawFile === "string") {
+    console.error("[Overlay] File field arrived as text, not a file:", rawFile.slice(0, 200));
+    return c.json({
+      error: {
+        message:
+          "The image didn't attach to the upload. Please pick the image again and retry.",
+        code: "FILE_NOT_ATTACHED",
+      },
+    }, 400);
+  }
+
+  const file = rawFile as File;
+
   if (!name || name.trim().length === 0) {
     return c.json({ error: { message: "Name is required", code: "NAME_REQUIRED" } }, 400);
+  }
+
+  if (file.size === 0) {
+    return c.json({
+      error: {
+        message: "That file is empty (0 bytes). Please pick the image again.",
+        code: "FILE_EMPTY",
+      },
+    }, 400);
+  }
+
+  const extension = (file.name || "").split(".").pop()?.toLowerCase() ?? "";
+
+  if (HEIC_EXTENSIONS.includes(extension) || (file.type || "").toLowerCase().includes("hei")) {
+    return c.json({
+      error: {
+        message:
+          "HEIC images (the iPhone photo format) aren't supported. Save or export the artwork as a PNG or JPG and upload that.",
+        code: "HEIC_NOT_SUPPORTED",
+      },
+    }, 400);
   }
 
   // Validate file type - must be an image
   if (!isAllowedImage(file)) {
     return c.json({
       error: {
-        message: "Invalid file type. Only PNG, JPG, GIF, and WebP images are allowed.",
+        message: `Invalid file type${
+          extension ? ` (.${extension})` : file.type ? ` (${file.type})` : ""
+        }. Only PNG, JPG, GIF, and WebP images are allowed.`,
         code: "INVALID_FILE_TYPE"
       }
     }, 400);
@@ -91,18 +150,18 @@ overlaysRouter.post("/", async (c) => {
   try {
     // Work out how this overlay should be applied. A JPG has no transparency,
     // so laying it on top would hide the photo entirely — it's a polaroid-style
-    // frame instead, and we find the window the photo drops into.
+    // frame instead, and we find the window the photo drops into. A PNG can be
+    // either: a see-through hole ringed by solid artwork is also a frame.
     const requestedMode = (formData.get("mode") as string | null)?.trim();
     let mode = requestedMode === "overlay" || requestedMode === "frame" ? requestedMode : "auto";
     let window: { x: number; y: number; w: number; h: number } | null = null;
 
     try {
       const imageBuffer = Buffer.from(await file.arrayBuffer());
-      const metadata = await sharp(imageBuffer).metadata();
-      const hasAlpha = metadata.hasAlpha === true;
 
       if (mode === "auto") {
-        mode = hasAlpha ? "overlay" : "frame";
+        mode = await detectMode(imageBuffer);
+        console.log(`[Overlay] Auto-detected "${file.name}" as ${mode} mode`);
       }
       if (mode === "frame") {
         window = await detectFrameWindow(imageBuffer);
@@ -123,13 +182,15 @@ overlaysRouter.post("/", async (c) => {
 
     if (!uploadResponse.ok) {
       const errorText = await uploadResponse.text();
-      console.error("Storage upload failed:", errorText);
+      console.error("Storage upload failed:", uploadResponse.status, errorText);
       return c.json({
         error: {
-          message: "Failed to upload file to storage",
+          message: `Storage rejected the file (${uploadResponse.status})${
+            errorText ? `: ${errorText.slice(0, 200)}` : ""
+          }`,
           code: "STORAGE_UPLOAD_FAILED"
         }
-      }, 500);
+      }, 502);
     }
 
     const uploadResult = await uploadResponse.json() as {
@@ -167,7 +228,9 @@ overlaysRouter.post("/", async (c) => {
     console.error("Error uploading overlay:", error);
     return c.json({
       error: {
-        message: "Internal server error during upload",
+        message: `Upload failed: ${
+          error instanceof Error ? error.message : String(error)
+        }`,
         code: "INTERNAL_ERROR"
       }
     }, 500);

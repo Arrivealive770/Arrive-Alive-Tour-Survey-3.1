@@ -1,14 +1,20 @@
 // API Types for Arrive Alive Tour Kiosk System
 
-// Survey type slugs
-export type SurveyTypeSlug =
+// Survey type slugs.
+//
+// Admins can build their own surveys, so a slug is any string. The union below
+// is only the set that ships with the app (used for built-in icons and the
+// offline fallback list) — never treat it as the full set of surveys.
+export type SurveyTypeSlug = string;
+
+export type BuiltInSurveyTypeSlug =
   | 'marijuana'
   | 'alcohol'
   | 'distracted'
   | 'impaired'
   | 'combo';
 
-export const SURVEY_TYPES: { slug: SurveyTypeSlug; label: string }[] = [
+export const SURVEY_TYPES: { slug: BuiltInSurveyTypeSlug; label: string }[] = [
   { slug: 'marijuana', label: 'Marijuana' },
   { slug: 'alcohol', label: 'Alcohol' },
   { slug: 'distracted', label: 'Distracted' },

@@ -9,6 +9,7 @@ import {
   TextInput,
   Alert,
   ActivityIndicator,
+  Platform,
 } from 'react-native';
 import {
   Plus,
@@ -22,12 +23,13 @@ import {
 } from 'lucide-react-native';
 import { Image } from 'expo-image';
 import * as ImagePicker from 'expo-image-picker';
+import * as ImageManipulator from 'expo-image-manipulator';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { EventCard } from '@/components/admin/EventCard';
 import { useDeviceStore } from '@/lib/state/device-store';
 import { api } from '@/lib/api/api';
+import { useSurveyTypes } from '@/lib/survey-questions';
 import {
-  SURVEY_TYPES,
   US_STATES,
   type SurveyTypeSlug,
   type Event,
@@ -48,6 +50,12 @@ interface EventWithCounts extends Event {
 export default function EventsScreen() {
   const [showNewEventModal, setShowNewEventModal] = useState(false);
   const [selectedEvent, setSelectedEvent] = useState<EventWithCounts | null>(null);
+  // Shown inline under the upload button. Alert.alert does nothing on web, so
+  // upload failures were invisible there.
+  const [uploadMessage, setUploadMessage] = useState<{
+    tone: 'success' | 'error';
+    text: string;
+  } | null>(null);
 
   // New event form state
   const [newVenueName, setNewVenueName] = useState('');
@@ -97,6 +105,21 @@ export default function EventsScreen() {
     },
   });
 
+  // The surveys built in the admin portal. These drive event creation — a new
+  // survey shows up here without an app update.
+  const {
+    data: builtSurveys,
+    isLoading: surveysLoading,
+    isError: surveysFailed,
+    refetch: refetchSurveys,
+  } = useSurveyTypes();
+
+  // Only surveys that are switched on can be collected at an event.
+  const availableSurveys = (builtSurveys ?? []).filter((survey) => survey.isActive);
+
+  const surveyNameFor = (slug: string) =>
+    builtSurveys?.find((survey) => survey.slug === slug)?.name ?? slug;
+
   // Fetch available overlays for per-event assignment
   const { data: overlays } = useQuery({
     queryKey: ['overlays'],
@@ -125,49 +148,76 @@ export default function EventsScreen() {
   // Upload a new overlay image (JPG frame or transparent PNG) from this device.
   const uploadOverlayMutation = useMutation({
     mutationFn: async ({ uri, name, fileName }: { uri: string; name: string; fileName: string }) => {
+      const contentType = fileName.toLowerCase().endsWith('.png') ? 'image/png' : 'image/jpeg';
       const formData = new FormData();
-      // React Native's FormData takes a { uri, name, type } descriptor.
-      formData.append('file', {
-        uri,
-        name: fileName,
-        type: fileName.toLowerCase().endsWith('.png') ? 'image/png' : 'image/jpeg',
-      } as unknown as Blob);
+
+      if (Platform.OS === 'web') {
+        // On web the { uri, name, type } descriptor is serialised as text and
+        // the image never reaches the server. Read the picked file into a real
+        // Blob first.
+        const fileResponse = await fetch(uri);
+        const blob = await fileResponse.blob();
+        formData.append('file', new File([blob], fileName, { type: blob.type || contentType }));
+      } else {
+        // React Native's FormData takes a { uri, name, type } descriptor.
+        formData.append('file', {
+          uri,
+          name: fileName,
+          type: contentType,
+        } as unknown as Blob);
+      }
       formData.append('name', name);
 
       const response = await fetch(`${process.env.EXPO_PUBLIC_BACKEND_URL}/api/overlays`, {
         method: 'POST',
         body: formData,
       });
-      const body = (await response.json()) as {
-        data?: Overlay;
-        error?: { message?: string };
-      };
-      if (!response.ok || !body.data) {
-        throw new Error(body.error?.message ?? 'Upload failed');
+
+      // Read as text first — a proxy error or crash returns HTML, and parsing
+      // that as JSON throws away the real reason for the failure.
+      const raw = await response.text();
+      let body: { data?: Overlay; error?: { message?: string } } | null = null;
+      try {
+        body = JSON.parse(raw) as { data?: Overlay; error?: { message?: string } };
+      } catch {
+        body = null;
+      }
+
+      if (!response.ok || !body?.data) {
+        const reason =
+          body?.error?.message ??
+          (raw ? raw.slice(0, 200) : `Server returned ${response.status} with no details`);
+        throw new Error(`(${response.status}) ${reason}`);
       }
       return body.data;
     },
     onSuccess: (overlay) => {
       queryClient.invalidateQueries({ queryKey: ['overlays'] });
-      Alert.alert(
-        'Overlay Uploaded',
-        overlay.mode === 'frame'
-          ? `"${overlay.name}" was added as a photo frame — pledge photos will sit inside it, like a polaroid. Tap it below to use it for this event.`
-          : `"${overlay.name}" was added and will be laid over pledge photos. Tap it below to use it for this event.`
-      );
+      setUploadMessage({
+        tone: 'success',
+        text:
+          overlay.mode === 'frame'
+            ? `"${overlay.name}" was added as a photo frame — pledge photos sit inside it, like a polaroid. Tap it below to use it for this event.`
+            : `"${overlay.name}" was added and will be laid over pledge photos. Tap it below to use it for this event.`,
+      });
     },
     onError: (error: Error) => {
-      Alert.alert('Upload Failed', error.message || 'Could not upload that image');
+      setUploadMessage({
+        tone: 'error',
+        text: error.message || 'Could not upload that image',
+      });
     },
   });
 
   const handleUploadOverlay = async () => {
+    setUploadMessage(null);
+
     const permission = await ImagePicker.requestMediaLibraryPermissionsAsync();
     if (!permission.granted) {
-      Alert.alert(
-        'Photo Access Needed',
-        'Allow photo access so you can pick an overlay image from this device.'
-      );
+      setUploadMessage({
+        tone: 'error',
+        text: 'Photo access is off for this app. Turn it on in Settings, then try again.',
+      });
       return;
     }
 
@@ -179,13 +229,40 @@ export default function EventsScreen() {
     if (result.canceled || !result.assets[0]) return;
 
     const asset = result.assets[0];
-    const fileName = asset.fileName ?? `overlay-${Date.now()}.jpg`;
-    // Name it after the current event so it's easy to find later.
-    const name = selectedEvent
-      ? `${selectedEvent.venueName} Frame`
-      : fileName.replace(/\.[^.]+$/, '');
+    const pickedName = asset.fileName ?? `overlay-${Date.now()}.jpg`;
+    const baseName = pickedName.replace(/\.[^.]+$/, '');
+    // Trust the actual file on disk over the library's filename — iPhone
+    // photos often report ".HEIC" for a file the picker already converted.
+    const uriExtension = asset.uri.split('?')[0].split('.').pop()?.toLowerCase() ?? '';
 
-    uploadOverlayMutation.mutate({ uri: asset.uri, name, fileName });
+    let uri = asset.uri;
+    let fileName = `${baseName}.${uriExtension || 'jpg'}`;
+
+    // PNGs go up untouched so transparency survives. Anything else (HEIC in
+    // particular, which the server can't read) is re-encoded as a JPEG.
+    if (uriExtension !== 'png') {
+      try {
+        const converted = await ImageManipulator.manipulateAsync(asset.uri, [], {
+          compress: 0.95,
+          format: ImageManipulator.SaveFormat.JPEG,
+        });
+        uri = converted.uri;
+        fileName = `${baseName}.jpg`;
+      } catch (conversionError) {
+        setUploadMessage({
+          tone: 'error',
+          text: `Could not read that image (${
+            conversionError instanceof Error ? conversionError.message : 'unknown error'
+          }). Try exporting it as a PNG or JPG.`,
+        });
+        return;
+      }
+    }
+
+    // Name it after the current event so it's easy to find later.
+    const name = selectedEvent ? `${selectedEvent.venueName} Frame` : baseName;
+
+    uploadOverlayMutation.mutate({ uri, name, fileName });
   };
 
   // Post-event photo purge (propagates deletion to phone + both tablets)
@@ -273,9 +350,12 @@ export default function EventsScreen() {
   };
 
   const toggleSurveyType = (type: SurveyTypeSlug) => {
-    setNewSurveyTypes((prev) =>
-      prev.includes(type) ? prev.filter((t) => t !== type) : [...prev, type]
-    );
+    setNewSurveyTypes((prev) => {
+      const next = prev.includes(type) ? prev.filter((t) => t !== type) : [...prev, type];
+      // The overlay type has to be one of the surveys still selected.
+      setNewOverlayType((current) => (current && next.includes(current) ? current : next[0] ?? ''));
+      return next;
+    });
   };
 
   const activeEvents = events?.filter((e) => e.status === 'active') || [];
@@ -404,7 +484,7 @@ export default function EventsScreen() {
                   <View className="flex-row flex-wrap gap-2">
                     {selectedEvent.surveyTypes.map((type) => (
                       <View key={type} className="bg-zinc-700 px-3 py-1 rounded-full">
-                        <Text className="text-white text-sm capitalize">{type}</Text>
+                        <Text className="text-white text-sm">{surveyNameFor(type)}</Text>
                       </View>
                     ))}
                   </View>
@@ -477,6 +557,27 @@ export default function EventsScreen() {
                       </>
                     )}
                   </Pressable>
+                  {uploadMessage ? (
+                    <View
+                      className={cn(
+                        'rounded-lg p-3 mb-3',
+                        uploadMessage.tone === 'error' ? 'bg-red-950' : 'bg-emerald-950'
+                      )}
+                    >
+                      <Text
+                        className={cn(
+                          'text-xs',
+                          uploadMessage.tone === 'error' ? 'text-red-200' : 'text-emerald-200'
+                        )}
+                      >
+                        {uploadMessage.text}
+                      </Text>
+                      <Pressable onPress={() => setUploadMessage(null)} className="mt-2">
+                        <Text className="text-zinc-400 text-xs font-semibold">Dismiss</Text>
+                      </Pressable>
+                    </View>
+                  ) : null}
+
                   <Text className="text-zinc-600 text-xs mb-3">
                     A JPG works like a polaroid — the photo goes inside the window in your artwork.
                     A see-through PNG is laid over the photo instead.
@@ -662,58 +763,95 @@ export default function EventsScreen() {
                 <Text className="text-zinc-600 text-xs mb-3">
                   Select which surveys field workers will collect at this event
                 </Text>
-                <View className="flex-row flex-wrap gap-2">
-                  {SURVEY_TYPES.map((type) => (
-                    <Pressable
-                      key={type.slug}
-                      onPress={() => toggleSurveyType(type.slug)}
-                      className={cn(
-                        'px-4 py-2 rounded-lg flex-row items-center',
-                        newSurveyTypes.includes(type.slug)
-                          ? 'bg-blue-600'
-                          : 'bg-zinc-800'
-                      )}
-                    >
-                      {newSurveyTypes.includes(type.slug) ? (
-                        <Check size={14} color="#fff" />
-                      ) : null}
-                      <Text
+
+                {surveysLoading ? (
+                  <View className="flex-row items-center py-2">
+                    <ActivityIndicator size="small" color="#71717a" />
+                    <Text className="text-zinc-500 text-sm ml-2">Loading your surveys…</Text>
+                  </View>
+                ) : surveysFailed ? (
+                  <View className="bg-red-950 rounded-lg p-3">
+                    <Text className="text-red-200 text-xs">
+                      Could not load your surveys. Check the connection and try again.
+                    </Text>
+                    <Pressable onPress={() => refetchSurveys()} className="mt-2">
+                      <Text className="text-red-100 text-xs font-semibold">Retry</Text>
+                    </Pressable>
+                  </View>
+                ) : availableSurveys.length === 0 ? (
+                  <View className="bg-zinc-800 rounded-lg p-3">
+                    <Text className="text-zinc-400 text-xs">
+                      No active surveys yet. Build a survey in the admin site first — it will
+                      appear here automatically.
+                    </Text>
+                  </View>
+                ) : (
+                  <View className="flex-row flex-wrap gap-2">
+                    {availableSurveys.map((survey) => (
+                      <Pressable
+                        key={survey.slug}
+                        onPress={() => toggleSurveyType(survey.slug)}
                         className={cn(
-                          'text-sm',
-                          newSurveyTypes.includes(type.slug) ? 'text-white ml-1' : 'text-zinc-400'
+                          'px-4 py-2 rounded-lg flex-row items-center',
+                          newSurveyTypes.includes(survey.slug)
+                            ? 'bg-blue-600'
+                            : 'bg-zinc-800'
                         )}
                       >
-                        {type.label}
-                      </Text>
-                    </Pressable>
-                  ))}
-                </View>
+                        {newSurveyTypes.includes(survey.slug) ? (
+                          <Check size={14} color="#fff" />
+                        ) : null}
+                        <Text
+                          className={cn(
+                            'text-sm',
+                            newSurveyTypes.includes(survey.slug)
+                              ? 'text-white ml-1'
+                              : 'text-zinc-400'
+                          )}
+                        >
+                          {survey.name}
+                        </Text>
+                      </Pressable>
+                    ))}
+                  </View>
+                )}
               </View>
 
               {/* Overlay Type */}
               <View className="mb-6">
                 <Text className="text-zinc-400 text-sm mb-2">Photo Overlay Type *</Text>
-                <View className="flex-row flex-wrap gap-2">
-                  {SURVEY_TYPES.map((type) => (
-                    <Pressable
-                      key={type.slug}
-                      onPress={() => setNewOverlayType(type.slug)}
-                      className={cn(
-                        'px-4 py-2 rounded-lg',
-                        newOverlayType === type.slug ? 'bg-purple-600' : 'bg-zinc-800'
-                      )}
-                    >
-                      <Text
+                <Text className="text-zinc-600 text-xs mb-3">
+                  Which survey's artwork goes on pledge photos at this event
+                </Text>
+                {newSurveyTypes.length === 0 ? (
+                  <View className="bg-zinc-800 rounded-lg p-3">
+                    <Text className="text-zinc-400 text-xs">
+                      Pick at least one survey above first.
+                    </Text>
+                  </View>
+                ) : (
+                  <View className="flex-row flex-wrap gap-2">
+                    {newSurveyTypes.map((slug) => (
+                      <Pressable
+                        key={slug}
+                        onPress={() => setNewOverlayType(slug)}
                         className={cn(
-                          'text-sm',
-                          newOverlayType === type.slug ? 'text-white' : 'text-zinc-400'
+                          'px-4 py-2 rounded-lg',
+                          newOverlayType === slug ? 'bg-purple-600' : 'bg-zinc-800'
                         )}
                       >
-                        {type.label}
-                      </Text>
-                    </Pressable>
-                  ))}
-                </View>
+                        <Text
+                          className={cn(
+                            'text-sm',
+                            newOverlayType === slug ? 'text-white' : 'text-zinc-400'
+                          )}
+                        >
+                          {surveyNameFor(slug)}
+                        </Text>
+                      </Pressable>
+                    ))}
+                  </View>
+                )}
               </View>
 
               {/* Create Button */}
