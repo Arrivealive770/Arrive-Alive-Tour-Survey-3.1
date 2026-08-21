@@ -5,6 +5,7 @@ import { prisma } from "../prisma";
 import sharp from "sharp";
 import {
   detectFrameWindow,
+  detectMode,
   compositePhoto,
   windowFromOverlay,
   DEFAULT_WINDOW,
@@ -149,18 +150,18 @@ overlaysRouter.post("/", async (c) => {
   try {
     // Work out how this overlay should be applied. A JPG has no transparency,
     // so laying it on top would hide the photo entirely — it's a polaroid-style
-    // frame instead, and we find the window the photo drops into.
+    // frame instead, and we find the window the photo drops into. A PNG can be
+    // either: a see-through hole ringed by solid artwork is also a frame.
     const requestedMode = (formData.get("mode") as string | null)?.trim();
     let mode = requestedMode === "overlay" || requestedMode === "frame" ? requestedMode : "auto";
     let window: { x: number; y: number; w: number; h: number } | null = null;
 
     try {
       const imageBuffer = Buffer.from(await file.arrayBuffer());
-      const metadata = await sharp(imageBuffer).metadata();
-      const hasAlpha = metadata.hasAlpha === true;
 
       if (mode === "auto") {
-        mode = hasAlpha ? "overlay" : "frame";
+        mode = await detectMode(imageBuffer);
+        console.log(`[Overlay] Auto-detected "${file.name}" as ${mode} mode`);
       }
       if (mode === "frame") {
         window = await detectFrameWindow(imageBuffer);

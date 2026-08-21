@@ -49,6 +49,84 @@ export function resolveMode(mode: string | null | undefined, hasAlpha: boolean):
   return hasAlpha ? "overlay" : "frame";
 }
 
+// Alpha thresholds for telling a frame apart from a sticker-style overlay.
+const OPAQUE_ALPHA = 200;
+const CLEAR_ALPHA = 40;
+// How much of the outer ring must be solid for the artwork to be a border.
+// Not 1.0, so rounded corners and soft edges still read as a frame.
+const EDGE_OPACITY_THRESHOLD = 0.75;
+// How much of the middle must be see-through for there to be a photo window.
+const CENTER_CLARITY_THRESHOLD = 0.6;
+// Width of the outer ring that gets checked, as a fraction of the image. Kept
+// deliberately thin: real frames can have a margin barely 2% wide, and a wider
+// ring would sample the transparent window and call the frame an overlay.
+const EDGE_BAND = 0.01;
+// How far in the "middle" starts, as a fraction of the image.
+const CENTER_INSET = 0.2;
+
+/**
+ * Decide what an overlay image actually is, by looking at its transparency.
+ *
+ * A transparent PNG is not automatically a lay-on-top overlay. A polaroid
+ * frame exported as a PNG — solid border, see-through hole in the middle — is
+ * a frame, and treating it as an overlay stretches it to the photo's shape,
+ * which squashes the logos and gives the border uneven thickness.
+ *
+ * So: solid all the way round the outside AND see-through in the middle means
+ * frame. Anything else with an alpha channel is a normal overlay.
+ */
+export async function detectMode(imageBuffer: Buffer): Promise<"overlay" | "frame"> {
+  try {
+    const meta = await sharp(imageBuffer).metadata();
+    // A JPG can't be see-through, so it can only ever work as a frame.
+    if (meta.hasAlpha !== true) return "frame";
+
+    const { data, info } = await sharp(imageBuffer)
+      .resize(SAMPLE_SIZE, SAMPLE_SIZE, { fit: "fill" })
+      .ensureAlpha()
+      .raw()
+      .toBuffer({ resolveWithObject: true });
+
+    const { width, height, channels } = info;
+    const alphaAt = (x: number, y: number) => data[(y * width + x) * channels + 3] ?? 0;
+
+    const band = Math.max(1, Math.round(width * EDGE_BAND));
+    const inset = Math.round(width * CENTER_INSET);
+
+    let edgeTotal = 0;
+    let edgeOpaque = 0;
+    let centerTotal = 0;
+    let centerClear = 0;
+
+    for (let y = 0; y < height; y++) {
+      for (let x = 0; x < width; x++) {
+        const onEdge = x < band || y < band || x >= width - band || y >= height - band;
+        if (onEdge) {
+          edgeTotal++;
+          if (alphaAt(x, y) >= OPAQUE_ALPHA) edgeOpaque++;
+          continue;
+        }
+        const inMiddle = x >= inset && y >= inset && x < width - inset && y < height - inset;
+        if (inMiddle) {
+          centerTotal++;
+          if (alphaAt(x, y) <= CLEAR_ALPHA) centerClear++;
+        }
+      }
+    }
+
+    const edgeRatio = edgeTotal > 0 ? edgeOpaque / edgeTotal : 0;
+    const centerRatio = centerTotal > 0 ? centerClear / centerTotal : 0;
+
+    return edgeRatio >= EDGE_OPACITY_THRESHOLD && centerRatio >= CENTER_CLARITY_THRESHOLD
+      ? "frame"
+      : "overlay";
+  } catch (error) {
+    // Never let a probe failure block an upload — fall back to the old rule.
+    console.error("[OverlayFrame] Mode detection failed, treating as overlay:", error);
+    return "overlay";
+  }
+}
+
 export function windowFromOverlay(overlay: {
   windowX: number | null;
   windowY: number | null;
@@ -188,7 +266,13 @@ export async function compositePhoto(options: {
 
   const overlayMeta = await sharp(overlayBuffer).metadata();
   const hasAlpha = overlayMeta.hasAlpha === true;
-  const mode = resolveMode(options.mode, hasAlpha);
+  // "auto" looks at the artwork itself. Overlays uploaded before frame
+  // detection existed are all stored as "auto", so they get classified here
+  // rather than staying stuck on the old has-alpha-means-overlay guess.
+  const mode =
+    options.mode === "overlay" || options.mode === "frame"
+      ? options.mode
+      : await detectMode(overlayBuffer);
 
   if (mode === "overlay") {
     const photoMeta = await sharp(photoBuffer).metadata();
