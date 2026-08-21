@@ -28,8 +28,8 @@ import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { EventCard } from '@/components/admin/EventCard';
 import { useDeviceStore } from '@/lib/state/device-store';
 import { api } from '@/lib/api/api';
+import { useSurveyTypes } from '@/lib/survey-questions';
 import {
-  SURVEY_TYPES,
   US_STATES,
   type SurveyTypeSlug,
   type Event,
@@ -104,6 +104,21 @@ export default function EventsScreen() {
       Alert.alert('Error', error.message || 'Failed to end event');
     },
   });
+
+  // The surveys built in the admin portal. These drive event creation — a new
+  // survey shows up here without an app update.
+  const {
+    data: builtSurveys,
+    isLoading: surveysLoading,
+    isError: surveysFailed,
+    refetch: refetchSurveys,
+  } = useSurveyTypes();
+
+  // Only surveys that are switched on can be collected at an event.
+  const availableSurveys = (builtSurveys ?? []).filter((survey) => survey.isActive);
+
+  const surveyNameFor = (slug: string) =>
+    builtSurveys?.find((survey) => survey.slug === slug)?.name ?? slug;
 
   // Fetch available overlays for per-event assignment
   const { data: overlays } = useQuery({
@@ -335,9 +350,12 @@ export default function EventsScreen() {
   };
 
   const toggleSurveyType = (type: SurveyTypeSlug) => {
-    setNewSurveyTypes((prev) =>
-      prev.includes(type) ? prev.filter((t) => t !== type) : [...prev, type]
-    );
+    setNewSurveyTypes((prev) => {
+      const next = prev.includes(type) ? prev.filter((t) => t !== type) : [...prev, type];
+      // The overlay type has to be one of the surveys still selected.
+      setNewOverlayType((current) => (current && next.includes(current) ? current : next[0] ?? ''));
+      return next;
+    });
   };
 
   const activeEvents = events?.filter((e) => e.status === 'active') || [];
@@ -466,7 +484,7 @@ export default function EventsScreen() {
                   <View className="flex-row flex-wrap gap-2">
                     {selectedEvent.surveyTypes.map((type) => (
                       <View key={type} className="bg-zinc-700 px-3 py-1 rounded-full">
-                        <Text className="text-white text-sm capitalize">{type}</Text>
+                        <Text className="text-white text-sm">{surveyNameFor(type)}</Text>
                       </View>
                     ))}
                   </View>
@@ -745,58 +763,95 @@ export default function EventsScreen() {
                 <Text className="text-zinc-600 text-xs mb-3">
                   Select which surveys field workers will collect at this event
                 </Text>
-                <View className="flex-row flex-wrap gap-2">
-                  {SURVEY_TYPES.map((type) => (
-                    <Pressable
-                      key={type.slug}
-                      onPress={() => toggleSurveyType(type.slug)}
-                      className={cn(
-                        'px-4 py-2 rounded-lg flex-row items-center',
-                        newSurveyTypes.includes(type.slug)
-                          ? 'bg-blue-600'
-                          : 'bg-zinc-800'
-                      )}
-                    >
-                      {newSurveyTypes.includes(type.slug) ? (
-                        <Check size={14} color="#fff" />
-                      ) : null}
-                      <Text
+
+                {surveysLoading ? (
+                  <View className="flex-row items-center py-2">
+                    <ActivityIndicator size="small" color="#71717a" />
+                    <Text className="text-zinc-500 text-sm ml-2">Loading your surveys…</Text>
+                  </View>
+                ) : surveysFailed ? (
+                  <View className="bg-red-950 rounded-lg p-3">
+                    <Text className="text-red-200 text-xs">
+                      Could not load your surveys. Check the connection and try again.
+                    </Text>
+                    <Pressable onPress={() => refetchSurveys()} className="mt-2">
+                      <Text className="text-red-100 text-xs font-semibold">Retry</Text>
+                    </Pressable>
+                  </View>
+                ) : availableSurveys.length === 0 ? (
+                  <View className="bg-zinc-800 rounded-lg p-3">
+                    <Text className="text-zinc-400 text-xs">
+                      No active surveys yet. Build a survey in the admin site first — it will
+                      appear here automatically.
+                    </Text>
+                  </View>
+                ) : (
+                  <View className="flex-row flex-wrap gap-2">
+                    {availableSurveys.map((survey) => (
+                      <Pressable
+                        key={survey.slug}
+                        onPress={() => toggleSurveyType(survey.slug)}
                         className={cn(
-                          'text-sm',
-                          newSurveyTypes.includes(type.slug) ? 'text-white ml-1' : 'text-zinc-400'
+                          'px-4 py-2 rounded-lg flex-row items-center',
+                          newSurveyTypes.includes(survey.slug)
+                            ? 'bg-blue-600'
+                            : 'bg-zinc-800'
                         )}
                       >
-                        {type.label}
-                      </Text>
-                    </Pressable>
-                  ))}
-                </View>
+                        {newSurveyTypes.includes(survey.slug) ? (
+                          <Check size={14} color="#fff" />
+                        ) : null}
+                        <Text
+                          className={cn(
+                            'text-sm',
+                            newSurveyTypes.includes(survey.slug)
+                              ? 'text-white ml-1'
+                              : 'text-zinc-400'
+                          )}
+                        >
+                          {survey.name}
+                        </Text>
+                      </Pressable>
+                    ))}
+                  </View>
+                )}
               </View>
 
               {/* Overlay Type */}
               <View className="mb-6">
                 <Text className="text-zinc-400 text-sm mb-2">Photo Overlay Type *</Text>
-                <View className="flex-row flex-wrap gap-2">
-                  {SURVEY_TYPES.map((type) => (
-                    <Pressable
-                      key={type.slug}
-                      onPress={() => setNewOverlayType(type.slug)}
-                      className={cn(
-                        'px-4 py-2 rounded-lg',
-                        newOverlayType === type.slug ? 'bg-purple-600' : 'bg-zinc-800'
-                      )}
-                    >
-                      <Text
+                <Text className="text-zinc-600 text-xs mb-3">
+                  Which survey's artwork goes on pledge photos at this event
+                </Text>
+                {newSurveyTypes.length === 0 ? (
+                  <View className="bg-zinc-800 rounded-lg p-3">
+                    <Text className="text-zinc-400 text-xs">
+                      Pick at least one survey above first.
+                    </Text>
+                  </View>
+                ) : (
+                  <View className="flex-row flex-wrap gap-2">
+                    {newSurveyTypes.map((slug) => (
+                      <Pressable
+                        key={slug}
+                        onPress={() => setNewOverlayType(slug)}
                         className={cn(
-                          'text-sm',
-                          newOverlayType === type.slug ? 'text-white' : 'text-zinc-400'
+                          'px-4 py-2 rounded-lg',
+                          newOverlayType === slug ? 'bg-purple-600' : 'bg-zinc-800'
                         )}
                       >
-                        {type.label}
-                      </Text>
-                    </Pressable>
-                  ))}
-                </View>
+                        <Text
+                          className={cn(
+                            'text-sm',
+                            newOverlayType === slug ? 'text-white' : 'text-zinc-400'
+                          )}
+                        >
+                          {surveyNameFor(slug)}
+                        </Text>
+                      </Pressable>
+                    ))}
+                  </View>
+                )}
               </View>
 
               {/* Create Button */}

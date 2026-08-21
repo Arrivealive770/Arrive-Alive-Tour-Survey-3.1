@@ -2,7 +2,14 @@ import { useState, useEffect, useCallback } from 'react';
 import { View, Text, ScrollView, ActivityIndicator, Image } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useRouter } from 'expo-router';
-import { Cannabis, Wine, Smartphone, AlertTriangle, Layers } from 'lucide-react-native';
+import {
+  Cannabis,
+  Wine,
+  Smartphone,
+  AlertTriangle,
+  Layers,
+  ClipboardList,
+} from 'lucide-react-native';
 import { SurveyTypeCard } from '@/components/kiosk';
 import { useSurveyStore } from '@/lib/state/survey-store';
 import { useDeviceStore } from '@/lib/state/device-store';
@@ -14,8 +21,9 @@ import type { SurveyTypeSlug, Event } from '@/lib/api/types';
 
 const AATLogo = require('@/assets/aat-logo.png');
 
-// Map survey type slugs to display info
-const SURVEY_TYPE_INFO: Record<SurveyTypeSlug, { name: string; Icon: LucideIcon }> = {
+// Icons for the surveys that ship with the app. Admin-built surveys aren't in
+// here, so they fall back to a generic icon and the name from the server.
+const SURVEY_TYPE_INFO: Record<string, { name: string; Icon: LucideIcon }> = {
   marijuana: { name: 'Marijuana', Icon: Cannabis },
   alcohol: { name: 'Alcohol', Icon: Wine },
   distracted: { name: 'Distracted Driving', Icon: Smartphone },
@@ -31,8 +39,9 @@ export default function KioskHome() {
   const setDeviceConfig = useDeviceStore((s) => s.setDeviceConfig);
 
   // Downloads and caches the questions while the kiosk is idle, so the survey
-  // itself still works if the venue's connection drops later.
-  useSurveyTypes();
+  // itself still works if the venue's connection drops later. Also gives us the
+  // display name for surveys the admin built themselves.
+  const { data: builtSurveys } = useSurveyTypes();
 
   const [surveyTypes, setSurveyTypes] = useState<SurveyTypeSlug[]>([]);
   const [venueName, setVenueName] = useState<string>('');
@@ -176,8 +185,12 @@ export default function KioskHome() {
           showsVerticalScrollIndicator={false}
         >
           {surveyTypes.map((slug) => {
-            const info = SURVEY_TYPE_INFO[slug];
-            if (!info) return null;
+            // An admin-built survey has no built-in icon — show it anyway using
+            // its name from the server, otherwise it silently disappears here.
+            const info = SURVEY_TYPE_INFO[slug] ?? {
+              name: builtSurveys?.find((survey) => survey.slug === slug)?.name ?? slug,
+              Icon: ClipboardList,
+            };
 
             return (
               <SurveyTypeCard

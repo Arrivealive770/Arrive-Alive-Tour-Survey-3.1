@@ -799,27 +799,9 @@ adminPortalRouter.get("/", (c) => {
             </div>
             <div class="form-group">
               <label>Survey Types</label>
-              <div class="checkbox-group">
-                <label class="checkbox-item">
-                  <input type="checkbox" name="surveyTypes" value="marijuana">
-                  Marijuana
-                </label>
-                <label class="checkbox-item">
-                  <input type="checkbox" name="surveyTypes" value="alcohol">
-                  Alcohol
-                </label>
-                <label class="checkbox-item">
-                  <input type="checkbox" name="surveyTypes" value="distracted">
-                  Distracted
-                </label>
-                <label class="checkbox-item">
-                  <input type="checkbox" name="surveyTypes" value="impaired">
-                  Impaired
-                </label>
-                <label class="checkbox-item">
-                  <input type="checkbox" name="surveyTypes" value="combo">
-                  Combo
-                </label>
+              <!-- Filled from the surveys built on the Surveys tab -->
+              <div class="checkbox-group" id="eventSurveyTypes">
+                <span style="color: #888; font-size: 13px;">Loading your surveys…</span>
               </div>
             </div>
             <div class="form-group">
@@ -1393,6 +1375,72 @@ adminPortalRouter.get("/", (c) => {
           return local.toISOString().slice(0, 16);
         }
 
+        // The event form offers exactly the surveys that have been built on the
+        // Surveys tab — nothing is hardcoded, so a new survey is selectable as
+        // soon as it is created.
+        // Fetched fresh every time the event form opens, so a survey created a
+        // minute ago is selectable. Always includes inactive ones: an event may
+        // still be using a survey that was switched off.
+        let eventFormSurveyTypes = [];
+
+        async function loadEventFormSurveyTypes() {
+          const res = await fetch(API_BASE + '/surveys/types?includeInactive=true');
+          const raw = await res.text();
+          let data = null;
+          try { data = JSON.parse(raw); } catch (parseErr) { data = null; }
+          if (!res.ok || !data || !data.data) {
+            const reason = (data && data.error && data.error.message) || raw.slice(0, 200)
+              || ('server returned ' + res.status);
+            throw new Error(reason);
+          }
+          eventFormSurveyTypes = data.data;
+          return eventFormSurveyTypes;
+        }
+
+        async function renderEventSurveyTypes(selectedSlugs) {
+          const container = document.getElementById('eventSurveyTypes');
+          const selected = selectedSlugs || [];
+          container.innerHTML = '<span style="color: #888; font-size: 13px;">Loading your surveys…</span>';
+
+          let types = [];
+          try {
+            types = await loadEventFormSurveyTypes();
+          } catch (err) {
+            console.error('Could not load survey types:', err);
+            // Fall back to whatever was loaded before rather than leaving the
+            // admin with no way to pick a survey.
+            types = eventFormSurveyTypes;
+            if (types.length === 0) {
+              container.innerHTML = '<span style="color: #ff6b6b; font-size: 13px;">Could not load your surveys: '
+                + escapeHtml(err && err.message ? err.message : String(err)) + '</span>';
+              return;
+            }
+          }
+
+          // Inactive surveys stay listed if this event already uses them,
+          // otherwise editing the event would quietly drop them.
+          const shown = types.filter(t => t.isActive || selected.includes(t.slug));
+
+          if (shown.length === 0) {
+            container.innerHTML = '<span style="color: #888; font-size: 13px;">'
+              + 'No active surveys yet. Build one on the Surveys tab and it will appear here.</span>';
+            return;
+          }
+
+          container.innerHTML = shown.map(function (t) {
+            const count = (t.questions || []).length;
+            return '<label class="checkbox-item">'
+              + '<input type="checkbox" name="surveyTypes" value="' + escapeHtml(t.slug) + '"'
+              + (selected.includes(t.slug) ? ' checked' : '') + '> '
+              + escapeHtml(t.name)
+              + '<span style="color: #666; font-size: 12px; margin-left: 6px;">'
+              + count + (count === 1 ? ' question' : ' questions')
+              + (t.isActive ? '' : ' · inactive')
+              + '</span>'
+              + '</label>';
+          }).join('');
+        }
+
         function openEventModal(eventId = null) {
           document.getElementById('eventId').value = '';
           document.getElementById('eventTeam').value = '';
@@ -1405,7 +1453,7 @@ adminPortalRouter.get("/", (c) => {
           document.getElementById('eventStatus').value = 'active';
           document.getElementById('eventStatusGroup').style.display = 'none';
           document.getElementById('eventPicturePledge').checked = false;
-          document.querySelectorAll('input[name="surveyTypes"]').forEach(cb => cb.checked = false);
+          renderEventSurveyTypes([]);
           document.getElementById('eventModalTitle').textContent = 'Add Event';
 
           if (eventId) {
@@ -1431,11 +1479,8 @@ adminPortalRouter.get("/", (c) => {
               document.getElementById('eventStatusGroup').style.display = 'block';
               document.getElementById('eventPicturePledge').checked = event.picturePledgeEnabled || false;
 
-              // Set survey types checkboxes
-              const surveyTypes = event.surveyTypes || [];
-              document.querySelectorAll('input[name="surveyTypes"]').forEach(cb => {
-                cb.checked = surveyTypes.includes(cb.value);
-              });
+              // Tick the surveys this event already collects
+              renderEventSurveyTypes(event.surveyTypes || []);
 
               document.getElementById('eventModalTitle').textContent = 'Edit Event';
             }
