@@ -25,7 +25,7 @@
     "@vibecodeapp/backend-sdk": "^1.0.1",
     "@vibecodeapp/cloud-studio": "^0.2.4",
     "@vibecodeapp/proxy": "^2.0.3",
-    "better-auth": "^1.6.25",
+    "better-auth": "^1.7.1",
     "hono": "^4.12.32",
     "sharp": "^0.34.5",
     "zod": "4.1.11"
