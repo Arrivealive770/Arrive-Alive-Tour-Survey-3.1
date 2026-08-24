@@ -1339,17 +1339,8 @@ adminPortalRouter.get("/", (c) => {
             const data = await res.json();
             events = data.data || [];
 
-            // Update event dropdown in data tab
-            const eventSelect = document.getElementById('dataEventFilter');
-            const currentValue = eventSelect.value;
-            eventSelect.innerHTML = '<option value="">All Events</option>';
-            events.forEach(event => {
-              const option = document.createElement('option');
-              option.value = event.id;
-              option.textContent = event.venueName + ' - ' + new Date(event.eventDate).toLocaleDateString();
-              eventSelect.appendChild(option);
-            });
-            eventSelect.value = currentValue;
+            // The Data tab picks its events from a checkbox list it fills itself
+            // (loadEventsForResults), so nothing else needs updating here.
 
             if (events.length === 0) {
               document.getElementById('eventsLoading').style.display = 'none';
@@ -1385,6 +1376,8 @@ adminPortalRouter.get("/", (c) => {
             document.getElementById('eventsLoading').style.display = 'none';
             document.getElementById('eventsTable').style.display = 'table';
           } catch (err) {
+            // Log it too — a silent 'Error loading events' hides real bugs.
+            console.error('Error loading events:', err);
             document.getElementById('eventsLoading').textContent = 'Error loading events';
           }
         }
