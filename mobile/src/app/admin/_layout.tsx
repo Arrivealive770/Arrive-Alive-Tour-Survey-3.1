@@ -4,6 +4,7 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import { Tabs, router } from 'expo-router';
 import { LayoutDashboard, Calendar, Tablet, Settings, ClipboardList, FileUp, ShieldOff, ArrowLeft } from 'lucide-react-native';
 import { PINEntry } from '@/components/admin/PINEntry';
+import { HomeHeaderButton } from '@/components/common/HomeHeaderButton';
 import { useDeviceStore } from '@/lib/state/device-store';
 import { useTeamAdminAccess } from '@/lib/team-access';
 
@@ -130,6 +131,9 @@ export default function AdminLayout() {
         headerTitleStyle: {
           fontWeight: '600',
         },
+        // Admin is a tab bar with no back arrow of its own, so every tab keeps
+        // a way out to the main menu.
+        headerLeft: () => <HomeHeaderButton />,
         tabBarStyle: {
           backgroundColor: '#000',
           borderTopColor: '#27272a',
@@ -195,11 +199,13 @@ export default function AdminLayout() {
         }}
       />
       {/* Hidden screens accessible from other tabs */}
+      {/* These two draw their own "back to Dashboard" bar, so no Menu button. */}
       <Tabs.Screen
         name="analytics"
         options={{
           href: null, // Hide from tab bar
           title: 'Analytics',
+          headerLeft: () => null,
         }}
       />
       <Tabs.Screen
@@ -207,6 +213,7 @@ export default function AdminLayout() {
         options={{
           href: null, // Hide from tab bar
           title: 'Survey Results',
+          headerLeft: () => null,
         }}
       />
     </Tabs>

@@ -1,6 +1,7 @@
 import { Stack } from 'expo-router';
 import { View, Text } from 'react-native';
 import { usePhotoQueueCount } from '@/lib/state/photo-store';
+import { HomeHeaderButton } from '@/components/common/HomeHeaderButton';
 
 function QueueBadge() {
   const queueCount = usePhotoQueueCount();
@@ -41,6 +42,9 @@ export default function PhotoHubLayout() {
         name="index"
         options={{
           title: 'Photo Hub',
+          // First screen of this stack, so there's no back arrow — give the
+          // crew an explicit way back to the main menu.
+          headerLeft: () => <HomeHeaderButton />,
           headerRight: () => <QueueBadge />,
         }}
       />
