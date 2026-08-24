@@ -7,6 +7,7 @@ import { MapPin, Calendar, Check, AlertCircle } from 'lucide-react-native';
 import { useDeviceStore } from '@/lib/state/device-store';
 import { useDatabase } from '@/providers/DatabaseProvider';
 import { api } from '@/lib/api/api';
+import { cacheEventOverlay } from '@/lib/overlays/overlay-cache';
 import { cn } from '@/lib/cn';
 import type { Event, Team } from '@/lib/api/types';
 
@@ -71,7 +72,18 @@ export default function EventSetupScreen() {
     // Store picture pledge settings in device store
     setDeviceConfig({
       picturePledgeEnabled: event.picturePledgeEnabled ?? false,
-      currentEventOverlayId: event.overlayType || null,
+      // overlayId, not the legacy overlayType slug — the slug never named the
+      // event's real artwork.
+      currentEventOverlayId: event.overlayId || null,
+    });
+
+    // Pull the event's frame down now, while the device is provably online —
+    // this screen only loads with a connection. Waiting until the camera is
+    // opened means downloading it at the venue, which is exactly where the
+    // signal is worst. Deliberately not awaited: a slow download should not
+    // hold up starting the event, and the camera falls back to fetching it.
+    cacheEventOverlay(event.id).catch((err: unknown) => {
+      console.log('[EventSetup] Could not pre-download overlay:', err);
     });
 
     // Store event in local database

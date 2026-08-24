@@ -11,6 +11,7 @@ import {
 } from '@/lib/services/local-photo-sender';
 import { useSyncStore } from '@/lib/state/sync-store';
 import { useDeviceStore } from '@/lib/state/device-store';
+import { cacheEventOverlay } from '@/lib/overlays/overlay-cache';
 import { useDatabaseReady } from '@/providers/DatabaseProvider';
 import type { SyncResult } from '@/lib/services/sync-types';
 
@@ -35,6 +36,7 @@ export function SyncProvider({ children }: SyncProviderProps) {
 
   // Subscribe to device store state
   const deviceType = useDeviceStore((s) => s.deviceType);
+  const currentEventId = useDeviceStore((s) => s.currentEventId);
 
   // Subscribe to sync store state
   const isOnline = useSyncStore((s) => s.isOnline);
@@ -82,6 +84,22 @@ export function SyncProvider({ children }: SyncProviderProps) {
       cleanupLocalPhotoSender();
     };
   }, [isDatabaseReady, deviceType]);
+
+  // Keep the current event's overlay artwork on the device.
+  //
+  // Runs whenever the app has an event and a connection — including the moment
+  // a connection comes back — so a device set up in the office arrives at the
+  // venue already holding its frame. Re-downloading is skipped when the same
+  // file is already stored, so this is cheap to repeat; the point of repeating
+  // it is that swapping an event's artwork in the admin portal reaches the
+  // phones without anyone re-picking the event.
+  useEffect(() => {
+    if (!isOnline || !currentEventId || currentEventId === 'no-event') return;
+
+    cacheEventOverlay(currentEventId).catch((err: unknown) => {
+      console.log('[SyncProvider] Overlay download failed, will retry:', err);
+    });
+  }, [isOnline, currentEventId]);
 
   // Manual sync trigger
   const sync = useCallback(async (): Promise<SyncResult> => {

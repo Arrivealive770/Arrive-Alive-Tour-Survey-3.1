@@ -1,5 +1,10 @@
+import { useEffect, useState } from 'react';
 import { useQuery } from '@tanstack/react-query';
-import { api } from '@/lib/api/api';
+import {
+  loadEventOverlay,
+  readCachedOverlay,
+  type EventOverlayArtwork,
+} from '@/lib/overlays/overlay-cache';
 
 /**
  * The artwork the current event's photos get, as the server resolves it.
@@ -9,25 +14,38 @@ import { api } from '@/lib/api/api';
  * was not what the guest got. Both sides now use this one answer. Events with
  * no artwork uploaded come back with the built-in standard frame
  * (`isStandard: true`), never an error.
+ *
+ * The artwork is stored on the device (see overlay-cache), so this keeps
+ * answering after the signal goes. The stored copy is handed back immediately
+ * on open rather than after a round trip, because a camera that shows the wrong
+ * frame for its first second is a camera staff will shoot through.
  */
-export interface EventOverlayArtwork {
-  /** null for the built-in standard frame. */
-  id: string | null;
-  name: string;
-  url: string;
-  /** "frame" = photo sits inside the window; "overlay" = art on top of the photo. */
-  mode: 'overlay' | 'frame';
-  window: { x: number; y: number; w: number; h: number } | null;
-  width: number | null;
-  height: number | null;
-  isStandard: boolean;
-}
+export type { EventOverlayArtwork };
 
 const isRealEvent = (eventId?: string | null): eventId is string =>
   !!eventId && eventId !== 'no-event';
 
 export function useEventOverlay(eventId?: string | null) {
-  return useQuery({
+  // What is already on this device, read straight from storage.
+  const [stored, setStored] = useState<EventOverlayArtwork | undefined>(undefined);
+
+  useEffect(() => {
+    let cancelled = false;
+    if (!isRealEvent(eventId)) {
+      setStored(undefined);
+      return;
+    }
+    readCachedOverlay(eventId)
+      .then((artwork) => {
+        if (!cancelled && artwork) setStored(artwork);
+      })
+      .catch(() => {});
+    return () => {
+      cancelled = true;
+    };
+  }, [eventId]);
+
+  const query = useQuery({
     queryKey: ['event-overlay', eventId],
     enabled: isRealEvent(eventId),
     // Artwork changes at most once per event, and the camera screen must keep
@@ -35,6 +53,10 @@ export function useEventOverlay(eventId?: string | null) {
     staleTime: 10 * 60 * 1000,
     gcTime: 24 * 60 * 60 * 1000,
     retry: 2,
-    queryFn: () => api.get<EventOverlayArtwork>(`/api/events/${eventId}/overlay`),
+    queryFn: () => loadEventOverlay(eventId as string),
   });
+
+  // Fresh answer wins; the stored copy covers the gap before it arrives and
+  // the case where it never does.
+  return { ...query, data: query.data ?? stored };
 }

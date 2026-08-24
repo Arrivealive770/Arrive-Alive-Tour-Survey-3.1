@@ -377,6 +377,17 @@ Worth knowing:
   ran and every response from all of them, across every tour date. Both ask you
   to type DELETE, and both show you the exact counts first — read them. The
   only way back is last night's backup.
+- **Photo overlays are per event.** Upload artwork on the **Overlays** tab, then
+  pick it in the event. The Events table has an **Overlay** column showing which
+  frame each event will really use — check it there rather than trusting the
+  form, because "Standard frame" in that column means the phones will use the
+  plain Arrive Alive frame no matter what the event was meant to have.
+- **Phones download the overlay ahead of time.** It's fetched when the event is
+  started and again whenever the phone has signal, then kept on the device. A
+  phone that opened its event once with service will keep showing the right
+  frame at a venue with no service at all. A phone that has *never* had signal
+  for that event falls back to the plain frame — so start the event before
+  leaving the office, or anywhere with a signal.
 
 ### Handy commands
 

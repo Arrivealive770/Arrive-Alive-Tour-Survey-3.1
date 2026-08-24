@@ -8,6 +8,7 @@ import { TAILSCALE_ORIGIN_REGEX, localNetworkOrigins, localIPv4Addresses } from 
 import { emailService } from "./lib/email-service";
 import { emailQueueProcessor } from "./lib/email-queue-processor";
 import { eventPurgeScheduler } from "./lib/event-purge";
+import { backfillEventOverlayIds } from "./lib/overlay-backfill";
 import { runningCommit } from "./lib/version";
 import { sampleRouter } from "./routes/sample";
 import { teamsRouter } from "./routes/teams";
@@ -160,6 +161,12 @@ emailQueueProcessor.start();
 // email address for any event whose designated end time has passed. Survey
 // answers are never touched.
 eventPurgeScheduler.start();
+
+// Reconnect events whose overlay choice was saved into the legacy slug column
+// instead of the relation the artwork is resolved through. Idempotent.
+backfillEventOverlayIds().catch((err: unknown) =>
+  console.error("[OverlayBackfill] Failed:", err)
+);
 
 const port = Number(process.env.PORT) || 3000;
 

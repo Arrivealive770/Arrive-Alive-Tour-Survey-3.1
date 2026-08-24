@@ -76,11 +76,13 @@ export default function KioskHome() {
             const event = await api.get<Event>(`/api/events/${currentEventId}`);
             console.log('[KioskHome] Refreshed event from server:', {
               picturePledgeEnabled: event.picturePledgeEnabled,
-              overlayType: event.overlayType,
+              overlayId: event.overlayId,
             });
             setDeviceConfig({
               picturePledgeEnabled: event.picturePledgeEnabled ?? false,
-              currentEventOverlayId: event.overlayType || null,
+              // overlayId is the field the event's real artwork hangs off;
+              // overlayType is a legacy slug that never named it.
+              currentEventOverlayId: event.overlayId || null,
             });
           } catch (err) {
             console.error('[KioskHome] Failed to refresh event from server:', err);

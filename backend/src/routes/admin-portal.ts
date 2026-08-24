@@ -532,6 +532,7 @@ adminPortalRouter.get("/", (c) => {
                     <th>Venue</th>
                     <th>Location</th>
                     <th>Date</th>
+                    <th>Overlay</th>
                     <th>Photo Deletion</th>
                     <th>Team</th>
                     <th>Status</th>
@@ -1336,6 +1337,13 @@ adminPortalRouter.get("/", (c) => {
           if (status) url += 'status=' + status + '&';
 
           try {
+            // The Overlay column names each event's artwork, which means the
+            // overlay list has to be here before the rows are drawn. Normally
+            // it is (loaded at sign-in), but not if this tab is opened fast.
+            if (overlays.length === 0) {
+              await loadOverlaysForDropdown();
+            }
+
             const res = await fetch(url);
             const data = await res.json();
             events = data.data || [];
@@ -1358,6 +1366,7 @@ adminPortalRouter.get("/", (c) => {
                 </td>
                 <td>\${escapeHtml(event.venueCity)}, \${escapeHtml(event.venueState)}</td>
                 <td>\${new Date(event.eventDate).toLocaleDateString()}</td>
+                <td>\${describeEventOverlay(event)}</td>
                 <td>\${describePurge(event)}</td>
                 <td>\${event.team ? escapeHtml(event.team.name) : '-'}</td>
                 <td>
@@ -1382,6 +1391,27 @@ adminPortalRouter.get("/", (c) => {
             console.error('Error loading events:', err);
             document.getElementById('eventsLoading').textContent = 'Error loading events';
           }
+        }
+
+        // Which frame this event's photos will actually come out in.
+        //
+        // Worth a column of its own: the assignment used to be saved into the
+        // wrong field, so an overlay could look picked in the form while the
+        // phones quietly used the standard frame all day. Now the table says
+        // what the devices will really do.
+        function describeEventOverlay(event) {
+          if (!event.picturePledgeEnabled) {
+            return '<span style="color: #666;">No photos</span>';
+          }
+          const overlay = overlays.find(o => o.id === event.overlayId);
+          if (!overlay) {
+            return '<span class="badge badge-warning">Standard frame</span>';
+          }
+          if (!overlay.isActive) {
+            return '<span class="badge badge-warning">' + escapeHtml(overlay.name) +
+              ' (inactive — standard frame used)</span>';
+          }
+          return '<span class="badge badge-success">' + escapeHtml(overlay.name) + '</span>';
         }
 
         // datetime-local inputs want local wall-clock time, not UTC.
@@ -1490,7 +1520,10 @@ adminPortalRouter.get("/", (c) => {
                 ? toDateTimeLocal(event.eventEndAt)
                 : '';
 
-              document.getElementById('eventOverlay').value = event.overlayType;
+              // Read back from overlayId, matching what the dropdown stores.
+              // Reading overlayType left the box blank on every edit, so
+              // re-saving an event quietly wiped its artwork.
+              document.getElementById('eventOverlay').value = event.overlayId || '';
               document.getElementById('eventStatus').value = event.status;
               document.getElementById('eventStatusGroup').style.display = 'block';
               document.getElementById('eventPicturePledge').checked = event.picturePledgeEnabled || false;
@@ -1717,7 +1750,13 @@ adminPortalRouter.get("/", (c) => {
           const venueState = document.getElementById('eventVenueState').value;
           const eventDate = document.getElementById('eventDate').value;
           const eventEndAtRaw = document.getElementById('eventEndAt').value;
-          const overlayType = document.getElementById('eventOverlay').value;
+          // The dropdown's values are overlay IDs (see updateOverlayDropdown),
+          // so this is an overlayId — not the legacy overlayType slug. Sending
+          // it as overlayType was the bug that stopped a picked overlay ever
+          // reaching the phones: the server resolves artwork through the
+          // overlayId relation, which stayed empty, so every event silently
+          // fell back to the standard frame.
+          const overlayId = document.getElementById('eventOverlay').value;
           const status = document.getElementById('eventStatus').value;
           const picturePledgeEnabled = document.getElementById('eventPicturePledge').checked;
 
@@ -1732,7 +1771,7 @@ adminPortalRouter.get("/", (c) => {
           }
 
           // An overlay only matters when photos are being taken.
-          if (picturePledgeEnabled && !overlayType) {
+          if (picturePledgeEnabled && !overlayId) {
             alert('Picture Pledge is switched on, so this event needs a photo overlay. Pick one, or upload artwork on the Overlays tab first.');
             return;
           }
@@ -1749,17 +1788,23 @@ adminPortalRouter.get("/", (c) => {
               // Sent as a full ISO timestamp so the server stores the same
               // instant the staff member picked, not a UTC-shifted one.
               eventEndAt: eventEndAtRaw ? new Date(eventEndAtRaw).toISOString() : null,
-              overlayType: overlayType || 'default',
               surveyTypes,
               picturePledgeEnabled
             };
 
             if (!id) {
               body.teamId = teamId;
+              // Legacy slug column. Kept at its default rather than filled with
+              // the overlay id, which is what used to happen.
+              body.overlayType = 'default';
+              // Create rejects null here, so only send it when one was picked.
+              if (overlayId) body.overlayId = overlayId;
             }
 
             if (id) {
               body.status = status;
+              // On edit, null is meaningful: it clears the assignment.
+              body.overlayId = overlayId || null;
             }
 
             const res = await fetch(url, {
