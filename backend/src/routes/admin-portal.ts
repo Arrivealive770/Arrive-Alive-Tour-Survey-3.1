@@ -707,6 +707,19 @@ adminPortalRouter.get("/", (c) => {
             </div>
 
             <div class="card">
+              <h2>Check the Connection to Resend</h2>
+              <p style="color: #888; margin-bottom: 20px;">
+                Use this when the key is definitely correct but sending still fails.
+                It contacts Resend without using your key at all, purely to see who
+                answers. If something on this network is intercepting the connection,
+                this is what proves it — and no key is involved, so the result is safe
+                to share with anyone.
+              </p>
+              <button class="btn btn-secondary" id="connCheckBtn" onclick="checkResendConnection()">Check Connection</button>
+              <div id="connCheckResult" style="display: none; margin-top: 16px;"></div>
+            </div>
+
+            <div class="card">
               <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 20px;">
                 <h2>Emails Waiting or Stuck</h2>
                 <button class="btn btn-warning btn-sm" onclick="retryFailedEmails()">Retry All Failed</button>
@@ -3536,6 +3549,79 @@ adminPortalRouter.get("/", (c) => {
           } catch (err) {
             console.error('Failed to load email status:', err);
             loadingEl.textContent = 'Could not check email status.';
+          }
+        }
+
+        // Asks the server to contact Resend with no key attached, purely to see
+        // who answers. A valid key that still comes back "unauthorized" means
+        // the reply was never Resend's, and this is what tells the two apart.
+        async function checkResendConnection() {
+          const btn = document.getElementById('connCheckBtn');
+          const resultEl = document.getElementById('connCheckResult');
+          btn.disabled = true;
+          btn.textContent = 'Checking...';
+          resultEl.style.display = 'none';
+
+          const green = 'background: #1a3a1a; border-left: 4px solid #28a745; padding: 16px; border-radius: 6px;';
+          const red = 'background: #3a1a1a; border-left: 4px solid #dc3545; padding: 16px; border-radius: 6px;';
+          const body = 'color: #ccc; margin: 8px 0 0;';
+          const mono = 'color: #888; margin: 12px 0 0; font-family: monospace; font-size: 12px; word-break: break-all;';
+
+          try {
+            const res = await fetch(API_BASE + '/email/connection-check');
+            const payload = await res.json();
+            const r = payload.data;
+            let html = '';
+
+            if (r.verdict === 'clean') {
+              html = '<div style="' + green + '"><strong style="color: #4ade80;">This computer can reach Resend normally.</strong>' +
+                '<p style="' + body + '">Resend itself answered, so nothing on this network is blocking email. ' +
+                'If sending still fails, the reason given by the test above is genuinely coming from Resend.</p></div>';
+            } else if (r.verdict === 'no-connection') {
+              const cert = /certificate|self.signed|unable to verify|SSL|TLS/i.test(r.error || '');
+              html = '<div style="' + red + '"><strong style="color: #ff6b6b;">Could not reach Resend at all.</strong>' +
+                (cert
+                  ? '<p style="' + body + '">The connection was re-signed by something else on the way out — ' +
+                    'that is security software or a firewall inspecting secure traffic. It has to be told to leave ' +
+                    'api.resend.com alone.</p>'
+                  : '<p style="' + body + '">Check this computer has working internet. If other websites load fine, ' +
+                    'then api.resend.com specifically is being blocked.</p>') +
+                '<p style="' + mono + '">' + escapeHtml(r.error || '') + '</p></div>';
+            } else {
+              html = '<div style="' + red + '"><strong style="color: #ff6b6b;">Something answered instead of Resend.</strong>' +
+                '<p style="' + body + '">The request left this computer but never arrived. Whatever replied is what has ' +
+                'been stopping your emails — and it explains a valid key being reported as unauthorized. ' +
+                'Usually this is antivirus or security software inspecting secure connections, a company firewall, ' +
+                'or a guest Wi-Fi login page.</p>' +
+                '<p style="' + body + '">Quickest way to confirm: put this computer on a phone hotspot and press ' +
+                'Check Connection again. If it goes green, the original network is the problem and api.resend.com ' +
+                'needs to be allowed through it.</p>' +
+                '<p style="' + mono + '">Replied with HTTP ' + escapeHtml(String(r.status)) +
+                (r.serverHeader ? ' from "' + escapeHtml(r.serverHeader) + '"' : '') +
+                '<br>' + escapeHtml(r.bodySnippet || '(empty reply)') + '</p></div>';
+            }
+
+            // A proxy setting redirects every outbound request before it leaves,
+            // so it can produce this on an otherwise healthy network.
+            if (r.proxyVariables && r.proxyVariables.length) {
+              html += '<div style="' + red + ' margin-top: 12px;"><strong style="color: #ff6b6b;">This server is set to send traffic through a proxy.</strong>' +
+                '<p style="' + body + '">A proxy setting was found on this computer. Everything the server sends goes ' +
+                'through it first, so if it is wrong or out of date it will answer instead of Resend. ' +
+                'If you did not set this up deliberately, it should be removed.</p>' +
+                '<p style="' + mono + '">' +
+                r.proxyVariables.map(function (v) { return escapeHtml(v.name) + ' = ' + escapeHtml(v.value); }).join('<br>') +
+                '</p></div>';
+            }
+
+            resultEl.innerHTML = html;
+            resultEl.style.display = 'block';
+          } catch (err) {
+            resultEl.innerHTML = '<div style="' + red + '"><strong style="color: #ff6b6b;">Could not run the check.</strong>' +
+              '<p style="' + body + '">The admin site could not reach this server.</p></div>';
+            resultEl.style.display = 'block';
+          } finally {
+            btn.disabled = false;
+            btn.textContent = 'Check Connection';
           }
         }
 

@@ -3,6 +3,7 @@ import { zValidator } from "@hono/zod-validator";
 import { z } from "zod";
 import { emailQueueProcessor } from "../lib/email-queue-processor";
 import { emailService } from "../lib/email-service";
+import { checkResendReachable } from "../lib/provider-reachability";
 import { prisma } from "../prisma";
 
 const emailRouter = new Hono();
@@ -48,6 +49,16 @@ emailRouter.get("/status", async (c) => {
       },
     },
   });
+});
+
+// GET /api/email/connection-check - Prove whether this computer can reach
+// Resend at all, using a request that carries no API key.
+//
+// Exists because a valid key from a verified account was still coming back
+// "unauthorized": the reply was never Resend's. Without this, that is
+// indistinguishable from a bad key and you replace the key forever.
+emailRouter.get("/connection-check", async (c) => {
+  return c.json({ data: await checkResendReachable() });
 });
 
 // POST /api/email/test - Send a test email and report exactly what happened.

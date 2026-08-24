@@ -382,20 +382,26 @@ What you might see:
 
 **"The request never reached Resend."** Resend always replies with JSON, so a
 reply in any other shape did not come from Resend. Antivirus and security
-suites that inspect secure connections, company firewalls, and guest Wi-Fi
-login pages all do this, and the result reads exactly like a rejected key —
-which sends you off replacing a key that was fine. To confirm it, run this on
-the desktop; it contains no key of any kind:
+suites that inspect secure connections, company firewalls, guest Wi-Fi login
+pages, and stale proxy settings all do this, and the result reads exactly like
+a rejected key — which sends you off replacing a key that was fine.
 
-```powershell
-curl.exe -s -i -X POST https://api.resend.com/emails -H "Content-Type: application/json" -d "{}"
-```
+The Email tab has a **Check Connection** button for exactly this. It contacts
+Resend *without using your key at all*, purely to see who answers, so the
+result is safe to share with anyone. Press it when the key is known-good and
+sending still fails:
 
-A healthy network answers `server: cloudflare` and
-`{"statusCode":401,"name":"missing_api_key","message":"Missing API Key"}`.
-Anything else — a plain word, a web page, a different `server:` line — is the
-thing blocking your email. Allow `api.resend.com` through it. A phone hotspot
-is the quickest way to prove that is the cause.
+- **Green** — Resend itself answered. The network is fine, and whatever the
+  send test reports is genuinely coming from Resend.
+- **"Something answered instead of Resend"** — the request never arrived. The
+  box shows who replied. That is what has been stopping your email.
+- **"This server is set to send traffic through a proxy"** — a proxy setting on
+  this computer is redirecting everything the server sends. Remove it unless
+  you set it up deliberately.
+
+Quickest confirmation of all: put the desktop on a phone hotspot and press
+**Check Connection** again. If it turns green, the original network is the
+problem and `api.resend.com` needs to be allowed through it.
 
 **If the key keeps being refused after you've corrected it**, the Email tab
 answers the question directly. It shows the key the server is actually using
