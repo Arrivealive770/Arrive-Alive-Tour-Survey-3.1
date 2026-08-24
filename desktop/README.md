@@ -539,26 +539,54 @@ no attention.
 
 **The tablet app itself** (screens, wording on buttons, the survey flow, a new
 feature)
-This needs a new APK: build it in Expo, then install it on each tablet. As
-long as it's built from the same Expo project, it installs over the old one
-and keeps each tablet's saved setup and any surveys that haven't synced yet.
+Publish it over the air — `eas update`, see below. No APK and no touching the
+tablets. A fresh APK is only needed for a new device permission, a new native
+module, or an Expo SDK upgrade.
 
-That last one means physically touching every tablet, which is the painful
-one mid-tour. It can be avoided — see below.
+When you do need an APK, it installs over the old one and keeps each tablet's
+saved setup and any surveys that haven't synced yet.
 
-### Over-the-air app updates (not set up yet)
+### Over-the-air app updates
 
-Expo can push app updates to the tablets over the internet: you publish, and
-each tablet picks the change up the next time it's opened. No APK, no
-re-installing, no chasing tablets between venues.
+Set up and ready. Instead of building an APK and touching every tablet, you
+publish once from the desktop and each tablet picks the change up on its own.
 
-It is **not** enabled on this project — it needs the `expo-updates` package
-added and configured, which happens on the Expo side. Worth doing before a
-tour rather than during one.
+**This only works on APKs built on or after 24 Aug 2026.** Anything installed
+before that has no update system inside it and will never receive a push — those
+tablets need one final APK install first. There is no way around that, and no
+warning if you skip it: the publish will report success and reach nobody.
 
-Even with it on, some changes still need a fresh APK: a new device permission,
-a new native module (camera, Bluetooth, printing), or an Expo SDK upgrade.
-Day-to-day wording and layout changes go over the air.
+**Publishing an update:**
+
+```powershell
+cd C:\ArriveAlive
+git fetch origin
+git checkout -B main origin/main
+cd mobile
+eas update --branch preview --message "what changed"
+```
+
+Takes about a minute. Tablets download it in the background the next time the
+app is opened and show it the open after that — so closing and reopening twice
+applies it immediately, and leaving them alone overnight does the same.
+
+`preview` is the branch because the tablets are built with the `preview`
+profile. If you ever build with a different profile, publish to the matching
+branch or the update goes nowhere.
+
+**Check what's live:**
+
+```powershell
+eas update:list --branch preview
+```
+
+**One rule: never change `version` in `mobile\app.json`.** Updates only reach
+tablets whose version matches, so bumping it silently cuts off every tablet in
+the field until they get a new APK.
+
+Some changes still need a fresh APK no matter what: a new device permission, a
+new native module (camera, Bluetooth, printing), or an Expo SDK upgrade.
+Wording, screens, layout and survey flow all go over the air.
 
 ---
 
