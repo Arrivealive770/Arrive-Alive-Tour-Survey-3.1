@@ -22,8 +22,18 @@ const envSchema = z.object({
   // defaulted in development.
   BETTER_AUTH_SECRET: z.string().min(1).optional(),
   // Email (use either Resend or SendGrid — an API key from one of them is required for email sending)
-  RESEND_API_KEY: z.string().optional(),
-  SENDGRID_API_KEY: z.string().optional(),
+  // Trimmed, and blank treated as absent. A key pasted into the settings file
+  // with a stray space or an accidental newline is rejected by the provider as
+  // "unauthorized", which reads as a wrong key and sends you looking in the
+  // wrong place. An empty value should mean "not set", not "set to nothing".
+  RESEND_API_KEY: z
+    .string()
+    .optional()
+    .transform((value) => value?.trim() || undefined),
+  SENDGRID_API_KEY: z
+    .string()
+    .optional()
+    .transform((value) => value?.trim() || undefined),
   EMAIL_FROM_ADDRESS: z.string().email().default("noreply@arrivealivetour.com"),
   EMAIL_FROM_NAME: z.string().default("Arrive Alive Tour"),
 })

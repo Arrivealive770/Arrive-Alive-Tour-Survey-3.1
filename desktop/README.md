@@ -99,6 +99,31 @@ RESEND_API_KEY="your-resend-key-here"
 Replace the Resend key with yours — that's what sends the pledge emails.
 Without it the server still runs, but no emails go out.
 
+**Getting the key right matters more than it looks.** Resend shows a key's
+full text **once**, at the moment you create it — after that the dashboard
+only ever shows the first few characters. So if you copy it from the list
+later, or the copy gets cut short, you end up with something that looks like
+a key and is rejected by Resend as `unauthorized`. There is no way to look an
+existing key up again. If you are not certain the key you have is the
+complete one you copied at creation time, don't try to repair it — go to
+[resend.com/api-keys](https://resend.com/api-keys), create a new one, and
+copy it straight into the settings file. Old keys can be deleted safely.
+
+**Changing the key later, once the server is already set up.** Don't rebuild
+the whole file from the block above — by then `BACKEND_URL` holds your real
+address and you would wipe it. Replace only the key line:
+
+```powershell
+$key = (Read-Host "Paste your new Resend API key (starts with re_)").Trim()
+$path = "C:\ArriveAlive\backend\.env"
+$kept = Get-Content $path | Where-Object { $_ -notmatch '^\s*RESEND_API_KEY\s*=' }
+$kept + "RESEND_API_KEY=`"$key`"" | Set-Content -Path $path -Encoding ascii
+Get-Content $path
+```
+
+Then restart the server (the block in step 5) and press **Send Test** on the
+admin website's Email tab again.
+
 **Already saved it as `.env.txt`?** Don't recreate it — just rename it. In
 PowerShell:
 

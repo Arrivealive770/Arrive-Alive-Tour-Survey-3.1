@@ -3311,6 +3311,44 @@ adminPortalRouter.get("/", (c) => {
         // domain is not verified, every email fails in silence. This tab is
         // where that becomes visible.
 
+        // Turn the email provider's own error into something actionable.
+        //
+        // "HTTP 401: unauthorized" is technically accurate and tells a
+        // non-technical reader nothing at all — least of all that the fix is a
+        // fresh key rather than anything to do with the address they typed.
+        // The raw text is still shown underneath; this only adds the meaning.
+        function explainEmailError(raw) {
+          const text = String(raw || '');
+          // Named from the error itself so the advice matches whichever
+          // provider actually rejected the send.
+          const provider = /sendgrid/i.test(text) ? 'SendGrid' : 'Resend';
+          const keysPage = provider === 'Resend' ? 'resend.com/api-keys' : 'your SendGrid dashboard';
+
+          if (/HTTP 401|unauthorized|invalid api key|API key is invalid|authorization grant is invalid/i.test(text)) {
+            return provider + ' is refusing the key on this server. Keys are shown only once when you create them, ' +
+              'so a key that was half-copied, later deleted, or belongs to a different account looks exactly like this. ' +
+              'Create a fresh key at ' + keysPage + ', put it in the settings file, then restart the server.';
+          }
+          if (/not verified|verify a domain|domain is not/i.test(text)) {
+            return 'The key works, but ' + provider + ' will not send from this address until the domain it belongs ' +
+              'to is verified on that account. Check the Domains page.';
+          }
+          if (/HTTP 403|forbidden|permission/i.test(text)) {
+            return 'The key is recognised but is not allowed to send. It needs sending permission on the ' +
+              provider + ' account.';
+          }
+          if (/HTTP 422|validation_error/i.test(text)) {
+            return provider + ' rejected the address it was asked to send to. Test with a real address you can open.';
+          }
+          if (/HTTP 429|rate limit|too many/i.test(text)) {
+            return provider + ' is rate-limiting this account — too many emails too quickly. Wait a minute and try again.';
+          }
+          if (/fetch failed|ENOTFOUND|ETIMEDOUT|network/i.test(text)) {
+            return 'The server could not reach ' + provider + ' at all. Check the desktop has internet.';
+          }
+          return null;
+        }
+
         async function loadEmailStatus() {
           const loadingEl = document.getElementById('emailStatusLoading');
           const boxEl = document.getElementById('emailStatusBox');
@@ -3402,13 +3440,17 @@ adminPortalRouter.get("/", (c) => {
                 ', including the junk folder. If it never arrives, the provider accepted it but did not deliver it — check your account there.</p>' +
                 '</div>';
             } else {
-              // The provider's own wording is the useful part. "domain is not
-              // verified" and "API key is invalid" are the two that matter and
-              // neither is guessable from a generic failure message.
+              const raw = data.error && data.error.message ? data.error.message : 'Unknown problem';
+              const plain = explainEmailError(raw);
+
+              // Plain-English cause first, the provider's exact words second.
+              // The raw text stays visible because it is the only thing worth
+              // pasting to someone else when the cause isn't one we recognise.
               resultEl.innerHTML = '<div style="background: #3a1a1a; border-left: 4px solid #dc3545; padding: 16px; border-radius: 6px;">' +
                 '<strong style="color: #ff6b6b;">It did not send.</strong>' +
-                '<p style="color: #ccc; margin: 8px 0 0; word-break: break-word;">' +
-                escapeHtml(data.error && data.error.message ? data.error.message : 'Unknown problem') + '</p>' +
+                (plain ? '<p style="color: #fff; margin: 8px 0 0;">' + escapeHtml(plain) + '</p>' : '') +
+                '<p style="color: #888; font-size: 12px; margin: 12px 0 0; word-break: break-word;">' +
+                escapeHtml(raw) + '</p>' +
                 '</div>';
             }
             resultEl.style.display = 'block';
@@ -3451,6 +3493,10 @@ adminPortalRouter.get("/", (c) => {
                   ? '<span class="badge badge-warning">Sending</span>'
                   : '<span class="badge badge-warning">Waiting</span>';
               const venue = item.pledge && item.pledge.event ? item.pledge.event.venueName : '';
+              const plain = explainEmailError(item.lastError);
+              const problem = item.lastError
+                ? (plain ? escapeHtml(plain) : escapeHtml(item.lastError))
+                : '';
               return \`
                 <tr>
                   <td>\${new Date(item.scheduledAt).toLocaleString()}</td>
@@ -3458,7 +3504,7 @@ adminPortalRouter.get("/", (c) => {
                   <td>\${escapeHtml(venue || '')}</td>
                   <td>\${badge}</td>
                   <td>\${item.attempts} of \${item.maxAttempts}</td>
-                  <td style="max-width: 320px; word-break: break-word; color: #888; font-size: 12px;">\${escapeHtml(item.lastError || '')}</td>
+                  <td style="max-width: 360px; word-break: break-word; color: #888; font-size: 12px;">\${problem}</td>
                 </tr>
               \`;
             }).join('');
