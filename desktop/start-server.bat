@@ -93,7 +93,42 @@ call "!BUN!" x prisma db push --skip-generate >> "%LOG%" 2>&1 || (
   exit /b 1
 )
 
-echo Starting server... >> "%LOG%"
+REM ===================================================================
+REM Free the port before starting.
+REM
+REM Stop-ScheduledTask kills this cmd.exe wrapper but leaves the bun.exe
+REM it launched still running, so the old server keeps holding the port.
+REM The freshly started one then cannot bind, exits, and the machine
+REM carries on serving the PREVIOUS version of the code while every
+REM restart reports success. That is indistinguishable from "the fix
+REM does not work" and cost two days of chasing the wrong thing.
+REM
+REM Done here rather than in the restart instructions because this is
+REM what runs at boot, unattended, with nobody available to notice.
+REM ===================================================================
+set "PORT=3000"
+for /f "usebackq tokens=2 delims==" %%p in (`findstr /b /c:"PORT=" .env 2^>nul`) do set "PORT=%%p"
+
+REM A PORT= line saved on Windows carries a trailing carriage return, and may
+REM be quoted or blank. Anything that is not plain digits is not a port, so
+REM fall back rather than search netstat for something that cannot match.
+echo !PORT!| findstr /r /c:"^[0-9][0-9]*$" >nul || set "PORT=3000"
+
+for /f "tokens=5" %%p in ('netstat -ano -p tcp ^| findstr /c:"LISTENING" ^| findstr /c:":!PORT! "') do (
+  echo Port !PORT! is still held by PID %%p from a previous run - stopping it. >> "%LOG%"
+  taskkill /pid %%p /f /t >> "%LOG%" 2>&1
+  REM Windows does not release the port the instant the process dies. Without
+  REM this pause the new server can still lose the bind and we are back to
+  REM serving stale code. "ping" rather than "timeout", because timeout aborts
+  REM with "input redirection is not supported" when run from a scheduled task.
+  ping -n 4 127.0.0.1 >nul 2>&1
+)
+
+echo Starting server on port !PORT!... >> "%LOG%"
 "!BUN!" run src/index.ts >> "%LOG%" 2>&1
 
+REM Reaching here means the server stopped. When that happens seconds
+REM after boot it is almost always the port bind failing, so say what to
+REM look for instead of leaving a bare timestamp in the log.
 echo Server exited at %DATE% %TIME% >> "%LOG%"
+echo If that was immediate, check the lines above for a port or database error. >> "%LOG%"

@@ -438,14 +438,31 @@ you're typing on, separately, once.
 cd C:\ArriveAlive
 git fetch origin
 git checkout -B main origin/main
-Stop-ScheduledTask  -TaskName ArriveAliveServer
+Stop-ScheduledTask -TaskName ArriveAliveServer
+Get-Process bun -ErrorAction SilentlyContinue | Stop-Process -Force
+Start-Sleep -Seconds 3
 Start-ScheduledTask -TaskName ArriveAliveServer
+Start-Sleep -Seconds 60
 Invoke-RestMethod http://localhost:3000/health
 ```
 
 That last line prints a `commit` value. It is the only honest answer to "did
 my update actually land?" — compare it to the newest commit on GitHub. If it
-says `unknown`, the folder is not a Git checkout (do B).
+says `unknown`, the folder is not a Git checkout (do B). If the `commit` line
+is missing entirely, the server is running a version from before /health
+reported it, which means the restart did not take.
+
+**Why the `Stop-Process` line is there.** `Stop-ScheduledTask` only kills the
+`cmd.exe` that start-server.bat runs in; the `bun.exe` underneath it survives
+and keeps holding the port. The replacement server then cannot bind to that
+port, gives up, and the machine carries on serving the old code while the
+restart reports success. `start-server.bat` now clears the port itself at
+startup, so this line is belt-and-braces — but leave it in, because it is
+free and the failure it prevents is invisible.
+
+**After the server is up, open the admin site and press Ctrl + Shift + R.** A
+plain refresh is not always enough; the browser can keep serving the version
+of the page it saved before the update.
 
 **Why `checkout -B main` and not plain `git pull`.** All the work lives on a
 branch called `main`. A desktop sitting on any other branch — `master`, most
