@@ -436,13 +436,30 @@ you're typing on, separately, once.
 
 ```powershell
 cd C:\ArriveAlive
-git pull
+git fetch origin
+git checkout -B main origin/main
 Stop-ScheduledTask  -TaskName ArriveAliveServer
 Start-ScheduledTask -TaskName ArriveAliveServer
+Invoke-RestMethod http://localhost:3000/health
 ```
 
-If `git pull` answers `fatal: not a git repository`, the folder came from a
-ZIP and was never connected. Do B, starting at the `git init` block.
+That last line prints a `commit` value. It is the only honest answer to "did
+my update actually land?" — compare it to the newest commit on GitHub. If it
+says `unknown`, the folder is not a Git checkout (do B).
+
+**Why `checkout -B main` and not plain `git pull`.** All the work lives on a
+branch called `main`. A desktop sitting on any other branch — `master`, most
+often, because that is what old versions of Git named the first branch — gets
+a `git pull` that succeeds, prints something reassuring, and changes nothing
+at all, forever. That cost a full working day once. This form moves you onto
+`main` and matches GitHub whatever branch you were on.
+
+It discards local edits to tracked files. That is what you want here: nothing
+in this folder should be hand-edited. `backend/.env`, `backend/prod.db` and
+the backups are untracked and are not touched.
+
+If it answers `fatal: not a git repository`, the folder came from a ZIP and
+was never connected. Do B, starting at the `git init` block.
 
 If it refuses with **`Your local changes to the following files would be
 overwritten`** and names `backend/bun.lock`, that's just your Bun version

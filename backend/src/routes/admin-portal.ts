@@ -17,6 +17,12 @@ adminPortalRouter.post("/verify-password", async (c) => {
 
 // GET /admin - Serve the admin portal HTML
 adminPortalRouter.get("/", (c) => {
+  // The whole admin site — markup and script — is this one response, and the
+  // desktop server is updated in place underneath a browser that is usually
+  // left open for days. Without this, the browser keeps serving the page it
+  // cached before the update, so a fix that is genuinely live on the server
+  // still looks broken to whoever is standing in front of it.
+  c.header("Cache-Control", "no-store, must-revalidate");
   return c.html(html`
     <!DOCTYPE html>
     <html lang="en">
