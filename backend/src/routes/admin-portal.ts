@@ -610,14 +610,6 @@ adminPortalRouter.get("/", (c) => {
                 <div class="value" id="statTotalSurveys">-</div>
               </div>
               <div class="stat-card">
-                <h3>Total Pledges</h3>
-                <div class="value" id="statTotalPledges">-</div>
-              </div>
-              <div class="stat-card">
-                <h3>Pledge Rate</h3>
-                <div class="value" id="statPledgeRate">-</div>
-              </div>
-              <div class="stat-card">
                 <h3>Total Photos</h3>
                 <div class="value" id="statTotalPhotos">-</div>
               </div>
@@ -2035,8 +2027,6 @@ adminPortalRouter.get("/", (c) => {
             analytics = data.data;
 
             document.getElementById('statTotalSurveys').textContent = analytics.totalSurveys;
-            document.getElementById('statTotalPledges').textContent = analytics.totalPledges;
-            document.getElementById('statPledgeRate').textContent = analytics.pledgeRate + '%';
             document.getElementById('statTotalPhotos').textContent = analytics.totalPhotos;
 
             // Surveys by type
@@ -2466,14 +2456,6 @@ adminPortalRouter.get("/", (c) => {
                   <div class="summary-card">
                     <h3>Total Surveys</h3>
                     <div class="value">\${analytics?.totalSurveys || 0}</div>
-                  </div>
-                  <div class="summary-card">
-                    <h3>Total Pledges</h3>
-                    <div class="value">\${analytics?.totalPledges || 0}</div>
-                  </div>
-                  <div class="summary-card">
-                    <h3>Pledge Rate</h3>
-                    <div class="value">\${analytics?.pledgeRate || 0}%</div>
                   </div>
                 </div>
 

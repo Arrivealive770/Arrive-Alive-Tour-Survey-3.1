@@ -5,6 +5,7 @@ import { prisma } from "../prisma";
 import { purgeEventParticipantData } from "../lib/pledge-privacy";
 import { eventPurgeScheduler } from "../lib/event-purge";
 import { storeFile } from "../lib/file-storage";
+import { overlayForEvent } from "../lib/event-overlay";
 
 const eventsRouter = new Hono();
 
@@ -76,6 +77,21 @@ eventsRouter.get("/:id", async (c) => {
   }
 
   return c.json({ data: withParsedSurveyTypes(event) });
+});
+
+// GET /api/events/:id/overlay - The artwork this event's photos get.
+// The phone camera draws this over the viewfinder so staff frame the guest
+// exactly where the photo will land. Events with no artwork uploaded get the
+// standard Arrive Alive frame rather than an error.
+eventsRouter.get("/:id/overlay", async (c) => {
+  const id = c.req.param("id");
+
+  const artwork = await overlayForEvent(id);
+  if (!artwork) {
+    return c.json({ error: { message: "Event not found", code: "NOT_FOUND" } }, 404);
+  }
+
+  return c.json({ data: artwork });
 });
 
 // GET /api/events/active/:teamId - Get active event for team

@@ -394,7 +394,6 @@ export default function EventsScreen() {
                     state={event.venueState}
                     date={event.eventDate}
                     surveyCount={event._count?.surveyResponses || 0}
-                    pledgeCount={event._count?.pledges || 0}
                     status={event.status}
                     onPress={() => handleEventPress(event)}
                   />
@@ -422,7 +421,6 @@ export default function EventsScreen() {
                     state={event.venueState}
                     date={event.eventDate}
                     surveyCount={event._count?.surveyResponses || 0}
-                    pledgeCount={event._count?.pledges || 0}
                     status={event.status}
                     onPress={() => handleEventPress(event)}
                   />
@@ -497,12 +495,6 @@ export default function EventsScreen() {
                       {selectedEvent._count?.surveyResponses || 0}
                     </Text>
                   </View>
-                  <View className="flex-1 bg-zinc-800 rounded-xl p-4">
-                    <Text className="text-zinc-400 text-sm">Pledges</Text>
-                    <Text className="text-white text-2xl font-bold">
-                      {selectedEvent._count?.pledges || 0}
-                    </Text>
-                  </View>
                 </View>
 
                 {/* Per-event Photo Overlay assignment */}
@@ -516,7 +508,7 @@ export default function EventsScreen() {
                   <Text className="text-zinc-500 text-xs mb-3">
                     {selectedEvent.overlay?.name
                       ? `Current: ${selectedEvent.overlay.name}`
-                      : 'No overlay assigned yet. Pick one to apply to pledge photos.'}
+                      : 'No overlay assigned — photos use the standard Arrive Alive frame. Pick one to use your own artwork.'}
                   </Text>
 
                   {/* Live preview of how a pledge photo will come out */}

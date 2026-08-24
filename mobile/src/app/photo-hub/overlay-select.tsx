@@ -24,7 +24,8 @@ export default function OverlaySelectScreen() {
         contentContainerStyle={{ padding: 16, gap: 12 }}
       >
         <Text className="text-zinc-400 text-sm mb-2 px-2">
-          Select an overlay style for your pledge photos
+          Tag your pledge photos with a topic. The frame around the photo comes
+          from the event&apos;s own artwork, so this only labels the photo.
         </Text>
 
         {OVERLAY_CONFIGS.map((config) => {

@@ -10,11 +10,13 @@ import sharp from "sharp";
 import { getDeletablePhoneOriginals } from "../lib/photo-cleanup";
 import { deleteFromRemoteStorage, purgeEventPhotos } from "../lib/pledge-privacy";
 import { storeFile, publicUrlFor } from "../lib/file-storage";
+import { compositePhoto } from "../lib/overlay-frame";
 import {
-  compositePhoto,
-  windowFromOverlay,
-  type OverlayMode,
-} from "../lib/overlay-frame";
+  loadOverlayBuffer,
+  overlayForEvent,
+  resolveOverlayArtwork,
+  type OverlayArtwork,
+} from "../lib/event-overlay";
 
 const photosRouter = new Hono();
 
@@ -259,50 +261,43 @@ photosRouter.post(
   async (c) => {
     const { photoUrl, overlayId, eventId } = c.req.valid("json");
 
-    // Resolve the overlay id: explicit overlayId wins, else the event's overlay.
-    let resolvedOverlayId = overlayId;
-    if (!resolvedOverlayId && eventId) {
-      const event = await prisma.event.findUnique({
-        where: { id: eventId },
-        select: { overlayId: true },
-      });
-      if (!event) {
+    // Which artwork to use: an explicit overlayId wins, otherwise the event's
+    // own artwork — falling back to the standard frame when it has none, so a
+    // guest never gets an unbranded photo just because the artwork is late.
+    let artwork: OverlayArtwork;
+
+    if (overlayId) {
+      const overlay = await prisma.overlay.findUnique({ where: { id: overlayId } });
+      if (!overlay) {
+        return c.json(
+          { error: { message: "Overlay not found", code: "OVERLAY_NOT_FOUND" } },
+          404
+        );
+      }
+      if (!overlay.isActive) {
+        return c.json(
+          { error: { message: "Overlay is not active", code: "OVERLAY_INACTIVE" } },
+          400
+        );
+      }
+      try {
+        artwork = await resolveOverlayArtwork(overlay);
+      } catch (error) {
+        console.error("[Composite] Failed to read overlay:", error);
+        return c.json(
+          { error: { message: "Failed to fetch overlay", code: "OVERLAY_FETCH_FAILED" } },
+          500
+        );
+      }
+    } else {
+      const resolved = await overlayForEvent(eventId!);
+      if (!resolved) {
         return c.json(
           { error: { message: "Event not found", code: "EVENT_NOT_FOUND" } },
           404
         );
       }
-      if (!event.overlayId) {
-        return c.json(
-          {
-            error: {
-              message: "Event has no overlay assigned",
-              code: "EVENT_OVERLAY_NOT_SET",
-            },
-          },
-          400
-        );
-      }
-      resolvedOverlayId = event.overlayId;
-    }
-
-    // Fetch the overlay from database
-    const overlay = await prisma.overlay.findUnique({
-      where: { id: resolvedOverlayId! },
-    });
-
-    if (!overlay) {
-      return c.json(
-        { error: { message: "Overlay not found", code: "OVERLAY_NOT_FOUND" } },
-        404
-      );
-    }
-
-    if (!overlay.isActive) {
-      return c.json(
-        { error: { message: "Overlay is not active", code: "OVERLAY_INACTIVE" } },
-        400
-      );
+      artwork = resolved;
     }
 
     try {
@@ -317,51 +312,31 @@ photosRouter.post(
       const photoBuffer = Buffer.from(await photoResponse.arrayBuffer());
 
       // Fetch the overlay image
-      const overlayResponse = await fetch(overlay.url);
-      if (!overlayResponse.ok) {
-        return c.json(
-          { error: { message: "Failed to fetch overlay", code: "OVERLAY_FETCH_FAILED" } },
-          500
-        );
-      }
-      const overlayBuffer = Buffer.from(await overlayResponse.arrayBuffer());
+      const overlayBuffer = await loadOverlayBuffer(artwork);
 
       // Transparent overlays go on top of the photo; opaque ones (JPG) are
       // treated as a polaroid frame with the photo dropped into its window.
+      // The mode and window were already worked out (and remembered) when the
+      // artwork was resolved, so the phone's preview and this agree exactly.
       const {
         buffer: compositedImage,
         mode: appliedMode,
-        window: appliedWindow,
+        contentType: compositedType,
+        extension: compositedExt,
       } = await compositePhoto({
         photoBuffer,
         overlayBuffer,
-        mode: (overlay.mode as OverlayMode) ?? "auto",
-        window: windowFromOverlay(overlay),
+        mode: artwork.mode,
+        window: artwork.window,
       });
-
-      // Remember a window we had to detect on the fly so the next photo (and
-      // the admin portal editor) reuses it instead of re-detecting.
-      if (appliedMode === "frame" && appliedWindow && !windowFromOverlay(overlay)) {
-        await prisma.overlay
-          .update({
-            where: { id: overlay.id },
-            data: {
-              windowX: appliedWindow.x,
-              windowY: appliedWindow.y,
-              windowW: appliedWindow.w,
-              windowH: appliedWindow.h,
-            },
-          })
-          .catch((err) => console.error("[Composite] Failed to cache window:", err));
-      }
 
       // The finished pledge photo lands on the server's own disk. This is the
       // image the participant is emailed, so it has to survive without any
       // outside storage service — see lib/file-storage.ts.
       const stored = await storeFile({
         buffer: compositedImage,
-        preferredName: `composited-${randomUUID()}.png`,
-        contentType: "image/png",
+        preferredName: `composited-${randomUUID()}${compositedExt}`,
+        contentType: compositedType,
       });
 
       return c.json({
@@ -369,8 +344,8 @@ photosRouter.post(
           compositedUrl: stored.url,
           fileId: stored.id,
           originalPhotoUrl: photoUrl,
-          overlayId: overlay.id,
-          overlayName: overlay.name,
+          overlayId: artwork.id,
+          overlayName: artwork.name,
           mode: appliedMode,
         },
       });

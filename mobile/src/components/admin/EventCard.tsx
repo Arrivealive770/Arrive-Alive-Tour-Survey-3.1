@@ -1,5 +1,5 @@
 import { View, Text, Pressable } from 'react-native';
-import { MapPin, Calendar, Users, Camera, CheckCircle2, Clock } from 'lucide-react-native';
+import { MapPin, Calendar, Users, CheckCircle2, Clock } from 'lucide-react-native';
 import { cn } from '@/lib/cn';
 
 export interface EventCardProps {
@@ -9,7 +9,6 @@ export interface EventCardProps {
   state: string;
   date: string;
   surveyCount: number;
-  pledgeCount: number;
   status: 'active' | 'completed';
   onPress?: () => void;
 }
@@ -20,7 +19,6 @@ export function EventCard({
   state,
   date,
   surveyCount,
-  pledgeCount,
   status,
   onPress,
 }: EventCardProps) {
@@ -95,16 +93,6 @@ export function EventCard({
           <View className="ml-2">
             <Text className="text-white text-lg font-bold">{surveyCount}</Text>
             <Text className="text-zinc-500 text-xs">Surveys</Text>
-          </View>
-        </View>
-
-        <View className="flex-row items-center flex-1">
-          <View className="w-8 h-8 rounded-lg bg-purple-500/20 items-center justify-center">
-            <Camera size={16} color="#a855f7" />
-          </View>
-          <View className="ml-2">
-            <Text className="text-white text-lg font-bold">{pledgeCount}</Text>
-            <Text className="text-zinc-500 text-xs">Pledges</Text>
           </View>
         </View>
 

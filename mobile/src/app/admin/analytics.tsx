@@ -12,7 +12,7 @@ import { FilterBar, type FilterConfig } from '@/components/admin/FilterBar';
 import { SummaryCard } from '@/components/admin/SummaryCard';
 import { BarChart, PieChart, LineChart, SURVEY_TYPE_COLORS, CHART_COLORS } from '@/components/admin/AnalyticsChart';
 import { ExportButton } from '@/components/admin/ExportButton';
-import { ClipboardList, Camera, TrendingUp, Percent } from 'lucide-react-native';
+import { ClipboardList, TrendingUp } from 'lucide-react-native';
 import { SURVEY_TYPES } from '@/lib/api/types';
 import { api } from '@/lib/api/api';
 import { useDeviceStore } from '@/lib/state/device-store';
@@ -21,8 +21,6 @@ interface AnalyticsData {
   totalSurveys: number;
   surveysByType: { surveyTypeSlug: string; count: number }[];
   surveysByDay: { date: string; count: number }[];
-  totalPledges: number;
-  pledgeRate: number;
 }
 
 interface SurveyResultsData {
@@ -137,8 +135,6 @@ export default function AnalyticsScreen() {
     : 0;
 
   const totalSurveys = selectedType ? filteredTypeTotal : analytics?.totalSurveys ?? 0;
-  const totalPledges = analytics?.totalPledges ?? 0;
-  const conversionRate = Math.round(analytics?.pledgeRate ?? 0);
   const dayCount = Math.max(
     1,
     Math.round(
@@ -191,30 +187,14 @@ export default function AnalyticsScreen() {
           />
         </View>
 
-        {/* Key Metrics */}
-        <View className="flex-row mb-4 gap-3">
+        {/* Key Metrics. Pledge totals and conversion are deliberately not shown:
+            the admin views report on surveys, not on who pledged. */}
+        <View className="flex-row mb-6 gap-3">
           <SummaryCard
             icon={ClipboardList}
             label="Total Surveys"
             value={totalSurveys}
             accentColor={CHART_COLORS.blue}
-            className="flex-1"
-          />
-          <SummaryCard
-            icon={Camera}
-            label="Total Pledges"
-            value={totalPledges}
-            accentColor={CHART_COLORS.purple}
-            className="flex-1"
-          />
-        </View>
-
-        <View className="flex-row mb-6 gap-3">
-          <SummaryCard
-            icon={Percent}
-            label="Conversion"
-            value={`${conversionRate}%`}
-            accentColor={CHART_COLORS.green}
             className="flex-1"
           />
           <SummaryCard
@@ -287,7 +267,7 @@ export default function AnalyticsScreen() {
         <View className="bg-zinc-900/50 rounded-xl p-4 mb-6">
           <Text className="text-zinc-500 text-sm text-center">
             Data shown is for the selected date range. Export includes all survey
-            responses and pledge information.
+            responses.
           </Text>
         </View>
       </ScrollView>

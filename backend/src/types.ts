@@ -157,7 +157,8 @@ export interface CompositePhotoResponse {
   compositedUrl: string;
   fileId: string;
   originalPhotoUrl: string;
-  overlayId: string;
+  /** null when the event had no artwork and the standard frame was used. */
+  overlayId: string | null;
   overlayName: string;
 }
 

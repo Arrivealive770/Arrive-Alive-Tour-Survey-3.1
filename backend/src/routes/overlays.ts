@@ -12,6 +12,7 @@ import {
   type OverlayMode,
 } from "../lib/overlay-frame";
 import { storeFile, deleteStoredFile } from "../lib/file-storage";
+import { forgetResolvedOverlay } from "../lib/event-overlay";
 
 const overlaysRouter = new Hono();
 
@@ -257,6 +258,9 @@ overlaysRouter.put(
       },
     });
 
+    // The camera preview and the compositor both cache the resolved artwork.
+    forgetResolvedOverlay(id);
+
     return c.json({ data: overlay });
   }
 );
@@ -292,6 +296,8 @@ overlaysRouter.post("/:id/redetect-window", async (c) => {
         windowH: window.h,
       },
     });
+
+    forgetResolvedOverlay(id);
 
     return c.json({ data: overlay });
   } catch (error) {
@@ -351,7 +357,7 @@ overlaysRouter.get("/:id/preview", async (c) => {
       photoBuffer = await sharp(Buffer.from(sample)).png().toBuffer();
     }
 
-    const { buffer } = await compositePhoto({
+    const { buffer, contentType } = await compositePhoto({
       photoBuffer,
       overlayBuffer,
       mode: (overlay.mode as OverlayMode) ?? "auto",
@@ -360,7 +366,7 @@ overlaysRouter.get("/:id/preview", async (c) => {
 
     return new Response(new Uint8Array(buffer), {
       headers: {
-        "Content-Type": "image/png",
+        "Content-Type": contentType,
         "Cache-Control": "no-store",
       },
     });
@@ -395,6 +401,8 @@ overlaysRouter.delete("/:id", async (c) => {
   await prisma.overlay.delete({
     where: { id },
   });
+
+  forgetResolvedOverlay(id);
 
   return c.json({ data: { success: true, id } });
 });

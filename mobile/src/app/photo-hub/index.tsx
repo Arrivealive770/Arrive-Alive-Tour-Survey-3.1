@@ -2,7 +2,14 @@ import { useState, useCallback, useRef } from 'react';
 import { View, Text, Pressable, Modal, Image, ActivityIndicator, Alert } from 'react-native';
 import { router } from 'expo-router';
 import { Images, Layers, Check, X, AlertCircle, Wifi } from 'lucide-react-native';
-import { CameraCapture, OverlayPreview, type CameraCaptureRef } from '@/components/photo-hub';
+import {
+  CameraCapture,
+  OverlayPreview,
+  EventOverlayGuide,
+  FramedPhotoPreview,
+  type CameraCaptureRef,
+} from '@/components/photo-hub';
+import { useEventOverlay } from '@/lib/overlays/event-overlay';
 import { usePhotoStore, useSelectedOverlay, usePhotoQueueCount } from '@/lib/state/photo-store';
 import { useDeviceStore } from '@/lib/state/device-store';
 import { useSyncStore } from '@/lib/state/sync-store';
@@ -37,6 +44,12 @@ export default function PhotoHubCamera() {
 
   // Check if we have a valid event
   const hasValidEvent = !!eventId && eventId !== 'no-event';
+
+  // The event's own artwork — or the standard frame if none was uploaded. This
+  // is the same artwork the server burns into the finished photo, so what staff
+  // line up here is what the guest gets. Falls back to the plain guide below
+  // while it loads or if this phone cannot reach the server.
+  const { data: eventArtwork } = useEventOverlay(eventId);
 
   const handleCapture = useCallback(
     async (uri: string) => {
@@ -129,7 +142,11 @@ export default function PhotoHubCamera() {
     <View style={{ flex: 1, backgroundColor: '#000' }}>
       <CameraCapture ref={cameraRef} onCapture={handleCapture}>
         {/* Overlay preview on camera */}
-        <OverlayPreview overlayType={currentOverlay} />
+        {eventArtwork ? (
+          <EventOverlayGuide artwork={eventArtwork} />
+        ) : (
+          <OverlayPreview overlayType={currentOverlay} />
+        )}
 
         {/* No event warning banner */}
         {!hasValidEvent ? (
@@ -151,6 +168,35 @@ export default function PhotoHubCamera() {
             <AlertCircle size={20} color="#fff" />
             <Text style={{ color: '#fff', fontSize: 14, fontWeight: '600', flex: 1 }}>
               No event selected. Go to Admin Settings to select an event.
+            </Text>
+          </View>
+        ) : null}
+
+        {/* Says which frame the photo will come out in, so nobody shoots a whole
+            event on the stand-in frame without realising the artwork is missing. */}
+        {eventArtwork ? (
+          <View
+            style={{
+              position: 'absolute',
+              bottom: 140,
+              left: 16,
+              right: 16,
+              alignItems: 'center',
+            }}
+          >
+            <Text
+              style={{
+                color: eventArtwork.isStandard ? '#fbbf24' : 'rgba(255,255,255,0.75)',
+                fontSize: 12,
+                fontWeight: '600',
+                textAlign: 'center',
+                textShadowColor: 'rgba(0,0,0,0.8)',
+                textShadowRadius: 4,
+              }}
+            >
+              {eventArtwork.isStandard
+                ? 'Standard frame — no artwork uploaded for this event'
+                : `Frame: ${eventArtwork.name}`}
             </Text>
           </View>
         ) : null}
@@ -276,16 +322,19 @@ export default function PhotoHubCamera() {
               position: 'relative',
             }}
           >
-            {previewUri ? (
-              <Image
-                source={{ uri: previewUri }}
-                style={{ width: '100%', height: '100%' }}
-                resizeMode="contain"
-              />
+            {previewUri && eventArtwork ? (
+              /* Shown the way the guest will get it: inside the event's frame */
+              <FramedPhotoPreview artwork={eventArtwork} photoUri={previewUri} />
+            ) : previewUri ? (
+              <>
+                <Image
+                  source={{ uri: previewUri }}
+                  style={{ width: '100%', height: '100%' }}
+                  resizeMode="contain"
+                />
+                <OverlayPreview overlayType={currentOverlay} showBadge={false} />
+              </>
             ) : null}
-
-            {/* Overlay frame on preview */}
-            <OverlayPreview overlayType={currentOverlay} showBadge={false} />
           </View>
 
           {/* Action buttons */}

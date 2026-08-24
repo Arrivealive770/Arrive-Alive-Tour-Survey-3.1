@@ -48,7 +48,6 @@ export default function AdminDashboard() {
   const [isRefreshing, setIsRefreshing] = useState(false);
 
   const pendingSurveys = useSyncStore((s) => s.pendingSurveys);
-  const pendingPledges = useSyncStore((s) => s.pendingPledges);
   const pendingPhotos = useSyncStore((s) => s.pendingPhotos);
 
   const teamCode = useDeviceStore((s) => s.teamCode);
@@ -71,10 +70,13 @@ export default function AdminDashboard() {
   });
 
   const todayStats = dashboardData?.stats;
-  const recentActivity: ActivityItem[] = dashboardData?.activity ?? [];
+  // Pledges are deliberately left out of the admin views — staff should see how
+  // the surveys are going, not how many people pledged or were emailed.
+  const recentActivity: ActivityItem[] = (dashboardData?.activity ?? []).filter(
+    (item) => item.type !== 'pledge'
+  );
 
   const surveysToday = todayStats?.surveys ?? 0;
-  const pledgesToday = todayStats?.pledges ?? 0;
 
   const surveysByType = (todayStats?.surveysByType ?? []).map((row) => ({
     label: SURVEY_TYPE_LABELS[row.surveyTypeSlug] ?? row.surveyTypeSlug,
@@ -106,10 +108,6 @@ export default function AdminDashboard() {
       hour12: true,
     });
   };
-
-  const conversionRate = surveysToday > 0
-    ? Math.round((pledgesToday / surveysToday) * 100)
-    : 0;
 
   return (
     <ScrollView
@@ -152,7 +150,7 @@ export default function AdminDashboard() {
       </View>
 
       {/* Summary Cards */}
-      <View className="flex-row mb-4">
+      <View className="flex-row mb-6">
         <SummaryCard
           icon={ClipboardList}
           label="Surveys Today"
@@ -161,27 +159,12 @@ export default function AdminDashboard() {
           className="flex-1 mr-2"
         />
         <SummaryCard
-          icon={Camera}
-          label="Pledges Today"
-          value={pledgesToday}
-          accentColor="#a855f7"
-          className="flex-1 ml-2"
-        />
-      </View>
-
-      <View className="flex-row mb-6">
-        <SummaryCard
           icon={RefreshCw}
           label="Pending Sync"
           value={pendingCount}
           accentColor={pendingCount > 0 ? '#f59e0b' : '#22c55e'}
-          className="flex-1 mr-2"
+          className="flex-1 ml-2"
         />
-        <View className="flex-1 ml-2 bg-zinc-800 rounded-2xl p-4 justify-center items-center">
-          <Text className="text-zinc-400 text-sm mb-1">Conversion Rate</Text>
-          <Text className="text-white text-3xl font-bold">{conversionRate}%</Text>
-          <Text className="text-zinc-500 text-xs">Surveys to Pledges</Text>
-        </View>
       </View>
 
       {/* Survey Breakdown */}
@@ -233,10 +216,6 @@ export default function AdminDashboard() {
               <Text className="text-zinc-500 text-xs">Surveys</Text>
             </View>
             <View className="items-center flex-1">
-              <Text className="text-amber-500 text-2xl font-bold">{pendingPledges}</Text>
-              <Text className="text-zinc-500 text-xs">Pledges</Text>
-            </View>
-            <View className="items-center flex-1">
               <Text className="text-amber-500 text-2xl font-bold">{pendingPhotos}</Text>
               <Text className="text-zinc-500 text-xs">Photos</Text>
             </View>
@@ -257,17 +236,11 @@ export default function AdminDashboard() {
             >
               <View
                 className={`w-8 h-8 rounded-lg items-center justify-center mr-3 ${
-                  activity.type === 'survey'
-                    ? 'bg-blue-500/20'
-                    : activity.type === 'pledge'
-                    ? 'bg-purple-500/20'
-                    : 'bg-green-500/20'
+                  activity.type === 'survey' ? 'bg-blue-500/20' : 'bg-green-500/20'
                 }`}
               >
                 {activity.type === 'survey' ? (
                   <ClipboardList size={16} color="#3b82f6" />
-                ) : activity.type === 'pledge' ? (
-                  <Camera size={16} color="#a855f7" />
                 ) : (
                   <Camera size={16} color="#22c55e" />
                 )}
@@ -276,8 +249,6 @@ export default function AdminDashboard() {
                 <Text className="text-white text-sm">
                   {activity.type === 'survey'
                     ? `${SURVEY_TYPE_LABELS[activity.label ?? ''] ?? activity.label} Survey`
-                    : activity.type === 'pledge'
-                    ? `Pledge${activity.label ? ` - ${activity.label}` : ''}`
                     : 'Photo captured'}
                 </Text>
                 <Text className="text-zinc-500 text-xs">{timeAgo(activity.at)}</Text>

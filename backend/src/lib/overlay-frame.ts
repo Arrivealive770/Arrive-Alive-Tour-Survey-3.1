@@ -250,18 +250,94 @@ export async function detectFrameWindow(imageBuffer: Buffer): Promise<WindowRect
   }
 }
 
+// Longest edge of a finished pledge photo.
+//
+// A phone camera shot is around 4000px wide. Left at that size, a finished
+// photo is a ~30MB PNG that the tablet has to decode in one piece to show the
+// preview — Android cannot downsample a PNG while decoding, so it allocates the
+// whole ~48MB bitmap and the app is killed for running out of memory. That is
+// the tap-the-photo-and-it-dies crash. 1600px is still plenty for the on-screen
+// preview and for the emailed keepsake, and keeps the decode well inside a
+// tablet's budget.
+const MAX_OUTPUT_EDGE = 1600;
+
+// Quality for the JPEG output. High enough that the pledge photo still looks
+// like a keepsake, small enough to email without trouble.
+const JPEG_QUALITY = 90;
+
 /**
- * Composite a photo with an overlay image and return a PNG buffer.
+ * Shrink a size so its longest edge fits MAX_OUTPUT_EDGE. Never enlarges.
+ *
+ * The canvas is capped before anything is composited onto it, not after: sharp
+ * resizes before it composites, whatever order the calls are made in, so a
+ * late resize would shrink the base and then refuse the now-too-big overlay.
+ */
+function cappedSize(width: number, height: number): { width: number; height: number } {
+  const scale = Math.min(1, MAX_OUTPUT_EDGE / Math.max(width, height));
+  return {
+    width: Math.max(1, Math.round(width * scale)),
+    height: Math.max(1, Math.round(height * scale)),
+  };
+}
+
+/**
+ * Encode the finished composite.
+ *
+ * JPEG whenever the result is fully opaque: it decodes far more cheaply on the
+ * tablets (Android downsamples JPEGs while decoding, PNGs not at all) and emails
+ * at a fraction of the size. PNG only when transparency has to survive.
+ */
+async function encodeOutput(
+  pipeline: sharp.Sharp,
+  needsAlpha: boolean
+): Promise<{ buffer: Buffer; contentType: string; extension: string }> {
+  if (needsAlpha) {
+    // A frame with an alpha channel usually ends up fully opaque anyway — the
+    // guest's photo fills the only see-through part of it. Only frames that
+    // stay see-through at the edges (rounded corners, cut-out shapes) really
+    // need PNG, so the finished image decides rather than the source.
+    const png = await pipeline.png().toBuffer();
+    const { isOpaque } = await sharp(png).stats();
+    if (!isOpaque) {
+      return { buffer: png, contentType: "image/png", extension: ".png" };
+    }
+    return {
+      buffer: await sharp(png)
+        .flatten({ background: { r: 255, g: 255, b: 255 } })
+        .jpeg({ quality: JPEG_QUALITY, mozjpeg: true })
+        .toBuffer(),
+      contentType: "image/jpeg",
+      extension: ".jpg",
+    };
+  }
+
+  return {
+    buffer: await pipeline.jpeg({ quality: JPEG_QUALITY, mozjpeg: true }).toBuffer(),
+    contentType: "image/jpeg",
+    extension: ".jpg",
+  };
+}
+
+/**
+ * Composite a photo with an overlay image and return the finished image.
  *
  * frame mode  -> output is the size of the frame, photo cropped to fill the window
  * overlay mode-> output is the size of the photo, overlay stretched on top
+ *
+ * Either way the result is capped at MAX_OUTPUT_EDGE on its longest side.
  */
 export async function compositePhoto(options: {
   photoBuffer: Buffer;
   overlayBuffer: Buffer;
   mode: OverlayMode;
   window: WindowRect | null;
-}): Promise<{ buffer: Buffer; mode: "overlay" | "frame"; window: WindowRect | null }> {
+}): Promise<{
+  buffer: Buffer;
+  mode: "overlay" | "frame";
+  window: WindowRect | null;
+  contentType: string;
+  extension: string;
+}> {
   const { photoBuffer, overlayBuffer } = options;
 
   const overlayMeta = await sharp(overlayBuffer).metadata();
@@ -276,24 +352,38 @@ export async function compositePhoto(options: {
 
   if (mode === "overlay") {
     const photoMeta = await sharp(photoBuffer).metadata();
-    const photoWidth = photoMeta.width || 1080;
-    const photoHeight = photoMeta.height || 1080;
+    const { width: photoWidth, height: photoHeight } = cappedSize(
+      photoMeta.width || 1080,
+      photoMeta.height || 1080
+    );
+
+    // Photo down to the capped size first, so it stays the canvas.
+    const basePhoto = await sharp(photoBuffer)
+      .resize(photoWidth, photoHeight, { fit: "fill" })
+      .toBuffer();
 
     const resizedOverlay = await sharp(overlayBuffer)
       .resize(photoWidth, photoHeight, { fit: "fill" })
       .toBuffer();
 
-    const buffer = await sharp(photoBuffer)
-      .composite([{ input: resizedOverlay, top: 0, left: 0 }])
-      .png()
-      .toBuffer();
+    // The photo is the canvas, so the result is opaque and can go out as JPEG.
+    const encoded = await encodeOutput(
+      sharp(basePhoto).composite([{ input: resizedOverlay, top: 0, left: 0 }]),
+      false
+    );
 
-    return { buffer, mode, window: null };
+    return { ...encoded, mode, window: null };
   }
 
-  // Frame mode.
-  const frameWidth = overlayMeta.width || 1080;
-  const frameHeight = overlayMeta.height || 1350;
+  // Frame mode. The frame is the canvas, so cap the frame and place the photo
+  // using the window rect scaled to the capped frame.
+  const { width: frameWidth, height: frameHeight } = cappedSize(
+    overlayMeta.width || 1080,
+    overlayMeta.height || 1350
+  );
+  const frameImage = await sharp(overlayBuffer)
+    .resize(frameWidth, frameHeight, { fit: "fill" })
+    .toBuffer();
   const rect = options.window ?? (await detectFrameWindow(overlayBuffer));
 
   // Clamp to the frame so a bad hand-entered rect can't blow up sharp.
@@ -307,30 +397,24 @@ export async function compositePhoto(options: {
     .resize(width, height, { fit: "cover", position: "centre" })
     .toBuffer();
 
-  let buffer: Buffer;
-  if (hasAlpha) {
-    // Transparent frame: photo underneath, frame on top so soft edges show.
-    buffer = await sharp({
-      create: {
-        width: frameWidth,
-        height: frameHeight,
-        channels: 4,
-        background: { r: 0, g: 0, b: 0, alpha: 0 },
-      },
-    })
-      .composite([
+  // Transparent frame: photo underneath, frame on top so soft edges show, and
+  // the transparent parts have to survive, so this one stays a PNG.
+  // Opaque frame (JPG): frame is the canvas, photo drops into the window.
+  const composed = hasAlpha
+    ? sharp({
+        create: {
+          width: frameWidth,
+          height: frameHeight,
+          channels: 4,
+          background: { r: 0, g: 0, b: 0, alpha: 0 },
+        },
+      }).composite([
         { input: windowPhoto, top, left },
-        { input: overlayBuffer, top: 0, left: 0 },
+        { input: frameImage, top: 0, left: 0 },
       ])
-      .png()
-      .toBuffer();
-  } else {
-    // Opaque frame (JPG): frame is the canvas, photo drops into the window.
-    buffer = await sharp(overlayBuffer)
-      .composite([{ input: windowPhoto, top, left }])
-      .png()
-      .toBuffer();
-  }
+    : sharp(frameImage).composite([{ input: windowPhoto, top, left }]);
 
-  return { buffer, mode, window: rect };
+  const encoded = await encodeOutput(composed, hasAlpha);
+
+  return { ...encoded, mode, window: rect };
 }
