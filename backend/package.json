@@ -26,8 +26,13 @@
     "@vibecodeapp/cloud-studio": "^0.2.4",
     "@vibecodeapp/proxy": "^2.0.3",
     "better-auth": "^1.7.1",
+    "does": "^0.0.11",
+    "fix": "^0.0.6",
     "hono": "^4.12.32",
+    "not": "^0.1.0",
     "sharp": "^0.34.5",
+    "the": "^1.0.2",
+    "work": "^0.11.1",
     "zod": "4.1.11"
   }
 }
