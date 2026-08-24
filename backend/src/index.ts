@@ -8,6 +8,7 @@ import { TAILSCALE_ORIGIN_REGEX, localNetworkOrigins, localIPv4Addresses } from 
 import { emailService } from "./lib/email-service";
 import { emailQueueProcessor } from "./lib/email-queue-processor";
 import { eventPurgeScheduler } from "./lib/event-purge";
+import { runningCommit } from "./lib/version";
 import { sampleRouter } from "./routes/sample";
 import { teamsRouter } from "./routes/teams";
 import { devicesRouter } from "./routes/devices";
@@ -83,8 +84,20 @@ app.use("*", async (c, next) => {
 // Mount auth handler
 app.on(["GET", "POST"], "/api/auth/*", (c) => auth.handler(c.req.raw));
 
-// Health check endpoint
-app.get("/health", (c) => c.json({ status: "ok" }));
+/**
+ * Health check.
+ *
+ * Also reports which commit is running. "I pulled but nothing changed" is
+ * otherwise indistinguishable from "the fix does not work", and telling those
+ * two apart over the phone cost a working afternoon once already.
+ */
+app.get("/health", (c) =>
+  c.json({
+    status: "ok",
+    commit: runningCommit(),
+    backendUrl: env.BACKEND_URL,
+  })
+);
 
 // Serve uploaded files
 app.use("/uploads/*", serveStatic({ root: "./" }));
