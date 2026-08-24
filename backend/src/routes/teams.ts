@@ -2,6 +2,7 @@ import { Hono } from "hono";
 import { zValidator } from "@hono/zod-validator";
 import { z } from "zod";
 import { prisma } from "../prisma";
+import { describeTeamDeletion, deleteTeamCompletely } from "../lib/hard-delete";
 
 const teamsRouter = new Hono();
 
@@ -216,5 +217,66 @@ teamsRouter.put(
     return c.json({ data: team });
   }
 );
+
+// GET /api/teams/:id/deletion-impact - What would be lost by deleting this team?
+//
+// Worth being blunt about the scale: a team owns its events, so this number
+// covers every tour date it ever worked, not just the current one. The admin
+// portal shows it before offering the button.
+teamsRouter.get("/:id/deletion-impact", async (c) => {
+  const id = c.req.param("id");
+
+  const impact = await describeTeamDeletion(id);
+
+  if (!impact) {
+    return c.json({ error: { message: "Team not found", code: "NOT_FOUND" } }, 404);
+  }
+
+  return c.json({ data: impact });
+});
+
+// DELETE /api/teams/:id - Remove a team, its devices, and every event, survey
+// response, pledge and photo belonging to it.
+//
+// Requires ?confirm=DELETE for the same reason the event route does. This is
+// the most destructive endpoint in the product; it must not be reachable by
+// accident.
+//
+// Deleting the only admin team is allowed. It locks every device out of the
+// app's Admin section, but the web portal is a separate door with its own
+// login, so it is recoverable by marking another team as admin — not the kind
+// of dead end worth blocking a legitimate cleanup over.
+teamsRouter.delete("/:id", async (c) => {
+  const id = c.req.param("id");
+
+  if (c.req.query("confirm") !== "DELETE") {
+    return c.json(
+      {
+        error: {
+          message: "Deleting a team requires confirm=DELETE",
+          code: "CONFIRMATION_REQUIRED",
+        },
+      },
+      400
+    );
+  }
+
+  const impact = await describeTeamDeletion(id);
+
+  if (!impact) {
+    return c.json({ error: { message: "Team not found", code: "NOT_FOUND" } }, 404);
+  }
+
+  const deleted = await deleteTeamCompletely(id);
+
+  console.log(
+    `[Teams] Deleted "${deleted.name}" (${deleted.code}) — ` +
+      `${deleted.eventCount} event(s), ${deleted.surveyResponseCount} survey response(s), ` +
+      `${deleted.pledgeCount} pledge(s), ${deleted.photoCount} photo(s), ` +
+      `${deleted.deviceCount} device(s)`
+  );
+
+  return c.json({ data: deleted });
+});
 
 export { teamsRouter };

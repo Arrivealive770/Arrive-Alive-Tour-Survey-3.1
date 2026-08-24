@@ -369,8 +369,14 @@ Worth knowing:
   recent 30 are kept. Copy them to a USB drive or OneDrive occasionally — a
   backup on the same machine doesn't help if the drive dies.
 - **Deleting pledge data** after an event: admin website → Events →
-  **Purge Pledges**. Removes the photos and participant emails, keeps every
-  survey answer.
+  **Purge Now**. Removes the photos and participant emails, keeps every
+  survey answer. This is the one you want after almost every event.
+- **Deleting an event or a team outright**: admin website → Events or Teams →
+  **Delete**. This is a different thing, and much bigger: it takes the survey
+  answers with it. Deleting a *team* also deletes every event that team ever
+  ran and every response from all of them, across every tour date. Both ask you
+  to type DELETE, and both show you the exact counts first — read them. The
+  only way back is last night's backup.
 
 ### Handy commands
 

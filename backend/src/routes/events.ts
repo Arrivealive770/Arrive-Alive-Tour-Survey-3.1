@@ -3,6 +3,7 @@ import { zValidator } from "@hono/zod-validator";
 import { z } from "zod";
 import { prisma } from "../prisma";
 import { purgeEventParticipantData } from "../lib/pledge-privacy";
+import { describeEventDeletion, deleteEventCompletely } from "../lib/hard-delete";
 import { eventPurgeScheduler } from "../lib/event-purge";
 import { storeFile } from "../lib/file-storage";
 import { overlayForEvent } from "../lib/event-overlay";
@@ -392,6 +393,58 @@ eventsRouter.post("/:id/purge", async (c) => {
 eventsRouter.post("/purge-due", async (c) => {
   const results = await eventPurgeScheduler.runOnce();
   return c.json({ data: { purgedEventCount: results.length, results } });
+});
+
+// GET /api/events/:id/deletion-impact - What would be lost by deleting this
+// event? The admin portal shows these numbers before it will let anyone
+// through, because "Purge" and "Delete" sit next to each other and only one of
+// them keeps the survey answers.
+eventsRouter.get("/:id/deletion-impact", async (c) => {
+  const id = c.req.param("id");
+
+  const impact = await describeEventDeletion(id);
+
+  if (!impact) {
+    return c.json({ error: { message: "Event not found", code: "NOT_FOUND" } }, 404);
+  }
+
+  return c.json({ data: impact });
+});
+
+// DELETE /api/events/:id - Remove an event and everything attached to it.
+//
+// Requires ?confirm=DELETE. A destructive endpoint that fires on a bare URL is
+// one mistyped fetch away from wiping an event, and browsers prefetch.
+eventsRouter.delete("/:id", async (c) => {
+  const id = c.req.param("id");
+
+  if (c.req.query("confirm") !== "DELETE") {
+    return c.json(
+      {
+        error: {
+          message: "Deleting an event requires confirm=DELETE",
+          code: "CONFIRMATION_REQUIRED",
+        },
+      },
+      400
+    );
+  }
+
+  const impact = await describeEventDeletion(id);
+
+  if (!impact) {
+    return c.json({ error: { message: "Event not found", code: "NOT_FOUND" } }, 404);
+  }
+
+  const deleted = await deleteEventCompletely(id);
+
+  console.log(
+    `[Events] Deleted "${deleted.venueName}" — ` +
+      `${deleted.surveyResponseCount} survey response(s), ` +
+      `${deleted.pledgeCount} pledge(s), ${deleted.photoCount} photo(s)`
+  );
+
+  return c.json({ data: deleted });
 });
 
 export { eventsRouter };

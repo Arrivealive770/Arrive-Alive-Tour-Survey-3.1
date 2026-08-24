@@ -1229,6 +1229,7 @@ adminPortalRouter.get("/", (c) => {
                 <td>\${new Date(team.createdAt).toLocaleDateString()}</td>
                 <td class="actions">
                   <button class="btn btn-secondary btn-sm" onclick="editTeam('\${team.id}')">Edit</button>
+                  <button class="btn btn-danger btn-sm" onclick="deleteTeam('\${team.id}')">Delete</button>
                 </td>
               </tr>
             \`).join('');
@@ -1369,6 +1370,7 @@ adminPortalRouter.get("/", (c) => {
                   <button class="btn btn-secondary btn-sm" onclick="editEvent('\${event.id}')">Edit</button>
                   \${event.status === 'active' ? \`<button class="btn btn-warning btn-sm" onclick="completeEvent('\${event.id}')">Complete</button>\` : ''}
                   <button class="btn btn-danger btn-sm" onclick="purgeEventData('\${event.id}', '\${escapeHtml(event.venueName).replace(/'/g, "\\\\'")}')">Purge Now</button>
+                  <button class="btn btn-danger btn-sm" onclick="deleteEvent('\${event.id}')">Delete</button>
                 </td>
               </tr>
             \`).join('');
@@ -1585,6 +1587,124 @@ adminPortalRouter.get("/", (c) => {
             loadEvents();
           } catch (err) {
             alert('Error purging participant data');
+          }
+        }
+
+        // Two dialogs on purpose. The first says exactly what is about to be
+        // destroyed; the second stops it being done by reflex. Deleting a team
+        // or an event cascades through every survey answer attached to it and
+        // there is no undo short of last night's backup.
+        function confirmHardDelete(title, lines) {
+          if (!confirm(title + '\\n\\n' + lines.join('\\n') + '\\n\\nThis CANNOT be undone.')) {
+            return false;
+          }
+          const typed = prompt('Type DELETE to confirm.');
+          return typed !== null && typed.trim().toUpperCase() === 'DELETE';
+        }
+
+        async function deleteEvent(eventId) {
+          let impact;
+          try {
+            const res = await fetch(API_BASE + '/events/' + eventId + '/deletion-impact');
+            const data = await res.json();
+            if (data.error) {
+              alert('Could not check the event: ' + data.error.message);
+              return;
+            }
+            impact = data.data;
+          } catch (err) {
+            console.error('Error loading deletion impact:', err);
+            alert('Could not check the event before deleting. Nothing was changed.');
+            return;
+          }
+
+          const ok = confirmHardDelete(
+            'Delete the event "' + impact.venueName + '" (' + impact.venueCity + ', ' + impact.venueState + ')?',
+            [
+              'This permanently deletes:',
+              '  - ' + impact.surveyResponseCount + ' survey response(s)',
+              '  - ' + impact.pledgeCount + ' pledge(s)',
+              '  - ' + impact.photoCount + ' photo(s)',
+              '  - ' + impact.externalImportCount + ' imported survey file(s)',
+              '',
+              'To erase photos and email addresses but KEEP the survey answers,',
+              'press "Purge Now" instead.'
+            ]
+          );
+          if (!ok) return;
+
+          try {
+            const res = await fetch(API_BASE + '/events/' + eventId + '?confirm=DELETE', {
+              method: 'DELETE'
+            });
+            const data = await res.json();
+
+            if (data.error) {
+              alert('Could not delete: ' + data.error.message);
+              return;
+            }
+
+            alert('Deleted "' + data.data.venueName + '".');
+            loadEvents();
+          } catch (err) {
+            console.error('Error deleting event:', err);
+            alert('Error deleting event');
+          }
+        }
+
+        async function deleteTeam(teamId) {
+          let impact;
+          try {
+            const res = await fetch(API_BASE + '/teams/' + teamId + '/deletion-impact');
+            const data = await res.json();
+            if (data.error) {
+              alert('Could not check the team: ' + data.error.message);
+              return;
+            }
+            impact = data.data;
+          } catch (err) {
+            console.error('Error loading deletion impact:', err);
+            alert('Could not check the team before deleting. Nothing was changed.');
+            return;
+          }
+
+          const ok = confirmHardDelete(
+            'Delete the team "' + impact.name + '" (' + impact.code + ')?',
+            [
+              'A team owns its events, so this covers EVERY tour date it has',
+              'ever worked - not just the current one.',
+              '',
+              'This permanently deletes:',
+              '  - ' + impact.eventCount + ' event(s)',
+              '  - ' + impact.surveyResponseCount + ' survey response(s)',
+              '  - ' + impact.pledgeCount + ' pledge(s)',
+              '  - ' + impact.photoCount + ' photo(s)',
+              '  - ' + impact.deviceCount + ' paired tablet(s)/phone(s)',
+              '',
+              'Any tablet using this team code will stop working until it is',
+              'set up again with a different code.'
+            ]
+          );
+          if (!ok) return;
+
+          try {
+            const res = await fetch(API_BASE + '/teams/' + teamId + '?confirm=DELETE', {
+              method: 'DELETE'
+            });
+            const data = await res.json();
+
+            if (data.error) {
+              alert('Could not delete: ' + data.error.message);
+              return;
+            }
+
+            alert('Deleted "' + data.data.name + '".');
+            // The Events tab is now stale — this team's events went with it.
+            loadTeams();
+            loadEvents();
+          } catch (err) {
+            console.error('Error deleting team:', err);
+            alert('Error deleting team');
           }
         }
 
