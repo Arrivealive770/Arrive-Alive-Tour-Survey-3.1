@@ -1,4 +1,7 @@
 import "@vibecodeapp/proxy"; // DO NOT REMOVE OTHERWISE VIBECODE PROXY WILL NOT WORK
+// Must come straight after the proxy import: it undoes the proxy's claim on
+// api.resend.com so pledge emails go to Resend directly. See the file itself.
+import "./lib/outbound-email-direct";
 import { Hono } from "hono";
 import { cors } from "hono/cors";
 import { serveStatic } from "hono/bun";
