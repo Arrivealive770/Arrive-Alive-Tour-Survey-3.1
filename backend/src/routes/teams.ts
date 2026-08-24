@@ -34,6 +34,24 @@ teamsRouter.get("/:id", async (c) => {
   return c.json({ data: team });
 });
 
+// GET /api/teams/:id/access - Can this team's devices open the Admin section?
+// Deliberately tiny: the app re-checks this every time Admin is opened, so a
+// team that loses admin rights loses them on the next tap, not the next setup.
+teamsRouter.get("/:id/access", async (c) => {
+  const id = c.req.param("id");
+
+  const team = await prisma.team.findUnique({
+    where: { id },
+    select: { id: true, name: true, code: true, isAdminTeam: true },
+  });
+
+  if (!team) {
+    return c.json({ error: { message: "Team not found", code: "NOT_FOUND" } }, 404);
+  }
+
+  return c.json({ data: team });
+});
+
 // GET /api/teams/code/:code - Get team by short code (for device pairing)
 // Checks both tablet code and phone code
 teamsRouter.get("/code/:code", async (c) => {
@@ -71,6 +89,9 @@ const createTeamSchema = z.object({
   name: z.string().min(1, "Name is required"),
   code: z.string().min(2, "Code must be at least 2 characters").max(10, "Code must be at most 10 characters"),
   phoneCode: z.string().min(2, "Phone code must be at least 2 characters").max(10, "Phone code must be at most 10 characters").optional(),
+  // Whether devices on this team may open the app's Admin section. Off unless
+  // asked for, so a new field team never gets admin by accident.
+  isAdminTeam: z.boolean().optional().default(false),
 });
 
 teamsRouter.post(
@@ -112,6 +133,7 @@ teamsRouter.post(
         name: data.name,
         code: data.code.toUpperCase(),
         phoneCode: data.phoneCode?.toUpperCase() || null,
+        isAdminTeam: data.isAdminTeam,
       },
     });
 
@@ -124,6 +146,7 @@ const updateTeamSchema = z.object({
   name: z.string().min(1).optional(),
   code: z.string().min(2).max(10).optional(),
   phoneCode: z.string().min(2).max(10).optional().nullable(),
+  isAdminTeam: z.boolean().optional(),
 });
 
 teamsRouter.put(
@@ -186,6 +209,7 @@ teamsRouter.put(
         ...(data.name && { name: data.name }),
         ...(data.code && { code: data.code.toUpperCase() }),
         ...(data.phoneCode !== undefined && { phoneCode: data.phoneCode?.toUpperCase() || null }),
+        ...(data.isAdminTeam !== undefined && { isAdminTeam: data.isAdminTeam }),
       },
     });
 

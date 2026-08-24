@@ -71,6 +71,11 @@ model Team {
   name      String
   code      String   @unique // Unique short code for the team (tablets)
   phoneCode String?  @unique // Separate code for phone devices
+  // Only teams marked as admin teams can open the Admin section in the app.
+  // Off by default: a field team's tablet joins with a team code and must not
+  // be able to reach events, devices, results or the data wipe. Designated in
+  // the admin portal's Teams tab.
+  isAdminTeam Boolean @default(false)
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 

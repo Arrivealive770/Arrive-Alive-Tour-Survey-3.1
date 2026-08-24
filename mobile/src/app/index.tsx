@@ -9,6 +9,7 @@ import {
   useDeviceType,
   useTeamId,
 } from '@/lib/state/device-store';
+import { useTeamAdminAccess } from '@/lib/team-access';
 import { cn } from '@/lib/cn';
 
 const AATLogo = require('@/assets/aat-logo.png');
@@ -19,6 +20,9 @@ export default function HomeScreen() {
   const deviceType = useDeviceType();
   const adminPin = useDeviceStore((s) => s.adminPin);
   const reset = useDeviceStore((s) => s.reset);
+  // Only admin teams get the Admin tile. Field teams shouldn't see a door they
+  // can't open (the layout blocks them anyway if they get there another way).
+  const { isAdminTeam } = useTeamAdminAccess();
 
   const [showResetModal, setShowResetModal] = useState(false);
   const [pinInput, setPinInput] = useState('');
@@ -128,19 +132,21 @@ export default function HomeScreen() {
             </Pressable>
           )}
 
-          {/* Admin - PIN protected by the admin layout */}
-          <Pressable
-            onPress={handleOpenAdmin}
-            className="flex-row items-center w-full h-20 px-6 bg-zinc-900 rounded-2xl active:bg-zinc-800"
-          >
-            <View className="w-12 h-12 rounded-full bg-zinc-800 items-center justify-center mr-4">
-              <Settings size={24} color="#fff" />
-            </View>
-            <View className="flex-1">
-              <Text className="text-xl font-bold text-white">Admin</Text>
-              <Text className="text-sm text-zinc-500">Events, devices and results</Text>
-            </View>
-          </Pressable>
+          {/* Admin - admin teams only, then PIN protected by the admin layout */}
+          {isAdminTeam ? (
+            <Pressable
+              onPress={handleOpenAdmin}
+              className="flex-row items-center w-full h-20 px-6 bg-zinc-900 rounded-2xl active:bg-zinc-800"
+            >
+              <View className="w-12 h-12 rounded-full bg-zinc-800 items-center justify-center mr-4">
+                <Settings size={24} color="#fff" />
+              </View>
+              <View className="flex-1">
+                <Text className="text-xl font-bold text-white">Admin</Text>
+                <Text className="text-sm text-zinc-500">Events, devices and results</Text>
+              </View>
+            </Pressable>
+          ) : null}
         </View>
 
         {/* Reset Button - small at bottom */}

@@ -27,6 +27,8 @@ export default function TeamSelectionScreen() {
         teamId: team.id,
         teamCode: team.code,
         codeType: (team.codeType || 'tablet') as CodeType,
+        // Whether this team is allowed into Admin at all.
+        isAdminTeam: !!team.isAdminTeam,
       });
       // Navigate to device config
       router.push('/setup/device-config' as any);

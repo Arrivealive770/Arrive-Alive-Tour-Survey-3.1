@@ -15,6 +15,10 @@ interface DeviceState {
   teamId: string | null;
   teamCode: string | null;
   codeType: CodeType | null; // Which type of code was used to join
+  // Only teams designated as admin teams in the admin portal may open the
+  // Admin section. Remembered here so an offline device still knows, but it is
+  // re-checked with the server every time Admin is opened.
+  isAdminTeam: boolean;
 
   // Event context
   currentEventId: string | null;
@@ -51,6 +55,7 @@ const initialState: DeviceState = {
   teamId: null,
   teamCode: null,
   codeType: null,
+  isAdminTeam: false,
   currentEventId: null,
   picturePledgeEnabled: false,
   currentEventOverlayId: null,
@@ -105,6 +110,7 @@ export const useDeviceStore = create<DeviceState & DeviceActions & DeviceHydrati
         teamId: state.teamId,
         teamCode: state.teamCode,
         codeType: state.codeType,
+        isAdminTeam: state.isAdminTeam,
         adminPin: state.adminPin,
         // The selected event must survive an app restart. Without it a relaunched
         // tablet/phone has no eventId, which silently drops pledges and blocks
@@ -129,6 +135,7 @@ export const useDeviceId = () => useDeviceStore((s) => s.deviceId);
 export const useDeviceType = () => useDeviceStore((s) => s.deviceType);
 export const useTeamId = () => useDeviceStore((s) => s.teamId);
 export const useTeamCode = () => useDeviceStore((s) => s.teamCode);
+export const useIsAdminTeam = () => useDeviceStore((s) => s.isAdminTeam);
 export const useCodeType = () => useDeviceStore((s) => s.codeType);
 export const useCurrentEventId = () => useDeviceStore((s) => s.currentEventId);
 export const useIsKioskMode = () => useDeviceStore((s) => s.isKioskMode);

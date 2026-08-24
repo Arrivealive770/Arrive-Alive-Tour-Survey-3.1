@@ -29,6 +29,8 @@ export interface Team {
   code: string;
   phoneCode: string | null;
   codeType?: 'tablet' | 'phone'; // Indicates which code was used to join
+  /** Only admin teams may open the Admin section in the app. */
+  isAdminTeam?: boolean;
   createdAt: string;
   updatedAt: string;
 }

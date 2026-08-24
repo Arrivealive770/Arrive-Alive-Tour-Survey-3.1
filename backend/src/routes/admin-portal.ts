@@ -491,6 +491,7 @@ adminPortalRouter.get("/", (c) => {
                   <tr>
                     <th>Name</th>
                     <th>Code</th>
+                    <th>App Admin Access</th>
                     <th>Created</th>
                     <th>Actions</th>
                   </tr>
@@ -746,6 +747,17 @@ adminPortalRouter.get("/", (c) => {
             <div class="form-group">
               <label for="teamCode">Team Code (2-10 characters)</label>
               <input type="text" id="teamCode" placeholder="e.g., ALPHA" maxlength="10" required>
+            </div>
+            <div class="form-group">
+              <label style="display: flex; align-items: center; gap: 10px; cursor: pointer;">
+                <input type="checkbox" id="teamIsAdmin" style="width: 18px; height: 18px;">
+                <span>Admin team &mdash; devices on this team can open Admin in the app</span>
+              </label>
+              <p style="color: #888; font-size: 13px; margin-top: 6px;">
+                Leave unticked for field teams. Their tablets and phones can run
+                surveys and pledge photos, but cannot see events, devices,
+                results or the data wipe.
+              </p>
             </div>
             <div class="modal-footer">
               <button type="button" class="btn btn-secondary" onclick="closeTeamModal()">Cancel</button>
@@ -1211,6 +1223,9 @@ adminPortalRouter.get("/", (c) => {
               <tr>
                 <td>\${escapeHtml(team.name)}</td>
                 <td><span class="badge badge-info">\${escapeHtml(team.code)}</span></td>
+                <td>\${team.isAdminTeam
+                  ? '<span class="badge badge-success">Admin team</span>'
+                  : '<span class="badge">Field team</span>'}</td>
                 <td>\${new Date(team.createdAt).toLocaleDateString()}</td>
                 <td class="actions">
                   <button class="btn btn-secondary btn-sm" onclick="editTeam('\${team.id}')">Edit</button>
@@ -1250,6 +1265,7 @@ adminPortalRouter.get("/", (c) => {
           document.getElementById('teamId').value = '';
           document.getElementById('teamName').value = '';
           document.getElementById('teamCode').value = '';
+          document.getElementById('teamIsAdmin').checked = false;
           document.getElementById('teamModalTitle').textContent = 'Add Team';
 
           if (teamId) {
@@ -1258,6 +1274,7 @@ adminPortalRouter.get("/", (c) => {
               document.getElementById('teamId').value = team.id;
               document.getElementById('teamName').value = team.name;
               document.getElementById('teamCode').value = team.code;
+              document.getElementById('teamIsAdmin').checked = !!team.isAdminTeam;
               document.getElementById('teamModalTitle').textContent = 'Edit Team';
             }
           }
@@ -1278,6 +1295,7 @@ adminPortalRouter.get("/", (c) => {
           const id = document.getElementById('teamId').value;
           const name = document.getElementById('teamName').value;
           const code = document.getElementById('teamCode').value;
+          const isAdminTeam = document.getElementById('teamIsAdmin').checked;
 
           try {
             const url = id ? API_BASE + '/teams/' + id : API_BASE + '/teams';
@@ -1286,7 +1304,7 @@ adminPortalRouter.get("/", (c) => {
             const res = await fetch(url, {
               method,
               headers: { 'Content-Type': 'application/json' },
-              body: JSON.stringify({ name, code })
+              body: JSON.stringify({ name, code, isAdminTeam })
             });
 
             const data = await res.json();
