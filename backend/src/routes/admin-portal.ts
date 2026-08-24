@@ -3360,6 +3360,9 @@ adminPortalRouter.get("/", (c) => {
             const data = await res.json();
             const s = data.data;
 
+            // The stored name is lowercase; these are the companies' own spellings.
+            const providerName = s.provider === 'sendgrid' ? 'SendGrid' : 'Resend';
+
             let html = '';
 
             if (!s.configured) {
@@ -3377,7 +3380,7 @@ adminPortalRouter.get("/", (c) => {
             } else {
               html += '<div style="background: #1a3a1a; border-left: 4px solid #28a745; padding: 16px; border-radius: 6px; margin-bottom: 16px;">' +
                 '<strong style="color: #4ade80;">Emails are switched on.</strong>' +
-                '<p style="color: #ccc; margin: 8px 0 0;">Sending through ' + escapeHtml(s.provider) +
+                '<p style="color: #ccc; margin: 8px 0 0;">Sending through ' + providerName +
                 ', checked every 30 seconds. Use the test below to confirm mail actually arrives.</p>' +
                 '</div>';
             }
@@ -3387,8 +3390,30 @@ adminPortalRouter.get("/", (c) => {
 
             if (s.configured) {
               html += '<p style="color: #888; font-size: 13px; margin-bottom: 16px;">' +
-                'This address has to be on a domain you have verified with ' + escapeHtml(s.provider) + '. ' +
+                'This address has to be on a domain you have verified with ' + providerName + '. ' +
                 'If it is not, every email is rejected even though the key is correct — the test below will say so.</p>';
+
+              // The key the server is actually using, shown as the provider's
+              // own dashboard shows it. When a key is refused, the first thing
+              // worth knowing is whether the file holds the key you think it
+              // does — and whether all of it arrived.
+              html += '<p style="color: #888; margin-bottom: 4px;">Key in the settings file</p>' +
+                '<p style="color: #fff; margin-bottom: 8px; font-family: monospace;">' +
+                escapeHtml(s.keyPreview || '') + '&hellip; <span style="color: #888; font-family: inherit;">(' +
+                s.keyLength + ' characters)</span></p>';
+
+              if (s.provider === 'resend') {
+                // Every complete Resend key seen so far is 36 characters.
+                // Treated as a hint, not a verdict: a full-length key can still
+                // be the wrong key, and only the send test settles it.
+                html += s.keyLength < 30
+                  ? '<p style="color: #ffc107; font-size: 13px; margin-bottom: 16px;">' +
+                    'That looks short for a Resend key, which is normally about 36 characters. ' +
+                    'It was probably cut off when it was copied.</p>'
+                  : '<p style="color: #888; font-size: 13px; margin-bottom: 16px;">' +
+                    'That is a normal length for a Resend key. Compare the opening characters against your key list ' +
+                    'at resend.com/api-keys — if no key there starts the same way, this one has been deleted.</p>';
+              }
             }
 
             html += '<div class="stats-grid">' +

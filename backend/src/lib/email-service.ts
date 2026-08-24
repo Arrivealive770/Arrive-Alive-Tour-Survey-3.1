@@ -24,7 +24,21 @@ export interface EmailServiceStatus {
   provider: Provider;
   fromAddress: string;
   fromName: string;
+  /** Opening characters of the configured key, e.g. "re_AbCdEfGh". */
+  keyPreview: string | null;
+  /** Character count of the configured key. */
+  keyLength: number;
 }
+
+/**
+ * How much of an API key may be shown.
+ *
+ * Enough to match against the key list on the provider's dashboard, which
+ * displays a similar prefix, and far too little to authenticate with. Paired
+ * with the length, this answers the two questions a rejected key raises: is it
+ * the same key I think it is, and did the whole thing make it into the file?
+ */
+const KEY_PREVIEW_CHARS = 11;
 
 interface PhotoAttachment {
   filename: string;
@@ -81,19 +95,30 @@ class EmailService {
   /**
    * What the admin portal shows on the Email tab.
    *
-   * Never includes the API key itself — only whether one was found, and the
-   * address it sends from, which is the other half of why mail silently fails
-   * (providers reject a from-address on a domain you have not verified).
+   * Never includes the API key itself — only its opening characters and its
+   * length, plus the address it sends from, which is the other half of why
+   * mail silently fails (providers reject a from-address on a domain you have
+   * not verified).
    */
   getStatus(): EmailServiceStatus {
     if (!this.initialized) {
       this.initialize();
     }
+
+    const key =
+      this.provider === "resend"
+        ? env.RESEND_API_KEY
+        : this.provider === "sendgrid"
+          ? env.SENDGRID_API_KEY
+          : undefined;
+
     return {
       configured: this.provider !== null,
       provider: this.provider,
       fromAddress: env.EMAIL_FROM_ADDRESS,
       fromName: env.EMAIL_FROM_NAME,
+      keyPreview: key ? key.slice(0, KEY_PREVIEW_CHARS) : null,
+      keyLength: key ? key.length : 0,
     };
   }
 
