@@ -47,6 +47,58 @@ export interface EmailServiceStatus {
  */
 const KEY_PREVIEW_CHARS = 11;
 
+/**
+ * Turn a failed provider response into an error that says WHO refused.
+ *
+ * Resend and SendGrid answer every error with JSON carrying a message. A
+ * plain-text or HTML body means something between this computer and the
+ * provider replied instead — a filtering proxy, a security suite inspecting
+ * HTTPS, or a captive portal. Resend's own wording for a bad key is "API key
+ * is invalid"; a bare "unauthorized" is somebody else's.
+ *
+ * Worth separating because the two have opposite fixes and look identical in
+ * raw form. Reading it as a rejected key sends you to re-copy a key that was
+ * never the problem, which is exactly what happened here.
+ */
+function describeProviderFailure(provider: "Resend" | "SendGrid", status: number, raw: string): string {
+  const body = raw.trim();
+
+  let message: string | null = null;
+  if (body.startsWith("{")) {
+    try {
+      const parsed = JSON.parse(body) as {
+        message?: unknown;
+        error?: unknown;
+        errors?: unknown;
+      };
+      if (typeof parsed.message === "string") {
+        message = parsed.message;
+      } else if (typeof parsed.error === "string") {
+        message = parsed.error;
+      } else if (Array.isArray(parsed.errors)) {
+        const first = parsed.errors[0] as { message?: unknown } | undefined;
+        if (first && typeof first.message === "string") {
+          message = first.message;
+        }
+      }
+    } catch {
+      // A body that opens like JSON and does not parse is no more the
+      // provider's than one that never claimed to be.
+    }
+  }
+
+  if (message !== null) {
+    return `${provider} API error (HTTP ${status}): ${message}`;
+  }
+
+  const snippet = body.length > 200 ? `${body.slice(0, 200)}…` : body || "(empty response)";
+  return (
+    `Blocked before reaching ${provider} (HTTP ${status}). The reply did not come from ` +
+    `${provider}, which always answers with JSON. Something on this network answered ` +
+    `instead: ${snippet}`
+  );
+}
+
 interface PhotoAttachment {
   filename: string;
   contentType: string;
@@ -310,7 +362,7 @@ class EmailService {
 
     if (!response.ok) {
       const detail = await response.text().catch(() => "");
-      throw new Error(`Resend API error (HTTP ${response.status}): ${detail}`);
+      throw new Error(describeProviderFailure("Resend", response.status, detail));
     }
   }
 
@@ -350,7 +402,7 @@ class EmailService {
 
     if (!response.ok) {
       const detail = await response.text().catch(() => "");
-      throw new Error(`SendGrid API error (HTTP ${response.status}): ${detail}`);
+      throw new Error(describeProviderFailure("SendGrid", response.status, detail));
     }
   }
 

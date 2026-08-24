@@ -378,6 +378,24 @@ What you might see:
 | Emails are switched on | Press **Send Test**. If the test says it did not send, the message underneath is Resend's own wording — send me that line. |
 | The server is NOT using the key in your settings file | Read the rest of that red box — it names the cause. Either the server wasn't restarted after you saved the file, or a Windows environment variable of the same name is overriding it. |
 | There is an extra settings file: `.env.txt` | Notepad saved your edit to the wrong file. Restart the server and it renames it for you (step 5). |
+| The request never reached Resend | The key is not the problem — something on that network is intercepting the connection. See below. |
+
+**"The request never reached Resend."** Resend always replies with JSON, so a
+reply in any other shape did not come from Resend. Antivirus and security
+suites that inspect secure connections, company firewalls, and guest Wi-Fi
+login pages all do this, and the result reads exactly like a rejected key —
+which sends you off replacing a key that was fine. To confirm it, run this on
+the desktop; it contains no key of any kind:
+
+```powershell
+curl.exe -s -i -X POST https://api.resend.com/emails -H "Content-Type: application/json" -d "{}"
+```
+
+A healthy network answers `server: cloudflare` and
+`{"statusCode":401,"name":"missing_api_key","message":"Missing API Key"}`.
+Anything else — a plain word, a web page, a different `server:` line — is the
+thing blocking your email. Allow `api.resend.com` through it. A phone hotspot
+is the quickest way to prove that is the cause.
 
 **If the key keeps being refused after you've corrected it**, the Email tab
 answers the question directly. It shows the key the server is actually using

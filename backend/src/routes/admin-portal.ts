@@ -3324,6 +3324,16 @@ adminPortalRouter.get("/", (c) => {
           const provider = /sendgrid/i.test(text) ? 'SendGrid' : 'Resend';
           const keysPage = provider === 'Resend' ? 'resend.com/api-keys' : 'your SendGrid dashboard';
 
+          // Checked before the 401 branch on purpose: this message contains a
+          // status code too, and it is the opposite problem. The key is fine;
+          // the request never got out of the building.
+          if (/^Blocked before reaching/i.test(text)) {
+            return 'The request never reached ' + provider + ', so the key is almost certainly not the problem. ' +
+              'Something on this network answered instead — usually antivirus or security software inspecting ' +
+              'secure connections, a company firewall, or a guest Wi-Fi login page. ' +
+              'Try the computer on a different network (a phone hotspot is the quickest test). ' +
+              'If that works, api.resend.com needs to be allowed through whatever is filtering the first network.';
+          }
           if (/HTTP 401|unauthorized|invalid api key|API key is invalid|authorization grant is invalid/i.test(text)) {
             return provider + ' is refusing the key on this server. Keys are shown only once when you create them, ' +
               'so a key that was half-copied, later deleted, or belongs to a different account looks exactly like this. ' +
