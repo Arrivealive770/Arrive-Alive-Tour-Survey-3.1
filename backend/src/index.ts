@@ -159,6 +159,18 @@ for (const ip of localIPv4Addresses()) {
   console.log(`${label}: http://${ip}:${port}/admin`);
 }
 
+// Overlay artwork and finished pledge photos are handed to the tablets as
+// absolute URLs built from BACKEND_URL. Left as localhost, every one of those
+// points the tablet back at itself and the images silently fail to load, which
+// is near-impossible to diagnose from the tablet end. Say so here instead.
+if (env.NODE_ENV === "production" && /localhost|127\.0\.0\.1/.test(env.BACKEND_URL)) {
+  console.warn(
+    `⚠️  BACKEND_URL is "${env.BACKEND_URL}". Photos and overlays will not load on the tablets.\n` +
+      `    Set BACKEND_URL in backend/.env to the address the tablets reach this server on\n` +
+      `    (your Tailscale address, e.g. https://arrivealive.tailXXXX.ts.net), then restart.`
+  );
+}
+
 export default {
   port,
   hostname: "0.0.0.0",

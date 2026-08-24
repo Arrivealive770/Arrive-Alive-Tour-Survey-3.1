@@ -1,6 +1,7 @@
 import { unlink } from "fs/promises";
 import { join } from "path";
 import { prisma } from "../prisma";
+import { deleteStoredFile } from "./file-storage";
 
 /**
  * Participant-data deletion.
@@ -38,8 +39,13 @@ export async function deleteFromRemoteStorage(fileUrl: string): Promise<void> {
 }
 
 /**
- * Remove the image bytes for one photo: the original on local disk and the
- * finished (overlaid) copy in remote storage. Never throws.
+ * Remove the image bytes for one photo: the original and the finished
+ * (overlaid) copy. Never throws.
+ *
+ * Finished photos are written to local disk now, but events collected before
+ * that change have a storage.vibecodeapp.com URL on file, so both are handled.
+ * A purge that silently skipped either one would leave a participant's face on
+ * the server after they had been told it was erased.
  */
 export async function deletePhotoFiles(photo: {
   storageKey: string | null;
@@ -53,6 +59,7 @@ export async function deletePhotoFiles(photo: {
     }
   }
   if (photo.finishedPhotoUrl) {
+    await deleteStoredFile(photo.finishedPhotoUrl);
     await deleteFromRemoteStorage(photo.finishedPhotoUrl);
   }
 }

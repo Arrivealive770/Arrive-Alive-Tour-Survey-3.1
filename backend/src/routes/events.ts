@@ -4,6 +4,7 @@ import { z } from "zod";
 import { prisma } from "../prisma";
 import { purgeEventParticipantData } from "../lib/pledge-privacy";
 import { eventPurgeScheduler } from "../lib/event-purge";
+import { storeFile } from "../lib/file-storage";
 
 const eventsRouter = new Hono();
 
@@ -125,7 +126,10 @@ const createEventSchema = z.object({
     .nullable()
     .optional(),
   surveyTypes: z.array(z.string()).min(1, "At least one survey type is required"),
-  overlayType: z.string().min(1, "Overlay type is required"),
+  // Only meaningful when Picture Pledge is on. A survey-only event has no
+  // photos to brand, and demanding an overlay for one made it impossible to
+  // create any event until artwork had been uploaded.
+  overlayType: z.string().optional().default("default"),
   overlayId: z.string().min(1).optional(),
   picturePledgeEnabled: z.boolean().optional().default(false),
 });
@@ -275,40 +279,21 @@ eventsRouter.post("/:id/overlay", async (c) => {
   }
 
   try {
-    const uploadFormData = new FormData();
-    uploadFormData.append("file", file);
-
-    const uploadResponse = await fetch("https://storage.vibecodeapp.com/v1/files/upload", {
-      method: "POST",
-      body: uploadFormData,
+    // Stored on the server's own disk — see lib/file-storage.ts.
+    const stored = await storeFile({
+      buffer: Buffer.from(await file.arrayBuffer()),
+      preferredName: file.name,
+      contentType: file.type,
     });
-
-    if (!uploadResponse.ok) {
-      console.error("Storage upload failed:", await uploadResponse.text());
-      return c.json(
-        { error: { message: "Failed to upload file to storage", code: "STORAGE_UPLOAD_FAILED" } },
-        500
-      );
-    }
-
-    const uploadResult = (await uploadResponse.json()) as {
-      file: {
-        id: string;
-        originalFilename: string;
-        contentType: string;
-        sizeBytes: number;
-        url: string;
-      };
-    };
 
     const overlay = await prisma.overlay.create({
       data: {
         name: nameRaw?.trim() || `${existingEvent.venueName} overlay`,
-        fileId: uploadResult.file.id,
-        url: uploadResult.file.url,
-        filename: uploadResult.file.originalFilename,
-        contentType: uploadResult.file.contentType,
-        sizeBytes: uploadResult.file.sizeBytes,
+        fileId: stored.id,
+        url: stored.url,
+        filename: stored.originalFilename,
+        contentType: stored.contentType,
+        sizeBytes: stored.sizeBytes,
         isActive: true,
       },
     });

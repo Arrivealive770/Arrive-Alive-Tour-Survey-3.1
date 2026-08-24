@@ -806,10 +806,15 @@ adminPortalRouter.get("/", (c) => {
             </div>
             <div class="form-group">
               <label for="eventOverlay">Photo Overlay</label>
-              <select id="eventOverlay" required>
-                <option value="">Select overlay</option>
+              <!-- Not "required": a survey-only event has no photos to brand,
+                   and this being mandatory meant no event could be created at
+                   all until an overlay had been uploaded. Checked in
+                   handleEventSubmit instead, only when Picture Pledge is on. -->
+              <select id="eventOverlay">
+                <option value="">No overlay</option>
                 <!-- Options will be populated from database -->
               </select>
+              <p style="font-size: 12px; color: #888; margin-top: 8px;">Only needed if Picture Pledge is switched on below.</p>
             </div>
             <div class="form-group">
               <label class="checkbox-item" style="margin-top: 8px;">
@@ -1597,6 +1602,12 @@ adminPortalRouter.get("/", (c) => {
             return;
           }
 
+          // An overlay only matters when photos are being taken.
+          if (picturePledgeEnabled && !overlayType) {
+            alert('Picture Pledge is switched on, so this event needs a photo overlay. Pick one, or upload artwork on the Overlays tab first.');
+            return;
+          }
+
           try {
             const url = id ? API_BASE + '/events/' + id : API_BASE + '/events';
             const method = id ? 'PUT' : 'POST';
@@ -1609,7 +1620,7 @@ adminPortalRouter.get("/", (c) => {
               // Sent as a full ISO timestamp so the server stores the same
               // instant the staff member picked, not a UTC-shifted one.
               eventEndAt: eventEndAtRaw ? new Date(eventEndAtRaw).toISOString() : null,
-              overlayType,
+              overlayType: overlayType || 'default',
               surveyTypes,
               picturePledgeEnabled
             };

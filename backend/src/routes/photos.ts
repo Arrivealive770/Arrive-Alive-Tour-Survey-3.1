@@ -9,6 +9,7 @@ import { randomUUID } from "crypto";
 import sharp from "sharp";
 import { getDeletablePhoneOriginals } from "../lib/photo-cleanup";
 import { deleteFromRemoteStorage, purgeEventPhotos } from "../lib/pledge-privacy";
+import { storeFile, publicUrlFor } from "../lib/file-storage";
 import {
   compositePhoto,
   windowFromOverlay,
@@ -203,7 +204,9 @@ photosRouter.post("/upload", async (c) => {
         teamId,
         eventId,
         storageKey: filename,
-        storageUrl: `/uploads/${filename}`,
+        // Absolute: the tablets render this straight into an <Image>, which
+        // cannot resolve a server-relative path.
+        storageUrl: publicUrlFor(filename),
         overlayType,
         status: "available",
         ...(deviceId && { captureDeviceId: deviceId }),
@@ -352,50 +355,19 @@ photosRouter.post(
           .catch((err) => console.error("[Composite] Failed to cache window:", err));
       }
 
-      // Upload the composited image to storage.vibecodeapp.com
-      const filename = `composited-${randomUUID()}.png`;
-      const blob = new Blob([compositedImage], { type: "image/png" });
-      const file = new File([blob], filename, { type: "image/png" });
-
-      const uploadFormData = new FormData();
-      uploadFormData.append("file", file);
-
-      const uploadResponse = await fetch(
-        "https://storage.vibecodeapp.com/v1/files/upload",
-        {
-          method: "POST",
-          body: uploadFormData,
-        }
-      );
-
-      if (!uploadResponse.ok) {
-        const errorText = await uploadResponse.text();
-        console.error("Storage upload failed:", errorText);
-        return c.json(
-          {
-            error: {
-              message: "Failed to upload composited image to storage",
-              code: "STORAGE_UPLOAD_FAILED",
-            },
-          },
-          500
-        );
-      }
-
-      const uploadResult = (await uploadResponse.json()) as {
-        file: {
-          id: string;
-          originalFilename: string;
-          contentType: string;
-          sizeBytes: number;
-          url: string;
-        };
-      };
+      // The finished pledge photo lands on the server's own disk. This is the
+      // image the participant is emailed, so it has to survive without any
+      // outside storage service — see lib/file-storage.ts.
+      const stored = await storeFile({
+        buffer: compositedImage,
+        preferredName: `composited-${randomUUID()}.png`,
+        contentType: "image/png",
+      });
 
       return c.json({
         data: {
-          compositedUrl: uploadResult.file.url,
-          fileId: uploadResult.file.id,
+          compositedUrl: stored.url,
+          fileId: stored.id,
           originalPhotoUrl: photoUrl,
           overlayId: overlay.id,
           overlayName: overlay.name,

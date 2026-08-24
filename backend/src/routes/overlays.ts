@@ -11,6 +11,7 @@ import {
   DEFAULT_WINDOW,
   type OverlayMode,
 } from "../lib/overlay-frame";
+import { storeFile, deleteStoredFile } from "../lib/file-storage";
 
 const overlaysRouter = new Hono();
 
@@ -156,9 +157,11 @@ overlaysRouter.post("/", async (c) => {
     let mode = requestedMode === "overlay" || requestedMode === "frame" ? requestedMode : "auto";
     let window: { x: number; y: number; w: number; h: number } | null = null;
 
-    try {
-      const imageBuffer = Buffer.from(await file.arrayBuffer());
+    // Read the bytes once: both the mode probe and the save below need them,
+    // and a File can only be streamed a single time.
+    const imageBuffer = Buffer.from(await file.arrayBuffer());
 
+    try {
       if (mode === "auto") {
         mode = await detectMode(imageBuffer);
         console.log(`[Overlay] Auto-detected "${file.name}" as ${mode} mode`);
@@ -171,47 +174,23 @@ overlaysRouter.post("/", async (c) => {
       if (mode === "frame") window = DEFAULT_WINDOW;
     }
 
-    // Upload to storage.vibecodeapp.com
-    const uploadFormData = new FormData();
-    uploadFormData.append("file", file);
-
-    const uploadResponse = await fetch("https://storage.vibecodeapp.com/v1/files/upload", {
-      method: "POST",
-      body: uploadFormData,
+    // Saved to the server's own uploads folder. See lib/file-storage.ts for
+    // why this no longer goes out to Vibecode's storage service.
+    const stored = await storeFile({
+      buffer: imageBuffer,
+      preferredName: file.name,
+      contentType: file.type,
     });
-
-    if (!uploadResponse.ok) {
-      const errorText = await uploadResponse.text();
-      console.error("Storage upload failed:", uploadResponse.status, errorText);
-      return c.json({
-        error: {
-          message: `Storage rejected the file (${uploadResponse.status})${
-            errorText ? `: ${errorText.slice(0, 200)}` : ""
-          }`,
-          code: "STORAGE_UPLOAD_FAILED"
-        }
-      }, 502);
-    }
-
-    const uploadResult = await uploadResponse.json() as {
-      file: {
-        id: string;
-        originalFilename: string;
-        contentType: string;
-        sizeBytes: number;
-        url: string;
-      };
-    };
 
     // Save overlay info to database
     const overlay = await prisma.overlay.create({
       data: {
         name: name.trim(),
-        fileId: uploadResult.file.id,
-        url: uploadResult.file.url,
-        filename: uploadResult.file.originalFilename,
-        contentType: uploadResult.file.contentType,
-        sizeBytes: uploadResult.file.sizeBytes,
+        fileId: stored.id,
+        url: stored.url,
+        filename: stored.originalFilename,
+        contentType: stored.contentType,
+        sizeBytes: stored.sizeBytes,
         isActive: true,
         mode,
         ...(window && {
@@ -406,20 +385,11 @@ overlaysRouter.delete("/:id", async (c) => {
     return c.json({ error: { message: "Overlay not found", code: "NOT_FOUND" } }, 404);
   }
 
-  try {
-    // Delete from storage.vibecodeapp.com
-    const deleteResponse = await fetch(`https://storage.vibecodeapp.com/v1/files/${existingOverlay.fileId}`, {
-      method: "DELETE",
-    });
-
-    if (!deleteResponse.ok) {
-      console.error("Failed to delete file from storage:", await deleteResponse.text());
-      // Continue with database deletion even if storage deletion fails
-    }
-  } catch (error) {
-    console.error("Error deleting from storage:", error);
-    // Continue with database deletion even if storage deletion fails
-  }
+  // Remove the artwork from disk. Best-effort by design: the overlay record
+  // goes either way, so a file that is already missing never blocks a delete.
+  // Overlays uploaded before the move to local storage have a remote URL and
+  // no local file; those are simply skipped.
+  await deleteStoredFile(existingOverlay.fileId);
 
   // Delete from database
   await prisma.overlay.delete({
