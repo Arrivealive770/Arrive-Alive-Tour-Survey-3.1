@@ -335,13 +335,29 @@ touring. Option A costs nothing and removes both problems, so prefer it.
 
 `{"status":"ok"}` means you're live.
 
-**6f.** Send yourself one test pledge from a tablet, to your own email address.
+**6f.** Open the admin website and go to the **Email** tab. It says in plain
+words whether this server can send at all, and there's a **Send Test** box —
+type your own address and press it.
 
-Pledge emails still go out through Resend from `noreply@arrivealivetour.com` —
-that part is untouched by this move. This test is only to confirm your Resend
-key made it into the `.env` file correctly.
+Do this before testing from a tablet. A tablet says "Sent!" the moment the
+pledge is saved on the phone, which happens well before anything leaves the
+server — so a tablet test can look perfectly successful while nothing is
+actually going out. The Email tab is the only place that tells you the truth.
 
-Check the email arrives **and that the photo shows up in it**. If the email
+What you might see:
+
+| Message | What to do |
+|---|---|
+| Emails are switched off on this server | Your `.env` file has no Resend key, or Windows saved it as `.env.txt`. Go back to step 4. |
+| A key is set, but sending was not started | You added the key after starting the server. Restart it (step 5). |
+| Emails are switched on | Press **Send Test**. If the test says it did not send, the message underneath is Resend's own wording — send me that line. |
+
+Nothing is ever lost while email is off. Pledges keep queueing, and the moment
+a working key is in place and the server is restarted, everything waiting goes
+out on its own.
+
+Once the test email arrives, send yourself one real pledge from a tablet and
+check the email arrives **and that the photo shows up in it**. If the email
 arrives with no photo, tell me and I'll look at the log.
 
 ---
@@ -377,6 +393,11 @@ Worth knowing:
   ran and every response from all of them, across every tour date. Both ask you
   to type DELETE, and both show you the exact counts first — read them. The
   only way back is last night's backup.
+- **Checking pledge emails are going out**: admin website → **Email** tab. It
+  shows how many were delivered, how many are waiting, and how many failed with
+  the reason. A tablet saying "Sent!" is not proof — this tab is. Worth a glance
+  after the first event of a tour, and any time somebody says they never got
+  their photo.
 - **Photo overlays are per event.** Upload artwork on the **Overlays** tab, then
   pick it in the event. The Events table has an **Overlay** column showing which
   frame each event will really use — check it there rather than trusting the

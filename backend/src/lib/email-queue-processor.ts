@@ -16,6 +16,15 @@ class EmailQueueProcessor {
   private readonly processingIntervalMs = 30000; // 30 seconds
 
   /**
+   * True when the 30-second sweep is actually running. False means queued
+   * pledge emails are sitting still — which is what happens when the server
+   * booted without an email key.
+   */
+  get running(): boolean {
+    return this.isRunning;
+  }
+
+  /**
    * Start the queue processor
    */
   start(): void {

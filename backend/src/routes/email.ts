@@ -1,8 +1,73 @@
 import { Hono } from "hono";
+import { zValidator } from "@hono/zod-validator";
+import { z } from "zod";
 import { emailQueueProcessor } from "../lib/email-queue-processor";
+import { emailService } from "../lib/email-service";
 import { prisma } from "../prisma";
 
 const emailRouter = new Hono();
+
+// GET /api/email/status - Is this server able to send pledge emails at all?
+//
+// Exists because a missing key is completely silent otherwise: the tablet says
+// "Sent!", the pledge is queued, and nothing ever leaves the building. The
+// admin portal shows this on the Email tab so the office can see it.
+emailRouter.get("/status", async (c) => {
+  const status = emailService.getStatus();
+
+  const counts = await prisma.emailQueue.groupBy({
+    by: ["status"],
+    _count: true,
+  });
+  const statusCounts: Record<string, number> = {};
+  for (const item of counts) {
+    statusCounts[item.status] = item._count;
+  }
+
+  // Pledges that arrived with no address (participant tapped Skip) are counted
+  // separately so "nothing was sent" isn't mistaken for a fault.
+  const skippedPledges = await prisma.pledge.count({
+    where: { emailStatus: "skipped" },
+  });
+  const sentPledges = await prisma.pledge.count({
+    where: { emailStatus: "sent" },
+  });
+
+  return c.json({
+    data: {
+      ...status,
+      processorRunning: emailQueueProcessor.running,
+      queue: {
+        pending: statusCounts["pending"] || 0,
+        processing: statusCounts["processing"] || 0,
+        failed: statusCounts["failed"] || 0,
+      },
+      pledges: {
+        delivered: sentPledges,
+        noEmailGiven: skippedPledges,
+      },
+    },
+  });
+});
+
+// POST /api/email/test - Send a test email and report exactly what happened.
+const testEmailSchema = z.object({
+  to: z.string().email("Enter a valid email address"),
+});
+
+emailRouter.post("/test", zValidator("json", testEmailSchema), async (c) => {
+  const { to } = c.req.valid("json");
+  const result = await emailService.sendTestEmail(to);
+
+  if (!result.success) {
+    return c.json(
+      { error: { message: result.error || "Test email failed", code: "TEST_EMAIL_FAILED" } },
+      400
+    );
+  }
+
+  return c.json({ data: { success: true, to } });
+});
 
 // POST /api/email/process - Trigger email queue processing (can be called by cron or manually)
 emailRouter.post("/process", async (c) => {

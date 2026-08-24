@@ -19,6 +19,13 @@ export interface SendEmailResult {
   photoEmbedded: boolean;
 }
 
+export interface EmailServiceStatus {
+  configured: boolean;
+  provider: Provider;
+  fromAddress: string;
+  fromName: string;
+}
+
 interface PhotoAttachment {
   filename: string;
   contentType: string;
@@ -69,6 +76,65 @@ class EmailService {
       this.initialize();
     }
     return this.provider !== null;
+  }
+
+  /**
+   * What the admin portal shows on the Email tab.
+   *
+   * Never includes the API key itself — only whether one was found, and the
+   * address it sends from, which is the other half of why mail silently fails
+   * (providers reject a from-address on a domain you have not verified).
+   */
+  getStatus(): EmailServiceStatus {
+    if (!this.initialized) {
+      this.initialize();
+    }
+    return {
+      configured: this.provider !== null,
+      provider: this.provider,
+      fromAddress: env.EMAIL_FROM_ADDRESS,
+      fromName: env.EMAIL_FROM_NAME,
+    };
+  }
+
+  /**
+   * Send a one-off test email so the office can prove delivery works without
+   * running a pledge through a tablet.
+   *
+   * Deliberately returns the provider's raw error text rather than a friendly
+   * message: "domain is not verified" is the single most common cause of
+   * pledge emails vanishing, and only the provider knows to say it.
+   */
+  async sendTestEmail(to: string): Promise<{ success: boolean; error?: string }> {
+    if (!this.isConfigured()) {
+      return {
+        success: false,
+        error: "No email key is set on this server (RESEND_API_KEY or SENDGRID_API_KEY).",
+      };
+    }
+
+    const subject = "Arrive Alive test email";
+    const html = `<!DOCTYPE html>
+<html>
+<body style="font-family: Arial, sans-serif; line-height: 1.6; color: #333; max-width: 600px; margin: 0 auto; padding: 20px;">
+  <p>This is a test from your Arrive Alive survey server.</p>
+  <p>If you are reading this, pledge photo emails will reach participants.</p>
+</body>
+</html>`;
+
+    try {
+      if (this.provider === "resend") {
+        await this.sendViaResend({ to, subject, html, attachment: null });
+      } else {
+        await this.sendViaSendGrid({ to, subject, html, attachment: null });
+      }
+      console.log(`[EmailService] Test email sent to ${to} via ${this.provider}`);
+      return { success: true };
+    } catch (error) {
+      const message = error instanceof Error ? error.message : "Unknown error";
+      console.error(`[EmailService] Test email to ${to} failed:`, message);
+      return { success: false, error: message };
+    }
   }
 
   /**

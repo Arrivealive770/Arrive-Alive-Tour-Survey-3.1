@@ -474,6 +474,7 @@ adminPortalRouter.get("/", (c) => {
           <div class="tab" data-tab="overlays">Overlays</div>
           <div class="tab" data-tab="surveys">Surveys</div>
           <div class="tab" data-tab="data">Data</div>
+          <div class="tab" data-tab="email">Email</div>
           <div class="tab" data-tab="settings">Settings</div>
         </nav>
 
@@ -677,6 +678,56 @@ adminPortalRouter.get("/", (c) => {
             <div class="card">
               <h2>Surveys by Type</h2>
               <div id="surveysByType"></div>
+            </div>
+          </div>
+
+          <!-- Email Tab -->
+          <div class="tab-content" id="emailTab">
+            <div class="card">
+              <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 20px;">
+                <h2>Pledge Email Delivery</h2>
+                <button class="btn btn-secondary btn-sm" onclick="loadEmailStatus()">Refresh</button>
+              </div>
+              <div id="emailStatusLoading" class="loading">Checking...</div>
+              <div id="emailStatusBox" style="display: none;"></div>
+            </div>
+
+            <div class="card">
+              <h2>Send a Test Email</h2>
+              <p style="color: #888; margin-bottom: 20px;">
+                Sends a plain test message to any address so you can confirm delivery
+                without running a pledge through a tablet. If it fails, the exact
+                reason from the email provider is shown below.
+              </p>
+              <div style="display: flex; gap: 12px; align-items: flex-start; flex-wrap: wrap; max-width: 640px;">
+                <input type="email" id="testEmailAddress" placeholder="you@example.com" style="flex: 1; min-width: 240px;">
+                <button class="btn btn-primary" id="testEmailBtn" onclick="sendTestEmail()">Send Test</button>
+              </div>
+              <div id="testEmailResult" style="display: none; margin-top: 16px;"></div>
+            </div>
+
+            <div class="card">
+              <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 20px;">
+                <h2>Emails Waiting or Stuck</h2>
+                <button class="btn btn-warning btn-sm" onclick="retryFailedEmails()">Retry All Failed</button>
+              </div>
+              <div id="emailQueueLoading" class="loading">Loading...</div>
+              <table id="emailQueueTable" style="display: none;">
+                <thead>
+                  <tr>
+                    <th>Queued</th>
+                    <th>To</th>
+                    <th>Event</th>
+                    <th>Status</th>
+                    <th>Tries</th>
+                    <th>Last Problem</th>
+                  </tr>
+                </thead>
+                <tbody id="emailQueueBody"></tbody>
+              </table>
+              <div id="emailQueueEmpty" class="empty-state" style="display: none;">
+                Nothing waiting. Every pledge email has either been delivered or had no address given.
+              </div>
             </div>
           </div>
 
@@ -1084,6 +1135,10 @@ adminPortalRouter.get("/", (c) => {
                 loadEventsForTeam();
                 loadAnalytics();
                 loadSurveyResponses();
+              }
+              if (tab.dataset.tab === 'email') {
+                loadEmailStatus();
+                loadEmailQueue();
               }
               if (tab.dataset.tab === 'settings') loadAdminUsers();
             });
@@ -3245,6 +3300,198 @@ adminPortalRouter.get("/", (c) => {
             errorEl.textContent = 'Error changing password';
             errorEl.style.display = 'block';
             console.error(err);
+          }
+        }
+
+        // ===== Email =====
+        //
+        // Pledge emails are the one part of the system with no visible result:
+        // the tablet says "Sent!" the moment the pledge is saved, long before
+        // anything leaves the server. If the key is missing or the sending
+        // domain is not verified, every email fails in silence. This tab is
+        // where that becomes visible.
+
+        async function loadEmailStatus() {
+          const loadingEl = document.getElementById('emailStatusLoading');
+          const boxEl = document.getElementById('emailStatusBox');
+          loadingEl.style.display = 'block';
+          boxEl.style.display = 'none';
+
+          try {
+            const res = await fetch(API_BASE + '/email/status');
+            const data = await res.json();
+            const s = data.data;
+
+            let html = '';
+
+            if (!s.configured) {
+              html += '<div style="background: #3a1a1a; border-left: 4px solid #dc3545; padding: 16px; border-radius: 6px; margin-bottom: 16px;">' +
+                '<strong style="color: #ff6b6b;">Emails are switched off on this server.</strong>' +
+                '<p style="color: #ccc; margin: 8px 0 0;">No email key is set, so pledge photos are saved but never sent. ' +
+                'Add your Resend key to the settings file on the server and restart it. ' +
+                'Anything already waiting below will go out automatically once you do — nothing is lost.</p>' +
+                '</div>';
+            } else if (!s.processorRunning) {
+              html += '<div style="background: #3a2f1a; border-left: 4px solid #ffc107; padding: 16px; border-radius: 6px; margin-bottom: 16px;">' +
+                '<strong style="color: #ffc107;">A key is set, but sending was not started.</strong>' +
+                '<p style="color: #ccc; margin: 8px 0 0;">The key was added after the server started. Restart the server to begin sending.</p>' +
+                '</div>';
+            } else {
+              html += '<div style="background: #1a3a1a; border-left: 4px solid #28a745; padding: 16px; border-radius: 6px; margin-bottom: 16px;">' +
+                '<strong style="color: #4ade80;">Emails are switched on.</strong>' +
+                '<p style="color: #ccc; margin: 8px 0 0;">Sending through ' + escapeHtml(s.provider) +
+                ', checked every 30 seconds. Use the test below to confirm mail actually arrives.</p>' +
+                '</div>';
+            }
+
+            html += '<p style="color: #888; margin-bottom: 4px;">Sent from</p>' +
+              '<p style="color: #fff; margin-bottom: 16px;">' + escapeHtml(s.fromName) + ' &lt;' + escapeHtml(s.fromAddress) + '&gt;</p>';
+
+            if (s.configured) {
+              html += '<p style="color: #888; font-size: 13px; margin-bottom: 16px;">' +
+                'This address has to be on a domain you have verified with ' + escapeHtml(s.provider) + '. ' +
+                'If it is not, every email is rejected even though the key is correct — the test below will say so.</p>';
+            }
+
+            html += '<div class="stats-grid">' +
+              '<div class="stat-card"><h3>Delivered</h3><div class="value">' + s.pledges.delivered + '</div></div>' +
+              '<div class="stat-card"><h3>Waiting to send</h3><div class="value">' + s.queue.pending + '</div></div>' +
+              '<div class="stat-card"><h3>Failed</h3><div class="value">' + s.queue.failed + '</div></div>' +
+              '<div class="stat-card"><h3>No email given</h3><div class="value">' + s.pledges.noEmailGiven + '</div></div>' +
+              '</div>';
+
+            boxEl.innerHTML = html;
+            loadingEl.style.display = 'none';
+            boxEl.style.display = 'block';
+          } catch (err) {
+            console.error('Failed to load email status:', err);
+            loadingEl.textContent = 'Could not check email status.';
+          }
+        }
+
+        async function sendTestEmail() {
+          const input = document.getElementById('testEmailAddress');
+          const btn = document.getElementById('testEmailBtn');
+          const resultEl = document.getElementById('testEmailResult');
+          const address = input.value.trim();
+
+          // Checked here as well as on the server: the server answers a bad
+          // address with a raw validation dump, which is no use to anyone.
+          if (!/^[^\\s@]+@[^\\s@]+\\.[^\\s@]+$/.test(address)) {
+            resultEl.innerHTML = '<span style="color: #ff6b6b;">Enter a valid email address first.</span>';
+            resultEl.style.display = 'block';
+            return;
+          }
+
+          btn.disabled = true;
+          btn.textContent = 'Sending...';
+          resultEl.style.display = 'none';
+
+          try {
+            const res = await fetch(API_BASE + '/email/test', {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({ to: address })
+            });
+            const data = await res.json();
+
+            if (res.ok && data.data) {
+              resultEl.innerHTML = '<div style="background: #1a3a1a; border-left: 4px solid #28a745; padding: 16px; border-radius: 6px;">' +
+                '<strong style="color: #4ade80;">Handed to the email provider.</strong>' +
+                '<p style="color: #ccc; margin: 8px 0 0;">Check ' + escapeHtml(address) +
+                ', including the junk folder. If it never arrives, the provider accepted it but did not deliver it — check your account there.</p>' +
+                '</div>';
+            } else {
+              // The provider's own wording is the useful part. "domain is not
+              // verified" and "API key is invalid" are the two that matter and
+              // neither is guessable from a generic failure message.
+              resultEl.innerHTML = '<div style="background: #3a1a1a; border-left: 4px solid #dc3545; padding: 16px; border-radius: 6px;">' +
+                '<strong style="color: #ff6b6b;">It did not send.</strong>' +
+                '<p style="color: #ccc; margin: 8px 0 0; word-break: break-word;">' +
+                escapeHtml(data.error && data.error.message ? data.error.message : 'Unknown problem') + '</p>' +
+                '</div>';
+            }
+            resultEl.style.display = 'block';
+          } catch (err) {
+            console.error('Test email failed:', err);
+            resultEl.innerHTML = '<span style="color: #ff6b6b;">Could not reach the server.</span>';
+            resultEl.style.display = 'block';
+          } finally {
+            btn.disabled = false;
+            btn.textContent = 'Send Test';
+          }
+        }
+
+        async function loadEmailQueue() {
+          const loadingEl = document.getElementById('emailQueueLoading');
+          const tableEl = document.getElementById('emailQueueTable');
+          const emptyEl = document.getElementById('emailQueueEmpty');
+          const bodyEl = document.getElementById('emailQueueBody');
+
+          loadingEl.style.display = 'block';
+          tableEl.style.display = 'none';
+          emptyEl.style.display = 'none';
+
+          try {
+            const res = await fetch(API_BASE + '/email/queue/items?limit=50');
+            const data = await res.json();
+            const items = data.data || [];
+
+            loadingEl.style.display = 'none';
+
+            if (items.length === 0) {
+              emptyEl.style.display = 'block';
+              return;
+            }
+
+            bodyEl.innerHTML = items.map(item => {
+              const badge = item.status === 'failed'
+                ? '<span class="badge badge-danger">Failed</span>'
+                : item.status === 'processing'
+                  ? '<span class="badge badge-warning">Sending</span>'
+                  : '<span class="badge badge-warning">Waiting</span>';
+              const venue = item.pledge && item.pledge.event ? item.pledge.event.venueName : '';
+              return \`
+                <tr>
+                  <td>\${new Date(item.scheduledAt).toLocaleString()}</td>
+                  <td>\${escapeHtml(item.toEmail || '')}</td>
+                  <td>\${escapeHtml(venue || '')}</td>
+                  <td>\${badge}</td>
+                  <td>\${item.attempts} of \${item.maxAttempts}</td>
+                  <td style="max-width: 320px; word-break: break-word; color: #888; font-size: 12px;">\${escapeHtml(item.lastError || '')}</td>
+                </tr>
+              \`;
+            }).join('');
+
+            tableEl.style.display = 'table';
+          } catch (err) {
+            console.error('Failed to load email queue:', err);
+            loadingEl.textContent = 'Could not load the email queue.';
+          }
+        }
+
+        async function retryFailedEmails() {
+          if (!confirm('Try sending all failed emails again?')) return;
+
+          try {
+            const res = await fetch(API_BASE + '/email/retry-failed', { method: 'POST' });
+            const data = await res.json();
+            const count = data.data ? data.data.resetCount : 0;
+
+            if (count === 0) {
+              alert('There are no failed emails to retry.');
+            } else {
+              // Nudge the queue rather than waiting up to 30 seconds, so the
+              // result of the retry is visible straight away.
+              await fetch(API_BASE + '/email/process', { method: 'POST' }).catch(() => {});
+              alert(count + ' email' + (count === 1 ? '' : 's') + ' queued to try again.');
+            }
+
+            loadEmailStatus();
+            loadEmailQueue();
+          } catch (err) {
+            console.error('Retry failed:', err);
+            alert('Could not retry the failed emails.');
           }
         }
 
