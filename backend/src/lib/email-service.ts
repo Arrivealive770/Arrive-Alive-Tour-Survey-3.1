@@ -1,4 +1,5 @@
 import { env } from "../env";
+import { readEnvFileKey, type EnvFileKeyReport } from "./env-file-key";
 
 export interface SendPledgeEmailParams {
   to: string;
@@ -28,6 +29,12 @@ export interface EmailServiceStatus {
   keyPreview: string | null;
   /** Character count of the configured key. */
   keyLength: number;
+  /**
+   * What the settings file on disk says right now, versus what this process is
+   * using. When those disagree, editing the file has had no effect and no
+   * amount of correcting the key will help until the reason is fixed.
+   */
+  envFile: EnvFileKeyReport;
 }
 
 /**
@@ -112,6 +119,11 @@ class EmailService {
           ? env.SENDGRID_API_KEY
           : undefined;
 
+    // Read the file back rather than trusting that it is the source of what we
+    // are holding. On the kiosk it usually is; when it is not, that fact is the
+    // whole answer.
+    const variableName = this.provider === "sendgrid" ? "SENDGRID_API_KEY" : "RESEND_API_KEY";
+
     return {
       configured: this.provider !== null,
       provider: this.provider,
@@ -119,6 +131,7 @@ class EmailService {
       fromName: env.EMAIL_FROM_NAME,
       keyPreview: key ? key.slice(0, KEY_PREVIEW_CHARS) : null,
       keyLength: key ? key.length : 0,
+      envFile: readEnvFileKey(variableName, key, KEY_PREVIEW_CHARS),
     };
   }
 

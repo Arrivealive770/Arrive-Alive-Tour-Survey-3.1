@@ -3349,6 +3349,101 @@ adminPortalRouter.get("/", (c) => {
           return null;
         }
 
+        // Compares the key held by the running server against the key sitting
+        // in the settings file. Silence here means they agree; everything this
+        // renders is a reason that editing the file has not taken effect, which
+        // is otherwise indistinguishable from having typed the key wrong.
+        function renderEnvFileCheck(s) {
+          const f = s.envFile;
+          if (!f) return '';
+
+          const red = 'background: #3a1a1a; border-left: 4px solid #dc3545; padding: 16px; border-radius: 6px; margin-bottom: 16px;';
+          const amber = 'background: #3a2f1a; border-left: 4px solid #ffc107; padding: 16px; border-radius: 6px; margin-bottom: 16px;';
+          const body = 'color: #ccc; margin: 8px 0 0;';
+          let html = '';
+
+          // Notepad appends .txt unless "Save as type" is changed, and Windows
+          // hides known extensions, so the wrong file looks like the right one.
+          const notepadFiles = (f.strayFiles || []).filter(function (n) {
+            return /\.(txt|rtf)$/i.test(n);
+          });
+          if (notepadFiles.length) {
+            html += '<div style="' + amber + '"><strong style="color: #ffc107;">There is an extra settings file: ' +
+              escapeHtml(notepadFiles.join(', ')) + '</strong>' +
+              '<p style="' + body + '">The server only reads the one called <strong>.env</strong>. ' +
+              "If you edited the file above by mistake, your key went somewhere nothing reads. " +
+              'Restarting the server renames it automatically.</p></div>';
+          }
+
+          if (!f.exists) {
+            return html + '<div style="' + red + '"><strong style="color: #ff6b6b;">The settings file is missing.</strong>' +
+              '<p style="' + body + '">Nothing was found at ' + escapeHtml(f.path) + '. See step 4 of the desktop guide.</p></div>';
+          }
+
+          if (f.occurrences === 0) {
+            return html + '<div style="' + amber + '"><strong style="color: #ffc107;">The settings file has no key line in it.</strong>' +
+              '<p style="' + body + '">' + escapeHtml(f.path) + " doesn't contain a line starting with " +
+              (s.provider === 'sendgrid' ? 'SENDGRID_API_KEY' : 'RESEND_API_KEY') +
+              '. The key the server is using came from somewhere else.</p></div>';
+          }
+
+          if (!f.matchesActive) {
+            html += '<div style="' + red + '"><strong style="color: #ff6b6b;">The server is NOT using the key in your settings file.</strong>' +
+              '<p style="' + body + '">The file holds a different key (' +
+              escapeHtml(f.keyPreview || '') + '&hellip;, ' + f.keyLength + ' characters) from the one shown above. ' +
+              'Until that is fixed, correcting the key in the file changes nothing.</p>';
+
+            if (f.editedSinceStart) {
+              html += '<p style="' + body + '"><strong>Cause: the server has not been restarted.</strong> ' +
+                'You saved the file at ' + formatWhen(f.modifiedAt) + ', but this server started at ' +
+                formatWhen(f.serverStartedAt) + ' and still has the old key in memory. Restart it.</p>';
+            } else {
+              html += '<p style="' + body + '"><strong>Cause: something on this computer is overriding the file.</strong> ' +
+                'The file was last saved at ' + formatWhen(f.modifiedAt) + ', before this server started at ' +
+                formatWhen(f.serverStartedAt) + " — so a restart will not help. Almost always this is a Windows " +
+                'environment variable with the same name, which wins over the file every time.</p>' +
+                '<p style="' + body + '">To clear it: press the Windows key, type <strong>environment variables</strong>, ' +
+                'open <strong>Edit the system environment variables</strong>, click <strong>Environment Variables</strong>, ' +
+                'look for <strong>' + (s.provider === 'sendgrid' ? 'SENDGRID_API_KEY' : 'RESEND_API_KEY') +
+                '</strong> in both lists, select it, click <strong>Delete</strong>, then <strong>OK</strong>. ' +
+                'Restart the server afterwards.</p>';
+            }
+            if (f.hasStrayQuotes) {
+              html += '<p style="' + body + '">The key in the file also has a space or a quote mark inside it. ' +
+                'It should sit between the two quote marks with nothing else.</p>';
+            }
+            return html + '</div>';
+          }
+
+          // File and server agree. Only worth saying anything if the file has a
+          // problem the provider would report as a plain "unauthorized".
+          if (f.occurrences > 1) {
+            html += '<div style="' + amber + '"><strong style="color: #ffc107;">The key is listed ' + f.occurrences +
+              ' times in the settings file.</strong>' +
+              '<p style="' + body + '">The last one wins, so an older line further up is being ignored. ' +
+              'Delete the spare lines to avoid confusion.</p></div>';
+          }
+          if (f.hasStrayQuotes) {
+            html += '<div style="' + amber + '"><strong style="color: #ffc107;">The key has extra characters in it.</strong>' +
+              '<p style="' + body + '">There is a space or a quote mark inside the key itself, which the email company ' +
+              'rejects as if the key were wrong. Open the file and make sure the key sits between the two quote marks ' +
+              'with nothing else.</p></div>';
+          }
+
+          if (!html) {
+            html = '<p style="color: #888; font-size: 13px; margin-bottom: 16px;">' +
+              'This is the key from ' + escapeHtml(f.path) + ', so the file and the server agree.</p>';
+          }
+          return html;
+        }
+
+        // Times come back as ISO strings; show them in the office's own clock.
+        function formatWhen(iso) {
+          if (!iso) return 'an unknown time';
+          const d = new Date(iso);
+          return isNaN(d.getTime()) ? 'an unknown time' : d.toLocaleString();
+        }
+
         async function loadEmailStatus() {
           const loadingEl = document.getElementById('emailStatusLoading');
           const boxEl = document.getElementById('emailStatusBox');
@@ -3397,7 +3492,7 @@ adminPortalRouter.get("/", (c) => {
               // own dashboard shows it. When a key is refused, the first thing
               // worth knowing is whether the file holds the key you think it
               // does — and whether all of it arrived.
-              html += '<p style="color: #888; margin-bottom: 4px;">Key in the settings file</p>' +
+              html += '<p style="color: #888; margin-bottom: 4px;">Key this server is using</p>' +
                 '<p style="color: #fff; margin-bottom: 8px; font-family: monospace;">' +
                 escapeHtml(s.keyPreview || '') + '&hellip; <span style="color: #888; font-family: inherit;">(' +
                 s.keyLength + ' characters)</span></p>';
@@ -3414,6 +3509,8 @@ adminPortalRouter.get("/", (c) => {
                     'That is a normal length for a Resend key. Compare the opening characters against your key list ' +
                     'at resend.com/api-keys — if no key there starts the same way, this one has been deleted.</p>';
               }
+
+              html += renderEnvFileCheck(s);
             }
 
             html += '<div class="stats-grid">' +

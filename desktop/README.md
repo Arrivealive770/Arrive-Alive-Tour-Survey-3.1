@@ -376,6 +376,15 @@ What you might see:
 | Emails are switched off on this server | Your `.env` file has no Resend key, or Windows saved it as `.env.txt`. Go back to step 4. |
 | A key is set, but sending was not started | You added the key after starting the server. Restart it (step 5). |
 | Emails are switched on | Press **Send Test**. If the test says it did not send, the message underneath is Resend's own wording — send me that line. |
+| The server is NOT using the key in your settings file | Read the rest of that red box — it names the cause. Either the server wasn't restarted after you saved the file, or a Windows environment variable of the same name is overriding it. |
+| There is an extra settings file: `.env.txt` | Notepad saved your edit to the wrong file. Restart the server and it renames it for you (step 5). |
+
+**If the key keeps being refused after you've corrected it**, the Email tab
+answers the question directly. It shows the key the server is actually using
+*and* the key sitting in your settings file. When those two disagree, the file
+is not the problem — something is stopping your edit from reaching the server,
+and the red box says which of the two causes it is. Correcting the key again
+won't help until that's dealt with.
 
 Nothing is ever lost while email is off. Pledges keep queueing, and the moment
 a working key is in place and the server is restarted, everything waiting goes
