@@ -37,7 +37,8 @@ interface DeviceActions {
   setDeviceConfig: (config: Partial<DeviceState>) => void;
   setCurrentEvent: (eventId: string | null) => void;
   enterKioskMode: () => void;
-  exitKioskMode: (pin: string) => boolean;
+  /** Leaving kiosk mode is a staff gesture (triple tap), not a PIN check. */
+  exitKioskMode: () => void;
   reset: () => void;
 }
 
@@ -86,13 +87,8 @@ export const useDeviceStore = create<DeviceState & DeviceActions & DeviceHydrati
         set({ isKioskMode: true });
       },
 
-      exitKioskMode: (pin) => {
-        const correctPin = get().adminPin;
-        if (pin === correctPin) {
-          set({ isKioskMode: false });
-          return true;
-        }
-        return false;
+      exitKioskMode: () => {
+        set({ isKioskMode: false });
       },
 
       reset: () => {

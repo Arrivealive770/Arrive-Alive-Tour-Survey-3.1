@@ -1,16 +1,14 @@
-import { useEffect, useState, useRef, useCallback } from 'react';
+import { useEffect, useRef, useCallback } from 'react';
 import { View, Pressable, BackHandler, StatusBar, Platform } from 'react-native';
 import { Stack, useRouter } from 'expo-router';
 import * as KeepAwake from 'expo-keep-awake';
+import * as Haptics from 'expo-haptics';
 import { useDeviceStore } from '@/lib/state/device-store';
-import { KioskExitModal } from '@/components/kiosk';
 
 export default function KioskLayout() {
   const router = useRouter();
-  const adminPin = useDeviceStore((s) => s.adminPin);
   const exitKioskMode = useDeviceStore((s) => s.exitKioskMode);
 
-  const [showExitModal, setShowExitModal] = useState(false);
   const tapCountRef = useRef(0);
   const lastTapRef = useRef<number>(0);
 
@@ -35,7 +33,9 @@ export default function KioskLayout() {
     return () => backHandler.remove();
   }, []);
 
-  // Triple tap detection for exit modal
+  // Triple tap the top-right corner leaves kiosk mode straight away — no PIN.
+  // Guests won't find it by accident, and staff don't have to remember a code
+  // in the middle of a busy event.
   const handleCornerTap = useCallback(() => {
     const now = Date.now();
 
@@ -48,16 +48,12 @@ export default function KioskLayout() {
     lastTapRef.current = now;
 
     if (tapCountRef.current >= 3) {
-      setShowExitModal(true);
       tapCountRef.current = 0;
+      Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success).catch(() => {});
+      exitKioskMode();
+      router.replace('/');
     }
-  }, []);
-
-  const handleExitSuccess = useCallback(() => {
-    exitKioskMode(adminPin);
-    setShowExitModal(false);
-    router.replace('/');
-  }, [exitKioskMode, adminPin, router]);
+  }, [exitKioskMode, router]);
 
   return (
     <View className="flex-1 bg-black">
@@ -90,13 +86,6 @@ export default function KioskLayout() {
         <Stack.Screen name="pledge-prompt" />
         <Stack.Screen name="pledge" />
       </Stack>
-
-      <KioskExitModal
-        visible={showExitModal}
-        correctPin={adminPin}
-        onSuccess={handleExitSuccess}
-        onClose={() => setShowExitModal(false)}
-      />
     </View>
   );
 }
