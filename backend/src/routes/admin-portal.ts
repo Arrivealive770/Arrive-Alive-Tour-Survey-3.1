@@ -254,6 +254,16 @@ adminPortalRouter.get("/", (c) => {
           font-size: 14px;
         }
 
+        /* Column headings you can click to sort. */
+        th.sortable {
+          cursor: pointer;
+          user-select: none;
+        }
+
+        th.sortable:hover {
+          color: #fff;
+        }
+
         td {
           color: #e0e0e0;
         }
@@ -649,6 +659,23 @@ adminPortalRouter.get("/", (c) => {
                     <button class="btn btn-secondary btn-sm" onclick="deselectAllEvents()">Clear All</button>
                   </div>
                 </div>
+                <div style="display: flex; gap: 12px; align-items: flex-end; margin-bottom: 12px;">
+                  <div class="form-group" style="flex: 1; margin: 0;">
+                    <label for="eventSearchFilter">Search</label>
+                    <input type="text" id="eventSearchFilter" placeholder="Venue, city or state..." oninput="renderEventsCheckboxList()">
+                  </div>
+                  <div class="form-group" style="margin: 0;">
+                    <label for="eventSortFilter">Sort by</label>
+                    <select id="eventSortFilter" onchange="renderEventsCheckboxList()">
+                      <option value="date-desc">Date (newest first)</option>
+                      <option value="date-asc">Date (oldest first)</option>
+                      <option value="name-asc">Name (A–Z)</option>
+                      <option value="name-desc">Name (Z–A)</option>
+                      <option value="state-asc">State (A–Z)</option>
+                      <option value="state-desc">State (Z–A)</option>
+                    </select>
+                  </div>
+                </div>
                 <div id="eventsCheckboxList" style="max-height: 200px; overflow-y: auto; background: #1a1a1a; border-radius: 8px; padding: 12px;">
                   <p class="text-muted">Loading events...</p>
                 </div>
@@ -661,10 +688,12 @@ adminPortalRouter.get("/", (c) => {
               <div id="responsesLoading" class="loading">Loading responses...</div>
               <table id="responsesTable" style="display: none;">
                 <thead>
+                  <!-- Click a heading to sort; click again to reverse it. -->
                   <tr>
-                    <th>Date</th>
-                    <th>Team</th>
-                    <th>Event</th>
+                    <th class="sortable" onclick="sortResponsesBy('date')">Date <span id="responsesSortDate"></span></th>
+                    <th class="sortable" onclick="sortResponsesBy('team')">Team <span id="responsesSortTeam"></span></th>
+                    <th class="sortable" onclick="sortResponsesBy('name')">Event <span id="responsesSortName"></span></th>
+                    <th class="sortable" onclick="sortResponsesBy('state')">State <span id="responsesSortState"></span></th>
                     <th>Survey Type</th>
                     <th>Age Range</th>
                     <th>Duration</th>
@@ -672,6 +701,7 @@ adminPortalRouter.get("/", (c) => {
                 </thead>
                 <tbody id="responsesBody"></tbody>
               </table>
+              <p id="responsesTruncated" style="display: none; color: #888; font-size: 12px; margin-top: 12px;"></p>
               <div id="responsesEmpty" class="empty-state" style="display: none;">No survey responses found.</div>
             </div>
 
@@ -880,16 +910,46 @@ adminPortalRouter.get("/", (c) => {
               </div>
             </div>
             <div class="form-group">
-              <label for="eventOverlay">Photo Overlay</label>
-              <!-- Not "required": a survey-only event has no photos to brand,
-                   and this being mandatory meant no event could be created at
-                   all until an overlay had been uploaded. Checked in
-                   handleEventSubmit instead, only when Picture Pledge is on. -->
-              <select id="eventOverlay">
-                <option value="">No overlay</option>
-                <!-- Options will be populated from database -->
-              </select>
-              <p style="font-size: 12px; color: #888; margin-top: 8px;">Only needed if Picture Pledge is switched on below.</p>
+              <label>Photo Overlay</label>
+              <!-- Stock is the default: an event with nothing picked here gets
+                   the standard Arrive Alive frame, so creating an event never
+                   waits on artwork being uploaded first. Custom reveals the
+                   search box and dropdown below. -->
+              <div style="display: flex; gap: 20px; margin-bottom: 12px;">
+                <label class="checkbox-item">
+                  <input type="radio" name="eventOverlaySource" value="stock" checked onchange="onEventOverlaySourceChange()">
+                  Stock overlay
+                </label>
+                <label class="checkbox-item">
+                  <input type="radio" name="eventOverlaySource" value="custom" onchange="onEventOverlaySourceChange()">
+                  Custom overlay
+                </label>
+              </div>
+
+              <div id="stockOverlayInfo" style="display: flex; gap: 12px; align-items: center; background: #252525; border-radius: 8px; padding: 12px;">
+                <img src="/api/overlays/standard/preview" alt="Stock overlay"
+                     style="width: 72px; height: 72px; object-fit: contain; background: #111; border-radius: 6px; border: 1px solid #333;">
+                <div style="font-size: 12px; color: #888;">
+                  <strong style="color: #fff;">Arrive Alive Tour (stock)</strong><br>
+                  The standard branded frame. Used for this event unless you pick custom artwork.
+                </div>
+              </div>
+
+              <div id="customOverlayPicker" style="display: none;">
+                <input type="text" id="eventOverlaySearch" placeholder="Search overlays by name..."
+                       oninput="updateOverlayDropdown()" style="margin-bottom: 8px;">
+                <select id="eventOverlay" onchange="renderEventOverlayPreview()">
+                  <option value="">Select overlay</option>
+                  <!-- Options will be populated from database -->
+                </select>
+                <div id="eventOverlayPreview" style="display: none; margin-top: 12px;">
+                  <img id="eventOverlayPreviewImg" src="" alt="Overlay preview"
+                       style="width: 120px; height: 120px; object-fit: contain; background: #111; border-radius: 6px; border: 1px solid #333;">
+                </div>
+                <p style="font-size: 12px; color: #888; margin-top: 8px;">
+                  Don't see your artwork? Upload it on the Overlays tab first.
+                </p>
+              </div>
             </div>
             <div class="form-group">
               <label class="checkbox-item" style="margin-top: 8px;">
@@ -1472,12 +1532,14 @@ adminPortalRouter.get("/", (c) => {
             return '<span style="color: #666;">No photos</span>';
           }
           const overlay = overlays.find(o => o.id === event.overlayId);
+          // Stock is a deliberate choice now, not a fallback, so it reads as
+          // normal rather than as a warning.
           if (!overlay) {
-            return '<span class="badge badge-warning">Standard frame</span>';
+            return '<span class="badge badge-info">Stock overlay</span>';
           }
           if (!overlay.isActive) {
             return '<span class="badge badge-warning">' + escapeHtml(overlay.name) +
-              ' (inactive — standard frame used)</span>';
+              ' (inactive — stock overlay used)</span>';
           }
           return '<span class="badge badge-success">' + escapeHtml(overlay.name) + '</span>';
         }
@@ -1563,7 +1625,10 @@ adminPortalRouter.get("/", (c) => {
           document.getElementById('eventVenueState').value = '';
           document.getElementById('eventDate').value = '';
           document.getElementById('eventEndAt').value = '';
+          document.getElementById('eventOverlaySearch').value = '';
           document.getElementById('eventOverlay').value = '';
+          // New events default to the stock frame.
+          setEventOverlaySource('stock');
           document.getElementById('eventStatus').value = 'active';
           document.getElementById('eventStatusGroup').style.display = 'none';
           document.getElementById('eventPicturePledge').checked = false;
@@ -1591,7 +1656,9 @@ adminPortalRouter.get("/", (c) => {
               // Read back from overlayId, matching what the dropdown stores.
               // Reading overlayType left the box blank on every edit, so
               // re-saving an event quietly wiped its artwork.
+              // No overlayId means this event is on the stock frame.
               document.getElementById('eventOverlay').value = event.overlayId || '';
+              setEventOverlaySource(event.overlayId ? 'custom' : 'stock');
               document.getElementById('eventStatus').value = event.status;
               document.getElementById('eventStatusGroup').style.display = 'block';
               document.getElementById('eventPicturePledge').checked = event.picturePledgeEnabled || false;
@@ -1608,6 +1675,47 @@ adminPortalRouter.get("/", (c) => {
 
         function closeEventModal() {
           document.getElementById('eventModal').classList.remove('active');
+        }
+
+        // Which overlay the event form is currently set to: 'stock' or 'custom'.
+        function getEventOverlaySource() {
+          const picked = document.querySelector('input[name="eventOverlaySource"]:checked');
+          return picked ? picked.value : 'stock';
+        }
+
+        function setEventOverlaySource(source) {
+          document.querySelectorAll('input[name="eventOverlaySource"]').forEach(radio => {
+            radio.checked = radio.value === source;
+          });
+          onEventOverlaySourceChange();
+        }
+
+        // Show the stock blurb or the custom search + dropdown, never both.
+        function onEventOverlaySourceChange() {
+          const custom = getEventOverlaySource() === 'custom';
+          document.getElementById('stockOverlayInfo').style.display = custom ? 'none' : 'flex';
+          document.getElementById('customOverlayPicker').style.display = custom ? 'block' : 'none';
+          if (custom) {
+            updateOverlayDropdown();
+            renderEventOverlayPreview();
+          }
+        }
+
+        // Thumbnail of the picked artwork, so a wrong pick is caught in the
+        // form rather than on a tablet at the venue.
+        function renderEventOverlayPreview() {
+          const overlayId = document.getElementById('eventOverlay').value;
+          const wrap = document.getElementById('eventOverlayPreview');
+          const img = document.getElementById('eventOverlayPreviewImg');
+
+          if (!overlayId) {
+            wrap.style.display = 'none';
+            img.src = '';
+            return;
+          }
+
+          img.src = API_BASE + '/overlays/' + overlayId + '/preview';
+          wrap.style.display = 'block';
         }
 
         function editEvent(eventId) {
@@ -1824,7 +1932,13 @@ adminPortalRouter.get("/", (c) => {
           // reaching the phones: the server resolves artwork through the
           // overlayId relation, which stayed empty, so every event silently
           // fell back to the standard frame.
-          const overlayId = document.getElementById('eventOverlay').value;
+          // Stock means "no custom artwork": the server resolves an event with
+          // no overlayId to the standard Arrive Alive frame, so this is left
+          // empty rather than pointing at a row.
+          const overlaySource = getEventOverlaySource();
+          const overlayId = overlaySource === 'custom'
+            ? document.getElementById('eventOverlay').value
+            : '';
           const status = document.getElementById('eventStatus').value;
           const picturePledgeEnabled = document.getElementById('eventPicturePledge').checked;
 
@@ -1838,9 +1952,11 @@ adminPortalRouter.get("/", (c) => {
             return;
           }
 
-          // An overlay only matters when photos are being taken.
-          if (picturePledgeEnabled && !overlayId) {
-            alert('Picture Pledge is switched on, so this event needs a photo overlay. Pick one, or upload artwork on the Overlays tab first.');
+          // Picture Pledge no longer blocks on artwork: an event with nothing
+          // picked gets the stock frame. Only an unfinished custom pick is an
+          // error, and only when there are photos to brand.
+          if (picturePledgeEnabled && overlaySource === 'custom' && !overlayId) {
+            alert('Custom overlay is selected but none is picked. Choose one from the list, upload artwork on the Overlays tab, or switch back to Stock overlay.');
             return;
           }
 
@@ -1958,27 +2074,61 @@ adminPortalRouter.get("/", (c) => {
         function updateOverlayDropdown() {
           const select = document.getElementById('eventOverlay');
           const currentValue = select.value;
+          const searchBox = document.getElementById('eventOverlaySearch');
+          const term = (searchBox ? searchBox.value : '').trim().toLowerCase();
+
           select.innerHTML = '<option value="">Select overlay</option>';
 
-          // Add active overlays from database
+          // Add active overlays from database, narrowed by the search box.
+          // A team with dozens of school-specific frames can't scroll a flat
+          // dropdown, so typing filters it.
           const activeOverlays = overlays.filter(o => o.isActive);
-          activeOverlays.forEach(overlay => {
+          const matching = term
+            ? activeOverlays.filter(o => (o.name || '').toLowerCase().includes(term))
+            : activeOverlays;
+
+          // Whatever this event is already on stays pickable even if it has
+          // since been deactivated or is filtered out by the search — losing it
+          // here would quietly move the event onto the stock frame on save.
+          const shown = matching.slice();
+          if (currentValue && !shown.some(o => o.id === currentValue)) {
+            const assigned = overlays.find(o => o.id === currentValue);
+            if (assigned) {
+              shown.unshift({
+                id: assigned.id,
+                name: assigned.name + (assigned.isActive ? '' : ' (inactive)'),
+              });
+            }
+          }
+
+          shown.forEach(overlay => {
             const option = document.createElement('option');
             option.value = overlay.id;
             option.textContent = overlay.name;
             select.appendChild(option);
           });
 
-          // If no overlays exist, show a hint
-          if (activeOverlays.length === 0) {
+          // Say which of the two empty cases this is — nothing uploaded at all,
+          // or nothing matching what was typed. Driven by the search result,
+          // not by the list: the current pick is carried above regardless, and
+          // its presence must not swallow a "nothing matched" message.
+          if (matching.length === 0) {
             const option = document.createElement('option');
             option.value = "";
-            option.textContent = "No overlays available - add one in Overlays tab";
+            option.textContent = activeOverlays.length === 0
+              ? "No overlays available - add one in Overlays tab"
+              : 'No overlays match "' + term + '"';
             option.disabled = true;
             select.appendChild(option);
           }
 
-          select.value = currentValue;
+          // Keep the current pick only if it survived the filter, otherwise the
+          // form would report an overlay that is no longer visible.
+          select.value = shown.some(o => o.id === currentValue) ? currentValue : '';
+
+          // Keep the thumbnail honest — a pick dropped by the filter must not
+          // leave its preview on screen.
+          renderEventOverlayPreview();
         }
 
         // A JPG can't be transparent, so it is applied as a polaroid frame.
@@ -2318,6 +2468,47 @@ adminPortalRouter.get("/", (c) => {
           }
         }
 
+        // Which events are ticked, held here rather than read off the DOM.
+        // Sorting and searching re-render the list, and a tick that only lived
+        // in the markup would vanish with it — silently shrinking the report.
+        let selectedEventIds = new Set();
+
+        // The events matching the search box, in the chosen order.
+        function visibleEventsForData() {
+          const searchBox = document.getElementById('eventSearchFilter');
+          const term = (searchBox ? searchBox.value : '').trim().toLowerCase();
+          const sortBox = document.getElementById('eventSortFilter');
+          const sort = sortBox ? sortBox.value : 'date-desc';
+
+          const matches = term
+            ? allEventsForData.filter(e =>
+                (e.venueName || '').toLowerCase().includes(term) ||
+                (e.venueCity || '').toLowerCase().includes(term) ||
+                (e.venueState || '').toLowerCase().includes(term))
+            : allEventsForData.slice();
+
+          // Case-insensitive so "austin high" and "Austin High" sort together.
+          const byName = (a, b) =>
+            (a.venueName || '').localeCompare(b.venueName || '', undefined, { sensitivity: 'base' });
+          const byDate = (a, b) => new Date(a.eventDate) - new Date(b.eventDate);
+          // Within a state, keep venues alphabetical — otherwise every event in
+          // TX comes back in an arbitrary order.
+          const byState = (a, b) =>
+            (a.venueState || '').localeCompare(b.venueState || '', undefined, { sensitivity: 'base' })
+            || byName(a, b);
+
+          const comparators = {
+            'date-desc': (a, b) => byDate(b, a),
+            'date-asc': byDate,
+            'name-asc': byName,
+            'name-desc': (a, b) => byName(b, a),
+            'state-asc': byState,
+            'state-desc': (a, b) => byState(b, a),
+          };
+
+          return matches.sort(comparators[sort] || comparators['date-desc']);
+        }
+
         function renderEventsCheckboxList() {
           const container = document.getElementById('eventsCheckboxList');
 
@@ -2327,9 +2518,17 @@ adminPortalRouter.get("/", (c) => {
             return;
           }
 
-          container.innerHTML = allEventsForData.map(event => \`
+          const visible = visibleEventsForData();
+
+          if (visible.length === 0) {
+            container.innerHTML = '<p class="text-muted">No events match your search.</p>';
+            updateSelectedEventsCount();
+            return;
+          }
+
+          container.innerHTML = visible.map(event => \`
             <label class="checkbox-item" style="display: flex; padding: 8px; border-bottom: 1px solid #333; cursor: pointer;">
-              <input type="checkbox" class="event-checkbox" value="\${event.id}" onchange="updateSelectedEventsCount()" style="margin-right: 12px;">
+              <input type="checkbox" class="event-checkbox" value="\${event.id}" \${selectedEventIds.has(event.id) ? 'checked' : ''} onchange="toggleEventSelection('\${event.id}', this.checked)" style="margin-right: 12px;">
               <div style="flex: 1;">
                 <div style="color: #fff;">\${escapeHtml(event.venueName)}</div>
                 <div style="color: #888; font-size: 12px;">\${escapeHtml(event.venueCity)}, \${escapeHtml(event.venueState)} - \${new Date(event.eventDate).toLocaleDateString()}</div>
@@ -2343,24 +2542,45 @@ adminPortalRouter.get("/", (c) => {
           updateSelectedEventsCount();
         }
 
+        function toggleEventSelection(eventId, checked) {
+          if (checked) {
+            selectedEventIds.add(eventId);
+          } else {
+            selectedEventIds.delete(eventId);
+          }
+          updateSelectedEventsCount();
+        }
+
         function getSelectedEventIds() {
-          const checkboxes = document.querySelectorAll('.event-checkbox:checked');
-          return Array.from(checkboxes).map(cb => cb.value);
+          // Only events currently loaded count — switching the team filter
+          // must not leave another team's events in the report.
+          return allEventsForData
+            .filter(e => selectedEventIds.has(e.id))
+            .map(e => e.id);
         }
 
         function updateSelectedEventsCount() {
-          const count = getSelectedEventIds().length;
-          document.getElementById('selectedEventsCount').textContent = count + ' event' + (count !== 1 ? 's' : '') + ' selected';
+          const selected = getSelectedEventIds();
+          const visibleIds = new Set(visibleEventsForData().map(e => e.id));
+          const hidden = selected.filter(id => !visibleIds.has(id)).length;
+
+          let text = selected.length + ' event' + (selected.length !== 1 ? 's' : '') + ' selected';
+          // Say so out loud: a report built from ticks you can't see on screen
+          // is otherwise very confusing.
+          if (hidden > 0) text += ' (' + hidden + ' hidden by search)';
+
+          document.getElementById('selectedEventsCount').textContent = text;
         }
 
         function selectAllEvents() {
-          document.querySelectorAll('.event-checkbox').forEach(cb => cb.checked = true);
-          updateSelectedEventsCount();
+          // "All" means everything on screen, matching what the search shows.
+          visibleEventsForData().forEach(e => selectedEventIds.add(e.id));
+          renderEventsCheckboxList();
         }
 
         function deselectAllEvents() {
-          document.querySelectorAll('.event-checkbox').forEach(cb => cb.checked = false);
-          updateSelectedEventsCount();
+          selectedEventIds.clear();
+          renderEventsCheckboxList();
         }
 
         async function loadSurveyResponses() {
@@ -2378,34 +2598,99 @@ adminPortalRouter.get("/", (c) => {
           try {
             const res = await fetch(url);
             const data = await res.json();
-            const responses = data.data || [];
+            allSurveyResponses = data.data || [];
 
-            if (responses.length === 0) {
+            if (allSurveyResponses.length === 0) {
               document.getElementById('responsesLoading').style.display = 'none';
+              document.getElementById('responsesTruncated').style.display = 'none';
               document.getElementById('responsesEmpty').style.display = 'block';
               return;
             }
 
-            const tbody = document.getElementById('responsesBody');
-            tbody.innerHTML = responses.slice(0, 100).map(r => \`
-              <tr>
-                <td>\${new Date(r.completedAt).toLocaleString()}</td>
-                <td>\${r.team ? escapeHtml(r.team.name) : '-'}</td>
-                <td>\${r.event ? escapeHtml(r.event.venueName) : '-'}</td>
-                <td><span class="badge badge-info">\${escapeHtml(r.surveyTypeSlug)}</span></td>
-                <td>\${r.ageRange || '-'}</td>
-                <td>\${r.durationSeconds ? r.durationSeconds + 's' : '-'}</td>
-              </tr>
-            \`).join('');
-
-            document.getElementById('responsesLoading').style.display = 'none';
-            document.getElementById('responsesTable').style.display = 'table';
+            renderSurveyResponses();
 
             // Also refresh analytics
             loadAnalytics();
           } catch (err) {
             document.getElementById('responsesLoading').textContent = 'Error loading responses';
           }
+        }
+
+        // How the responses table is currently ordered. Newest first to start,
+        // which is what the table did before it could be sorted at all.
+        let allSurveyResponses = [];
+        let responsesSortKey = 'date';
+        let responsesSortDir = 'desc';
+
+        // Same heading clicked twice reverses it; a new heading starts on the
+        // order that reads naturally for that column (A–Z, newest first).
+        function sortResponsesBy(key) {
+          if (responsesSortKey === key) {
+            responsesSortDir = responsesSortDir === 'asc' ? 'desc' : 'asc';
+          } else {
+            responsesSortKey = key;
+            responsesSortDir = key === 'date' ? 'desc' : 'asc';
+          }
+          renderSurveyResponses();
+        }
+
+        function renderSurveyResponses() {
+          const RESPONSE_LIMIT = 100;
+          const text = {
+            date: r => r.completedAt || '',
+            team: r => (r.team && r.team.name) || '',
+            name: r => (r.event && r.event.venueName) || '',
+            state: r => (r.event && r.event.venueState) || '',
+          };
+          const read = text[responsesSortKey] || text.date;
+
+          const sorted = allSurveyResponses.slice().sort((a, b) => {
+            let result;
+            if (responsesSortKey === 'date') {
+              result = new Date(a.completedAt) - new Date(b.completedAt);
+            } else {
+              result = read(a).localeCompare(read(b), undefined, { sensitivity: 'base' });
+              // Ties fall back to newest first so rows don't jump around
+              // between renders.
+              if (result === 0) result = new Date(b.completedAt) - new Date(a.completedAt);
+            }
+            return responsesSortDir === 'asc' ? result : -result;
+          });
+
+          const arrow = responsesSortDir === 'asc' ? '▲' : '▼';
+          ['date', 'team', 'name', 'state'].forEach(key => {
+            const label = key.charAt(0).toUpperCase() + key.slice(1);
+            document.getElementById('responsesSort' + label).textContent =
+              responsesSortKey === key ? arrow : '';
+          });
+
+          const tbody = document.getElementById('responsesBody');
+          tbody.innerHTML = sorted.slice(0, RESPONSE_LIMIT).map(r => \`
+            <tr>
+              <td>\${new Date(r.completedAt).toLocaleString()}</td>
+              <td>\${r.team ? escapeHtml(r.team.name) : '-'}</td>
+              <td>\${r.event ? escapeHtml(r.event.venueName) : '-'}</td>
+              <td>\${r.event && r.event.venueState ? escapeHtml(r.event.venueState) : '-'}</td>
+              <td><span class="badge badge-info">\${escapeHtml(r.surveyTypeSlug)}</span></td>
+              <td>\${r.ageRange || '-'}</td>
+              <td>\${r.durationSeconds ? r.durationSeconds + 's' : '-'}</td>
+            </tr>
+          \`).join('');
+
+          // The table has always shown at most 100 rows. Say so, rather than
+          // letting it look like the whole data set.
+          const truncated = document.getElementById('responsesTruncated');
+          if (sorted.length > RESPONSE_LIMIT) {
+            truncated.textContent = 'Showing the first ' + RESPONSE_LIMIT + ' of ' +
+              sorted.length + ' responses. Narrow the filters above to see the rest.';
+            truncated.style.display = 'block';
+          } else {
+            truncated.style.display = 'none';
+          }
+
+          document.getElementById('responsesLoading').style.display = 'none';
+          document.getElementById('responsesEmpty').style.display = 'none';
+          document.getElementById('responsesTable').style.display = 'table';
         }
 
         async function exportPieChartReport() {

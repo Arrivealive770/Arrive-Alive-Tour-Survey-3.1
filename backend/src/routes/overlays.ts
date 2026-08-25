@@ -12,9 +12,37 @@ import {
   type OverlayMode,
 } from "../lib/overlay-frame";
 import { storeFile, deleteStoredFile } from "../lib/file-storage";
-import { forgetResolvedOverlay } from "../lib/event-overlay";
+import { forgetResolvedOverlay, standardOverlayArtwork } from "../lib/event-overlay";
+import { getStandardOverlayBuffer } from "../lib/standard-overlay";
 
 const overlaysRouter = new Hono();
+
+/**
+ * The photo used to show how a frame will come out. Either a real photo the
+ * caller pointed at, or a stand-in: portrait, obviously fake, with an
+ * off-centre marker so it is clear which part of the photo the window keeps.
+ */
+async function samplePhotoBuffer(photoUrl?: string): Promise<Buffer> {
+  if (photoUrl) {
+    const photoResponse = await fetch(photoUrl);
+    if (!photoResponse.ok) {
+      throw new Error(`Could not fetch photo (${photoResponse.status})`);
+    }
+    return Buffer.from(await photoResponse.arrayBuffer());
+  }
+
+  const sample = `<svg xmlns="http://www.w3.org/2000/svg" width="1080" height="1440">
+    <defs><linearGradient id="g" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0%" stop-color="#3b82f6"/><stop offset="100%" stop-color="#0f172a"/>
+    </linearGradient></defs>
+    <rect width="1080" height="1440" fill="url(#g)"/>
+    <circle cx="540" cy="520" r="180" fill="#ffffff" opacity="0.9"/>
+    <rect x="300" y="760" width="480" height="520" rx="240" fill="#ffffff" opacity="0.9"/>
+    <text x="540" y="1390" font-family="sans-serif" font-size="56" fill="#ffffff"
+          text-anchor="middle" opacity="0.8">SAMPLE PHOTO</text>
+  </svg>`;
+  return sharp(Buffer.from(sample)).png().toBuffer();
+}
 
 const VALID_IMAGE_TYPES = [
   "image/png",
@@ -54,6 +82,34 @@ overlaysRouter.get("/", async (c) => {
   });
 
   return c.json({ data: overlays });
+});
+
+// GET /api/overlays/standard - The stock Arrive Alive frame every event uses
+// unless custom artwork is picked for it. Has no database row, so it is served
+// from here rather than from the list above. Must stay ahead of "/:id".
+overlaysRouter.get("/standard", async (c) => {
+  return c.json({ data: await standardOverlayArtwork() });
+});
+
+// GET /api/overlays/standard/preview - Same sample composite as
+// /:id/preview, but for the stock frame.
+overlaysRouter.get("/standard/preview", async (c) => {
+  try {
+    const artwork = await standardOverlayArtwork();
+    const { buffer, contentType } = await compositePhoto({
+      photoBuffer: await samplePhotoBuffer(c.req.query("photoUrl")),
+      overlayBuffer: await getStandardOverlayBuffer(),
+      mode: artwork.mode,
+      window: artwork.window,
+    });
+
+    return new Response(new Uint8Array(buffer), {
+      headers: { "Content-Type": contentType, "Cache-Control": "no-store" },
+    });
+  } catch (error) {
+    console.error("[Overlay] Standard preview failed:", error);
+    return c.json({ error: { message: "Preview failed", code: "INTERNAL_ERROR" } }, 500);
+  }
 });
 
 // GET /api/overlays/:id - Get single overlay
@@ -330,32 +386,7 @@ overlaysRouter.get("/:id/preview", async (c) => {
     }
     const overlayBuffer = Buffer.from(await overlayResponse.arrayBuffer());
 
-    // Stand-in photo: portrait, obviously fake, with an off-centre marker so
-    // it's clear which part of the photo the window keeps.
-    const photoUrl = c.req.query("photoUrl");
-    let photoBuffer: Buffer;
-    if (photoUrl) {
-      const photoResponse = await fetch(photoUrl);
-      if (!photoResponse.ok) {
-        return c.json(
-          { error: { message: "Could not fetch photo", code: "PHOTO_FETCH_FAILED" } },
-          400
-        );
-      }
-      photoBuffer = Buffer.from(await photoResponse.arrayBuffer());
-    } else {
-      const sample = `<svg xmlns="http://www.w3.org/2000/svg" width="1080" height="1440">
-        <defs><linearGradient id="g" x1="0" y1="0" x2="0" y2="1">
-          <stop offset="0%" stop-color="#3b82f6"/><stop offset="100%" stop-color="#0f172a"/>
-        </linearGradient></defs>
-        <rect width="1080" height="1440" fill="url(#g)"/>
-        <circle cx="540" cy="520" r="180" fill="#ffffff" opacity="0.9"/>
-        <rect x="300" y="760" width="480" height="520" rx="240" fill="#ffffff" opacity="0.9"/>
-        <text x="540" y="1390" font-family="sans-serif" font-size="56" fill="#ffffff"
-              text-anchor="middle" opacity="0.8">SAMPLE PHOTO</text>
-      </svg>`;
-      photoBuffer = await sharp(Buffer.from(sample)).png().toBuffer();
-    }
+    const photoBuffer = await samplePhotoBuffer(c.req.query("photoUrl"));
 
     const { buffer, contentType } = await compositePhoto({
       photoBuffer,
