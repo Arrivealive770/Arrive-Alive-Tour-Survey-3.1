@@ -679,10 +679,16 @@ adminPortalRouter.get("/", (c) => {
                 <div id="eventsCheckboxList" style="max-height: 200px; overflow-y: auto; background: #1a1a1a; border-radius: 8px; padding: 12px;">
                   <p class="text-muted">Loading events...</p>
                 </div>
-                <div style="margin-top: 12px; display: flex; align-items: center; gap: 16px;">
+                <div style="margin-top: 12px; display: flex; align-items: center; gap: 12px; flex-wrap: wrap;">
                   <span id="selectedEventsCount" style="color: #888;">0 events selected</span>
                   <button class="btn btn-primary btn-sm" onclick="exportPieChartReport()">Export Pie Chart Report</button>
+                  <button class="btn btn-secondary btn-sm" onclick="downloadSpreadsheet('summary', this)">Spreadsheet: Totals</button>
+                  <button class="btn btn-secondary btn-sm" onclick="downloadSpreadsheet('responses', this)">Spreadsheet: Every Response</button>
                 </div>
+                <p class="text-muted" style="margin: 8px 0 0; font-size: 12px;">
+                  Spreadsheets open in Excel, Google Sheets or Numbers. "Totals" holds the same
+                  numbers as the pie charts; "Every Response" is one row per survey taken.
+                </p>
               </div>
 
               <div id="responsesLoading" class="loading">Loading responses...</div>
@@ -2691,6 +2697,75 @@ adminPortalRouter.get("/", (c) => {
           document.getElementById('responsesLoading').style.display = 'none';
           document.getElementById('responsesEmpty').style.display = 'none';
           document.getElementById('responsesTable').style.display = 'table';
+        }
+
+        /**
+         * Download the selected events as a spreadsheet.
+         *
+         * kind is 'summary' (the pie chart numbers as a table) or 'responses'
+         * (one row per survey taken). The server builds the file from the same
+         * filters shown on this tab, so a download always matches the screen.
+         */
+        async function downloadSpreadsheet(kind, button) {
+          const teamId = document.getElementById('dataTeamFilter').value;
+          const surveyTypeSlug = document.getElementById('dataSurveyTypeFilter').value;
+          const selectedEventIds = getSelectedEventIds();
+
+          if (selectedEventIds.length === 0) {
+            alert('Please select at least one event to download a spreadsheet.');
+            return;
+          }
+
+          const params = new URLSearchParams();
+          params.set('eventIds', selectedEventIds.join(','));
+          if (teamId) params.set('teamId', teamId);
+          if (surveyTypeSlug) params.set('surveyTypeSlug', surveyTypeSlug);
+
+          const originalText = button ? button.textContent : '';
+          if (button) {
+            button.textContent = 'Preparing...';
+            button.disabled = true;
+          }
+
+          try {
+            const res = await fetch(API_BASE + '/surveys/export/' + kind + '.csv?' + params.toString());
+            if (!res.ok) {
+              throw new Error('Server responded ' + res.status);
+            }
+
+            const csv = await res.text();
+
+            // A file holding nothing but column headings looks like a broken
+            // download rather than an empty selection, so say so instead.
+            const dataRows = csv.split('\\r\\n').filter(line => line.length > 0).length - 1;
+            if (dataRows < 1) {
+              alert('No survey responses match the current filters, so there is nothing to put in a spreadsheet.');
+              return;
+            }
+
+            // Prefer the name the server chose; it carries today's date.
+            let filename = kind === 'summary' ? 'survey-summary.csv' : 'survey-responses.csv';
+            const disposition = res.headers.get('content-disposition') || '';
+            const match = /filename="([^"]+)"/.exec(disposition);
+            if (match) filename = match[1];
+
+            const blobUrl = URL.createObjectURL(new Blob([csv], { type: 'text/csv;charset=utf-8;' }));
+            const link = document.createElement('a');
+            link.href = blobUrl;
+            link.download = filename;
+            document.body.appendChild(link);
+            link.click();
+            document.body.removeChild(link);
+            URL.revokeObjectURL(blobUrl);
+          } catch (error) {
+            console.error('Spreadsheet download failed:', error);
+            alert('Could not build the spreadsheet: ' + error.message);
+          } finally {
+            if (button) {
+              button.textContent = originalText;
+              button.disabled = false;
+            }
+          }
         }
 
         async function exportPieChartReport() {

@@ -2,6 +2,7 @@ import { Hono } from "hono";
 import { zValidator } from "@hono/zod-validator";
 import { z } from "zod";
 import { prisma } from "../prisma";
+import { csvResponse, timestampedFilename } from "../lib/csv";
 
 const surveysRouter = new Hono();
 
@@ -19,8 +20,15 @@ const ANSWER_TYPES = z.enum(["single_choice", "multi_select"]);
  * A single-choice answer is a string; a multi-select answer is an array. Older
  * app builds joined multi answers with ", " before sending, so that shape is
  * accepted too — otherwise those responses would silently count as zero.
+ *
+ * Older builds again sent the whole session object per question —
+ * { questionId, answer, answeredAt } — rather than the answer alone, so the
+ * answer is unwrapped when it arrives wrapped.
  */
 function selectedOptions(answer: unknown, options: string[]): string[] {
+  if (answer && typeof answer === "object" && !Array.isArray(answer) && "answer" in answer) {
+    return selectedOptions((answer as { answer: unknown }).answer, options);
+  }
   if (Array.isArray(answer)) {
     return answer.map((value) => String(value));
   }
@@ -33,6 +41,130 @@ function selectedOptions(answer: unknown, options: string[]): string[] {
   // Not a known option on its own — it may be a legacy joined multi-answer.
   const parts = answer.split(", ").map((part) => part.trim());
   return parts.length > 1 && parts.every((part) => options.includes(part)) ? parts : [answer];
+}
+
+/** The shape of a question as far as counting is concerned. */
+interface CountableQuestion {
+  id: string;
+  orderIndex: number;
+  questionText: string;
+  options: string;
+}
+
+/**
+ * Tally answers per question.
+ *
+ * Shared by the pie chart endpoint and the spreadsheet export so the two can
+ * never disagree: a report and a download that put different numbers against
+ * the same question is worse than having neither.
+ */
+function tallyQuestions(
+  questions: CountableQuestion[],
+  responses: { responses: string }[]
+) {
+  return questions.map((question) => {
+    const options = JSON.parse(question.options) as string[];
+
+    // Count responses for each option
+    const optionCounts: Record<string, number> = {};
+    options.forEach((opt) => {
+      optionCounts[opt] = 0;
+    });
+
+    // Number of PEOPLE who answered this question. For single choice that is
+    // the same as the sum of the counts; for multi select it is not, and
+    // percentages must be out of respondents or they add up past 100%.
+    let respondentCount = 0;
+
+    responses.forEach((response) => {
+      const answers = JSON.parse(response.responses) as Record<string, unknown>;
+      const questionKey = `q${question.orderIndex}`;
+      const picked = selectedOptions(answers[questionKey], options);
+
+      let counted = false;
+      picked.forEach((choice) => {
+        if (optionCounts[choice] !== undefined) {
+          optionCounts[choice]++;
+          counted = true;
+        }
+      });
+
+      if (counted) respondentCount++;
+    });
+
+    const totalResponses = respondentCount;
+
+    return {
+      questionId: question.id,
+      orderIndex: question.orderIndex,
+      questionText: question.questionText,
+      totalResponses,
+      options: options.map((opt) => ({
+        label: opt,
+        count: optionCounts[opt] || 0,
+        percentage: totalResponses > 0
+          ? Math.round((optionCounts[opt] || 0) / totalResponses * 100)
+          : 0,
+      })),
+    };
+  });
+}
+
+/**
+ * The response filter shared by every read endpoint.
+ *
+ * `eventIds` takes a comma separated list because the Data tab lets staff tick
+ * any number of events; `eventId` stays supported for the single-event callers
+ * that were written first.
+ */
+function responseFilter(query: Record<string, string | undefined>) {
+  const { teamId, eventId, surveyTypeSlug, startDate, endDate } = query;
+
+  const eventIds = (query.eventIds ?? "")
+    .split(",")
+    .map((id) => id.trim())
+    .filter(Boolean);
+
+  return {
+    ...(teamId && { teamId }),
+    ...(eventIds.length > 0
+      ? { eventId: { in: eventIds } }
+      : eventId
+        ? { eventId }
+        : {}),
+    ...(surveyTypeSlug && { surveyTypeSlug }),
+    ...(startDate || endDate
+      ? {
+          completedAt: {
+            ...(startDate && { gte: new Date(startDate) }),
+            ...(endDate && { lte: new Date(endDate) }),
+          },
+        }
+      : {}),
+  };
+}
+
+/** Every filter the export endpoints read off the query string. */
+function exportQuery(c: { req: { query: (key: string) => string | undefined } }) {
+  return {
+    teamId: c.req.query("teamId"),
+    eventId: c.req.query("eventId"),
+    eventIds: c.req.query("eventIds"),
+    surveyTypeSlug: c.req.query("surveyTypeSlug"),
+    startDate: c.req.query("startDate"),
+    endDate: c.req.query("endDate"),
+  };
+}
+
+/** "Riverside High — Austin, TX (Mar 4, 2026)" for a spreadsheet cell. */
+function describeEvent(event: {
+  venueName: string;
+  venueCity: string | null;
+  venueState: string | null;
+} | null): string {
+  if (!event) return "";
+  const place = [event.venueCity, event.venueState].filter(Boolean).join(", ");
+  return place ? `${event.venueName} — ${place}` : event.venueName;
 }
 
 // GET /api/surveys/types - List all survey types with questions
@@ -316,26 +448,8 @@ surveysRouter.get("/types/:slug", async (c) => {
 
 // GET /api/surveys/responses - List responses (filter by teamId, eventId, surveyTypeSlug, dateRange)
 surveysRouter.get("/responses", async (c) => {
-  const teamId = c.req.query("teamId");
-  const eventId = c.req.query("eventId");
-  const surveyTypeSlug = c.req.query("surveyTypeSlug");
-  const startDate = c.req.query("startDate");
-  const endDate = c.req.query("endDate");
-
   const responses = await prisma.surveyResponse.findMany({
-    where: {
-      ...(teamId && { teamId }),
-      ...(eventId && { eventId }),
-      ...(surveyTypeSlug && { surveyTypeSlug }),
-      ...(startDate || endDate
-        ? {
-            completedAt: {
-              ...(startDate && { gte: new Date(startDate) }),
-              ...(endDate && { lte: new Date(endDate) }),
-            },
-          }
-        : {}),
-    },
+    where: responseFilter(exportQuery(c)),
     include: {
       team: {
         select: { id: true, name: true, code: true },
@@ -435,10 +549,6 @@ surveysRouter.post(
 // GET /api/surveys/results/:slug - Get aggregated survey results for pie charts
 surveysRouter.get("/results/:slug", async (c) => {
   const slug = c.req.param("slug");
-  const teamId = c.req.query("teamId");
-  const eventId = c.req.query("eventId");
-  const startDate = c.req.query("startDate");
-  const endDate = c.req.query("endDate");
 
   // Get the survey type with questions
   const surveyType = await prisma.surveyType.findUnique({
@@ -457,67 +567,13 @@ surveysRouter.get("/results/:slug", async (c) => {
   // Get all responses for this survey type
   const responses = await prisma.surveyResponse.findMany({
     where: {
+      ...responseFilter(exportQuery(c)),
       surveyTypeSlug: slug,
-      ...(teamId && { teamId }),
-      ...(eventId && { eventId }),
-      ...(startDate || endDate
-        ? {
-            completedAt: {
-              ...(startDate && { gte: new Date(startDate) }),
-              ...(endDate && { lte: new Date(endDate) }),
-            },
-          }
-        : {}),
     },
   });
 
   // Aggregate responses by question
-  const questionResults = surveyType.questions.map((question) => {
-    const options = JSON.parse(question.options) as string[];
-
-    // Count responses for each option
-    const optionCounts: Record<string, number> = {};
-    options.forEach((opt) => {
-      optionCounts[opt] = 0;
-    });
-
-    // Number of PEOPLE who answered this question. For single choice that is
-    // the same as the sum of the counts; for multi select it is not, and
-    // percentages must be out of respondents or they add up past 100%.
-    let respondentCount = 0;
-
-    responses.forEach((response) => {
-      const answers = JSON.parse(response.responses) as Record<string, unknown>;
-      const questionKey = `q${question.orderIndex}`;
-      const picked = selectedOptions(answers[questionKey], options);
-
-      let counted = false;
-      picked.forEach((choice) => {
-        if (optionCounts[choice] !== undefined) {
-          optionCounts[choice]++;
-          counted = true;
-        }
-      });
-
-      if (counted) respondentCount++;
-    });
-
-    const totalResponses = respondentCount;
-
-    return {
-      questionId: question.id,
-      orderIndex: question.orderIndex,
-      questionText: question.questionText,
-      totalResponses,
-      options: options.map((opt, index) => ({
-        label: opt,
-        count: optionCounts[opt] || 0,
-        percentage: totalResponses > 0
-          ? Math.round((optionCounts[opt] || 0) / totalResponses * 100)
-          : 0,
-      })),
-    };
-  });
+  const questionResults = tallyQuestions(surveyType.questions, responses);
 
   return c.json({
     data: {
@@ -531,6 +587,207 @@ surveysRouter.get("/results/:slug", async (c) => {
       questionResults,
     },
   });
+});
+
+/**
+ * Spreadsheet exports for the Data tab.
+ *
+ * The pie chart report answers "what does this look like on a slide". These
+ * answer "give me the numbers so I can work with them" — sponsors and school
+ * districts ask for the underlying data, and until now the only way to hand it
+ * over was to read it off the screen.
+ *
+ * CSV rather than xlsx: it opens natively in Excel, Sheets and Numbers, and it
+ * needs no dependency to produce. Both endpoints take the same filters as the
+ * rest of this router, so a download always matches what the tab is showing.
+ *
+ * These return text/csv, which api-patterns.md exempts from the { data } envelope.
+ */
+
+/** Timestamps as "2026-08-25 14:30", which every spreadsheet parses as a date. */
+function utcTimestamp(value: Date | null): string {
+  if (!value) return "";
+  return `${value.toISOString().slice(0, 10)} ${value.toISOString().slice(11, 16)}`;
+}
+
+/** Dates as "2026-08-25". */
+function utcDate(value: Date | null): string {
+  return value ? value.toISOString().slice(0, 10) : "";
+}
+
+// GET /api/surveys/export/summary.csv - Aggregated answers, the pie chart numbers
+surveysRouter.get("/export/summary.csv", async (c) => {
+  const filter = responseFilter(exportQuery(c));
+
+  const [surveyTypes, responses] = await Promise.all([
+    prisma.surveyType.findMany({
+      include: { questions: { orderBy: { orderIndex: "asc" } } },
+      orderBy: { name: "asc" },
+    }),
+    prisma.surveyResponse.findMany({ where: filter }),
+  ]);
+
+  const rows: unknown[][] = [[
+    "Survey Type",
+    "Question #",
+    "Question",
+    "Answer",
+    "Responses",
+    "% of People Who Answered",
+    "People Who Answered",
+    "Total Surveys Taken",
+  ]];
+
+  for (const surveyType of surveyTypes) {
+    const forType = responses.filter((r) => r.surveyTypeSlug === surveyType.slug);
+
+    // A type nobody answered inside the current filters would only add rows of
+    // zeroes, which reads as "we asked and got nothing" rather than "this was
+    // not part of the selection".
+    if (forType.length === 0) continue;
+
+    for (const question of tallyQuestions(surveyType.questions, forType)) {
+      for (const option of question.options) {
+        rows.push([
+          surveyType.name,
+          question.orderIndex,
+          question.questionText,
+          option.label,
+          option.count,
+          `${option.percentage}%`,
+          question.totalResponses,
+          forType.length,
+        ]);
+      }
+    }
+  }
+
+  return csvResponse(timestampedFilename("survey-summary", new Date()), rows);
+});
+
+// GET /api/surveys/export/responses.csv - One row per survey taken
+surveysRouter.get("/export/responses.csv", async (c) => {
+  const filter = responseFilter(exportQuery(c));
+
+  const [surveyTypes, responses] = await Promise.all([
+    prisma.surveyType.findMany({
+      include: { questions: { orderBy: { orderIndex: "asc" } } },
+      orderBy: { name: "asc" },
+    }),
+    prisma.surveyResponse.findMany({
+      where: filter,
+      include: {
+        team: { select: { name: true, code: true } },
+        event: {
+          select: {
+            venueName: true,
+            venueCity: true,
+            venueState: true,
+            eventDate: true,
+          },
+        },
+      },
+      orderBy: { completedAt: "desc" },
+    }),
+  ]);
+
+  const typesBySlug = new Map(surveyTypes.map((t) => [t.slug, t]));
+  const presentSlugs = new Set(responses.map((r) => r.surveyTypeSlug));
+
+  // One column per question, across every survey type in the results. When the
+  // export covers a single type the headers are just the questions; when it
+  // covers several, they are prefixed so two "How did you hear about us?"
+  // columns can be told apart.
+  const needsTypePrefix = presentSlugs.size > 1;
+  const questionColumns: { key: string; slug: string; header: string }[] = [];
+
+  for (const surveyType of surveyTypes) {
+    if (!presentSlugs.has(surveyType.slug)) continue;
+    for (const question of surveyType.questions) {
+      const label = `Q${question.orderIndex}. ${question.questionText}`;
+      questionColumns.push({
+        key: `q${question.orderIndex}`,
+        slug: surveyType.slug,
+        header: needsTypePrefix ? `${surveyType.name} — ${label}` : label,
+      });
+    }
+  }
+
+  const bodyRows: unknown[][] = [];
+  const extraCells: string[] = [];
+
+  for (const response of responses) {
+    let answers: Record<string, unknown> = {};
+    try {
+      answers = JSON.parse(response.responses) as Record<string, unknown>;
+    } catch {
+      // A row with unreadable answers still belongs in the export — losing the
+      // fact that someone took the survey is worse than losing their answers.
+    }
+
+    const questions = typesBySlug.get(response.surveyTypeSlug)?.questions ?? [];
+    const known = new Set(questions.map((q) => `q${q.orderIndex}`));
+
+    const answerCells = questionColumns.map((column) => {
+      if (column.slug !== response.surveyTypeSlug) return "";
+
+      const question = questions.find((q) => `q${q.orderIndex}` === column.key);
+      const options = question ? (JSON.parse(question.options) as string[]) : [];
+      // "; " not ", " — option labels contain commas of their own.
+      return selectedOptions(answers[column.key], options).join("; ");
+    });
+
+    // Answers whose question no longer exists. Editing a survey type replaces
+    // its questions outright, so older responses can carry keys the current
+    // schema has no column for. Dropping them silently would quietly shrink
+    // the totals, so they ride along in one last column.
+    const orphaned = Object.entries(answers)
+      .filter(([key]) => !known.has(key))
+      .map(([key, value]) => `${key}=${Array.isArray(value) ? value.join("; ") : String(value)}`)
+      .join(" | ");
+    extraCells.push(orphaned);
+
+    bodyRows.push([
+      utcTimestamp(response.completedAt),
+      response.team?.name ?? "",
+      response.team?.code ?? "",
+      describeEvent(response.event),
+      response.event?.venueName ?? "",
+      response.event?.venueCity ?? "",
+      response.event?.venueState ?? "",
+      utcDate(response.event?.eventDate ?? null),
+      typesBySlug.get(response.surveyTypeSlug)?.name ?? response.surveyTypeSlug,
+      response.ageRange ?? "",
+      response.durationSeconds ?? "",
+      ...answerCells,
+    ]);
+  }
+
+  const header: unknown[] = [
+    "Completed At (UTC)",
+    "Team",
+    "Team Code",
+    "Event",
+    "Venue",
+    "City",
+    "State",
+    "Event Date",
+    "Survey Type",
+    "Age Range",
+    "Duration (seconds)",
+    ...questionColumns.map((column) => column.header),
+  ];
+
+  // Only carry the catch-all column when it actually holds something.
+  if (extraCells.some(Boolean)) {
+    header.push("Answers To Removed Questions");
+    bodyRows.forEach((row, index) => row.push(extraCells[index]));
+  }
+
+  return csvResponse(timestampedFilename("survey-responses", new Date()), [
+    header,
+    ...bodyRows,
+  ]);
 });
 
 export { surveysRouter };
