@@ -10,6 +10,7 @@ import { GestureHandlerRootView } from 'react-native-gesture-handler';
 import { KeyboardProvider } from 'react-native-keyboard-controller';
 import { DatabaseProvider } from '@/providers/DatabaseProvider';
 import { SyncProvider } from '@/providers/SyncProvider';
+import { EventWatcherProvider } from '@/providers/EventWatcherProvider';
 
 export const unstable_settings = {
   // Start at the main index which handles routing based on device config
@@ -78,7 +79,9 @@ export default function RootLayout() {
             <KeyboardProvider>
               <ThemeProvider value={colorScheme === 'dark' ? DarkTheme : DefaultTheme}>
                 <StatusBar style={colorScheme === 'dark' ? 'light' : 'dark'} />
-                <Slot />
+                <EventWatcherProvider>
+                  <Slot />
+                </EventWatcherProvider>
               </ThemeProvider>
             </KeyboardProvider>
           </GestureHandlerRootView>

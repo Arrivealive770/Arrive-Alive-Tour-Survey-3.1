@@ -1,13 +1,14 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useMemo } from 'react';
 import { View, Text, Pressable, ActivityIndicator, ScrollView, RefreshControl } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { router } from 'expo-router';
 import { useQuery } from '@tanstack/react-query';
-import { MapPin, Calendar, Check, AlertCircle } from 'lucide-react-native';
+import { MapPin, Calendar, Check, AlertCircle, ChevronLeft, Clock } from 'lucide-react-native';
 import { useDeviceStore } from '@/lib/state/device-store';
 import { useDatabase } from '@/providers/DatabaseProvider';
 import { api } from '@/lib/api/api';
 import { cacheEventOverlay } from '@/lib/overlays/overlay-cache';
+import { isEventOver } from '@/lib/events/event-status';
 import { cn } from '@/lib/cn';
 import type { Event, Team } from '@/lib/api/types';
 
@@ -48,22 +49,31 @@ export default function EventSetupScreen() {
     enabled: !!teamId,
   });
 
+  // Anything already past its end time or day is no longer a place to work,
+  // even if the home office hasn't marked it complete yet. Soonest first, so
+  // the area the crew is heading to next is at the top.
+  const selectableEvents = useMemo(() => {
+    if (!events) return [];
+    return events
+      .filter((event) => !isEventOver(event))
+      .sort((a, b) => new Date(a.eventDate).getTime() - new Date(b.eventDate).getTime());
+  }, [events]);
+
   // Auto-select today's event
   useEffect(() => {
-    if (events && events.length > 0 && !autoSelected) {
-      // Find event for today
-      const todayEvent = events.find(e => isToday(e.eventDate));
+    if (selectableEvents.length > 0 && !autoSelected) {
+      const todayEvent = selectableEvents.find((e) => isToday(e.eventDate));
       if (todayEvent) {
         setSelectedEventId(todayEvent.id);
         setAutoSelected(true);
       }
     }
-  }, [events, autoSelected]);
+  }, [selectableEvents, autoSelected]);
 
   const handleSelectEvent = async () => {
-    if (!selectedEventId || !events) return;
+    if (!selectedEventId) return;
 
-    const event = events.find(e => e.id === selectedEventId);
+    const event = selectableEvents.find((e) => e.id === selectedEventId);
     if (!event) return;
 
     // Store event in device store
@@ -75,6 +85,12 @@ export default function EventSetupScreen() {
       // overlayId, not the legacy overlayType slug — the slug never named the
       // event's real artwork.
       currentEventOverlayId: event.overlayId || null,
+      // Kept so the main menu can name the area, and so the event watcher can
+      // tell that this event is over without needing a connection.
+      currentEventVenue: event.venueName,
+      currentEventDate: event.eventDate,
+      currentEventEndAt: event.eventEndAt ?? null,
+      currentEventStatus: event.status,
     });
 
     // Pull the event's frame down now, while the device is provably online —
@@ -108,17 +124,26 @@ export default function EventSetupScreen() {
     }
   };
 
-  const selectedEvent = events?.find(e => e.id === selectedEventId);
-  const todayEvent = events?.find(e => isToday(e.eventDate));
+  const selectedEvent = selectableEvents.find((e) => e.id === selectedEventId);
+  const todayCount = selectableEvents.filter((e) => isToday(e.eventDate)).length;
 
   return (
     <SafeAreaView className="flex-1 bg-black">
-      <View className="flex-1 px-8 pt-16">
+      <View className="flex-1 px-8 pt-6">
+        {/* Back to the main menu. Switching areas mid-tour is a normal thing to
+            change your mind about, so this must never be a dead end. */}
+        <Pressable
+          onPress={() => router.replace('/' as any)}
+          hitSlop={12}
+          className="flex-row items-center self-start py-2 mb-2 active:opacity-60"
+        >
+          <ChevronLeft size={22} color="#3b82f6" />
+          <Text className="text-blue-500 text-base font-semibold ml-1">Menu</Text>
+        </Pressable>
+
         {/* Header */}
         <View className="mb-6">
-          <Text className="text-4xl font-bold text-white mb-2">
-            Today's Event
-          </Text>
+          <Text className="text-4xl font-bold text-white mb-2">Select Event Area</Text>
           {team ? (
             <Text className="text-lg text-zinc-400">Team: {team.name}</Text>
           ) : null}
@@ -141,115 +166,108 @@ export default function EventSetupScreen() {
               <ActivityIndicator size="large" color="#fff" />
               <Text className="text-zinc-400 mt-4">Loading events...</Text>
             </View>
-          ) : todayEvent ? (
-            // Show today's event prominently
+          ) : selectableEvents.length > 0 ? (
             <View className="mb-6">
-              <Pressable
-                onPress={() => setSelectedEventId(todayEvent.id)}
-                className={cn(
-                  'p-6 rounded-2xl border-2',
-                  selectedEventId === todayEvent.id
-                    ? 'bg-green-500/10 border-green-500'
-                    : 'bg-zinc-900 border-zinc-700'
-                )}
-              >
-                <View className="flex-row items-center mb-3">
-                  <View className="bg-green-500 px-3 py-1 rounded-full">
-                    <Text className="text-white text-sm font-bold">TODAY</Text>
-                  </View>
-                </View>
-                <Text className="text-2xl font-bold text-white mb-2">
-                  {todayEvent.venueName}
-                </Text>
-                <View className="flex-row items-center mb-2">
-                  <MapPin size={16} color="#71717a" />
-                  <Text className="text-zinc-400 ml-2 text-lg">
-                    {todayEvent.venueCity}, {todayEvent.venueState}
+              {todayCount === 0 ? (
+                <View className="flex-row items-center bg-amber-500/10 p-4 rounded-xl mb-6">
+                  <AlertCircle size={24} color="#f59e0b" />
+                  <Text className="text-amber-500 ml-3 flex-1">
+                    No event scheduled for today. Select an upcoming event below.
                   </Text>
                 </View>
-                <View className="flex-row items-center mb-4">
-                  <Calendar size={16} color="#71717a" />
-                  <Text className="text-zinc-400 ml-2">
-                    {new Date(todayEvent.eventDate).toLocaleDateString('en-US', {
-                      weekday: 'long',
-                      month: 'long',
-                      day: 'numeric',
-                    })}
-                  </Text>
-                </View>
-                {/* Survey Types */}
-                <View className="flex-row flex-wrap gap-2">
-                  {todayEvent.surveyTypes.map((type) => (
-                    <View key={type} className="bg-zinc-800 px-3 py-1.5 rounded-lg">
-                      <Text className="text-zinc-300 text-sm capitalize">{type}</Text>
-                    </View>
-                  ))}
-                </View>
-                {selectedEventId === todayEvent.id ? (
-                  <View className="absolute top-4 right-4 w-8 h-8 rounded-full bg-green-500 items-center justify-center">
-                    <Check size={20} color="#fff" />
-                  </View>
-                ) : null}
-              </Pressable>
-            </View>
-          ) : events && events.length > 0 ? (
-            // No event for today, but other events exist
-            <View className="mb-6">
-              <View className="flex-row items-center bg-amber-500/10 p-4 rounded-xl mb-6">
-                <AlertCircle size={24} color="#f59e0b" />
-                <Text className="text-amber-500 ml-3 flex-1">
-                  No event scheduled for today. Select an upcoming event below.
-                </Text>
-              </View>
+              ) : null}
 
-              <Text className="text-zinc-400 text-sm uppercase tracking-wide mb-3">
-                Upcoming Events
-              </Text>
               <View className="gap-3">
-                {events.map((event) => (
-                  <Pressable
-                    key={event.id}
-                    onPress={() => setSelectedEventId(event.id)}
-                    className={cn(
-                      'p-4 rounded-xl border-2',
-                      selectedEventId === event.id
-                        ? 'bg-white/10 border-white'
-                        : 'bg-zinc-900 border-zinc-700'
-                    )}
-                  >
-                    <View className="flex-row items-start justify-between">
-                      <View className="flex-1">
-                        <Text className="text-lg font-bold text-white mb-1">
-                          {event.venueName}
-                        </Text>
-                        <View className="flex-row items-center">
-                          <MapPin size={12} color="#71717a" />
-                          <Text className="text-zinc-500 ml-1 text-sm">
-                            {event.venueCity}, {event.venueState}
-                          </Text>
-                          <Text className="text-zinc-600 mx-2">•</Text>
-                          <Calendar size={12} color="#71717a" />
-                          <Text className="text-zinc-500 ml-1 text-sm">
-                            {new Date(event.eventDate).toLocaleDateString()}
-                          </Text>
-                        </View>
-                      </View>
-                      {selectedEventId === event.id ? (
-                        <View className="w-6 h-6 rounded-full bg-white items-center justify-center">
-                          <Check size={16} color="#000" />
+                {selectableEvents.map((event) => {
+                  const today = isToday(event.eventDate);
+                  const isSelected = selectedEventId === event.id;
+
+                  return (
+                    <Pressable
+                      key={event.id}
+                      onPress={() => setSelectedEventId(event.id)}
+                      className={cn(
+                        'p-5 rounded-2xl border-2',
+                        isSelected
+                          ? today
+                            ? 'bg-green-500/10 border-green-500'
+                            : 'bg-white/10 border-white'
+                          : 'bg-zinc-900 border-zinc-700'
+                      )}
+                    >
+                      {today ? (
+                        <View className="flex-row items-center mb-3">
+                          <View className="bg-green-500 px-3 py-1 rounded-full">
+                            <Text className="text-white text-sm font-bold">TODAY</Text>
+                          </View>
                         </View>
                       ) : null}
-                    </View>
-                  </Pressable>
-                ))}
+
+                      <Text className="text-2xl font-bold text-white mb-2 pr-10">
+                        {event.venueName}
+                      </Text>
+
+                      <View className="flex-row items-center mb-2">
+                        <MapPin size={16} color="#71717a" />
+                        <Text className="text-zinc-400 ml-2 text-base">
+                          {event.venueCity}, {event.venueState}
+                        </Text>
+                      </View>
+
+                      <View className="flex-row items-center flex-wrap mb-4">
+                        <Calendar size={16} color="#71717a" />
+                        <Text className="text-zinc-400 ml-2">
+                          {new Date(event.eventDate).toLocaleDateString('en-US', {
+                            weekday: 'short',
+                            month: 'long',
+                            day: 'numeric',
+                          })}
+                        </Text>
+                        {event.eventEndAt ? (
+                          <>
+                            <Text className="text-zinc-600 mx-2">•</Text>
+                            <Clock size={14} color="#71717a" />
+                            <Text className="text-zinc-400 ml-1.5">
+                              ends{' '}
+                              {new Date(event.eventEndAt).toLocaleTimeString('en-US', {
+                                hour: 'numeric',
+                                minute: '2-digit',
+                              })}
+                            </Text>
+                          </>
+                        ) : null}
+                      </View>
+
+                      {/* Survey Types */}
+                      <View className="flex-row flex-wrap gap-2">
+                        {event.surveyTypes.map((type) => (
+                          <View key={type} className="bg-zinc-800 px-3 py-1.5 rounded-lg">
+                            <Text className="text-zinc-300 text-sm capitalize">{type}</Text>
+                          </View>
+                        ))}
+                      </View>
+
+                      {isSelected ? (
+                        <View
+                          className={cn(
+                            'absolute top-4 right-4 w-8 h-8 rounded-full items-center justify-center',
+                            today ? 'bg-green-500' : 'bg-white'
+                          )}
+                        >
+                          <Check size={20} color={today ? '#fff' : '#000'} />
+                        </View>
+                      ) : null}
+                    </Pressable>
+                  );
+                })}
               </View>
             </View>
           ) : (
             <View className="items-center py-12">
               <AlertCircle size={48} color="#71717a" />
-              <Text className="text-zinc-400 text-lg mt-4 mb-2">No events scheduled</Text>
+              <Text className="text-zinc-400 text-lg mt-4 mb-2">No events available</Text>
               <Text className="text-zinc-500 text-center">
-                Contact your home office to create an event for today.
+                Every scheduled event has finished. Contact your home office to create the next one.
               </Text>
             </View>
           )}

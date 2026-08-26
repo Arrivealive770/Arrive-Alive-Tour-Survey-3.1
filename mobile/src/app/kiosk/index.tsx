@@ -83,6 +83,12 @@ export default function KioskHome() {
               // overlayId is the field the event's real artwork hangs off;
               // overlayType is a legacy slug that never named it.
               currentEventOverlayId: event.overlayId || null,
+              // Refresh the end-of-event details too, so the watcher notices an
+              // event the home office closed while this tablet was asleep.
+              currentEventVenue: event.venueName,
+              currentEventDate: event.eventDate,
+              currentEventEndAt: event.eventEndAt ?? null,
+              currentEventStatus: event.status,
             });
           } catch (err) {
             console.error('[KioskHome] Failed to refresh event from server:', err);

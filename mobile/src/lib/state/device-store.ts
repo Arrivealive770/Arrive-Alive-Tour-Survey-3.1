@@ -22,6 +22,14 @@ interface DeviceState {
 
   // Event context
   currentEventId: string | null;
+  /** Venue name of the running event, so the main menu can name it offline. */
+  currentEventVenue: string | null;
+  /** Event day, ISO. Used to end the event when the calendar day rolls over. */
+  currentEventDate: string | null;
+  /** Scheduled end time, ISO, or null when the event has no scheduled end. */
+  currentEventEndAt: string | null;
+  /** Server status of the running event. 'completed' means it is over. */
+  currentEventStatus: 'active' | 'completed' | null;
 
   // Picture pledge settings for current event
   picturePledgeEnabled: boolean;
@@ -36,6 +44,12 @@ interface DeviceState {
 interface DeviceActions {
   setDeviceConfig: (config: Partial<DeviceState>) => void;
   setCurrentEvent: (eventId: string | null) => void;
+  /**
+   * Forget the running event without touching the team/device pairing, so the
+   * crew lands back on the main menu ready to pick the next area rather than
+   * having to re-enter their team code.
+   */
+  clearCurrentEvent: () => void;
   enterKioskMode: () => void;
   /** Leaving kiosk mode is a staff gesture (triple tap), not a PIN check. */
   exitKioskMode: () => void;
@@ -58,6 +72,10 @@ const initialState: DeviceState = {
   codeType: null,
   isAdminTeam: false,
   currentEventId: null,
+  currentEventVenue: null,
+  currentEventDate: null,
+  currentEventEndAt: null,
+  currentEventStatus: null,
   picturePledgeEnabled: false,
   currentEventOverlayId: null,
   isKioskMode: false,
@@ -81,6 +99,19 @@ export const useDeviceStore = create<DeviceState & DeviceActions & DeviceHydrati
 
       setCurrentEvent: (eventId) => {
         set({ currentEventId: eventId });
+      },
+
+      clearCurrentEvent: () => {
+        set({
+          currentEventId: null,
+          currentEventVenue: null,
+          currentEventDate: null,
+          currentEventEndAt: null,
+          currentEventStatus: null,
+          currentEventOverlayId: null,
+          picturePledgeEnabled: false,
+          isKioskMode: false,
+        });
       },
 
       enterKioskMode: () => {
@@ -112,6 +143,12 @@ export const useDeviceStore = create<DeviceState & DeviceActions & DeviceHydrati
         // tablet/phone has no eventId, which silently drops pledges and blocks
         // photo capture. It mirrors the `current_event` row in SQLite.
         currentEventId: state.currentEventId,
+        // Kept alongside the id so a device with no signal can still tell that
+        // the event is over and offer the next one.
+        currentEventVenue: state.currentEventVenue,
+        currentEventDate: state.currentEventDate,
+        currentEventEndAt: state.currentEventEndAt,
+        currentEventStatus: state.currentEventStatus,
         picturePledgeEnabled: state.picturePledgeEnabled,
         currentEventOverlayId: state.currentEventOverlayId,
         // Don't persist isKioskMode - kiosk should never be locked on cold start
@@ -134,6 +171,7 @@ export const useTeamCode = () => useDeviceStore((s) => s.teamCode);
 export const useIsAdminTeam = () => useDeviceStore((s) => s.isAdminTeam);
 export const useCodeType = () => useDeviceStore((s) => s.codeType);
 export const useCurrentEventId = () => useDeviceStore((s) => s.currentEventId);
+export const useCurrentEventVenue = () => useDeviceStore((s) => s.currentEventVenue);
 export const useIsKioskMode = () => useDeviceStore((s) => s.isKioskMode);
 export const usePicturePledgeEnabled = () => useDeviceStore((s) => s.picturePledgeEnabled);
 export const useCurrentEventOverlayId = () => useDeviceStore((s) => s.currentEventOverlayId);

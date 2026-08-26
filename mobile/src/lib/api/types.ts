@@ -60,6 +60,13 @@ export interface Event {
   venueCity: string;
   venueState: string;
   eventDate: string;
+  /**
+   * Scheduled end of the event. Once this passes the event is over and kiosks
+   * send themselves back to the main menu so the crew can pick the next area.
+   * Null means "no scheduled end" — only an admin marking it completed, or the
+   * calendar day rolling over, ends it.
+   */
+  eventEndAt?: string | null;
   surveyTypes: SurveyTypeSlug[];
   overlayType: string; // Now an overlay ID
   overlayId?: string | null; // Assigned custom overlay id

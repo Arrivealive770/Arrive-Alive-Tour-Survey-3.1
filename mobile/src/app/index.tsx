@@ -1,8 +1,18 @@
 import { useState } from 'react';
-import { View, Text, Pressable, TextInput, Modal, Image, ActivityIndicator } from 'react-native';
+import { View, Text, Pressable, TextInput, Modal, Image, ActivityIndicator, ScrollView } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
-import { router, Redirect } from 'expo-router';
-import { Play, RefreshCw, Camera, Tablet, Settings } from 'lucide-react-native';
+import { router, Redirect, useLocalSearchParams } from 'expo-router';
+import {
+  Play,
+  RefreshCw,
+  Camera,
+  Tablet,
+  Settings,
+  MapPin,
+  CalendarClock,
+  ChevronRight,
+  CheckCircle2,
+} from 'lucide-react-native';
 import {
   useDeviceStore,
   useDeviceHydrated,
@@ -20,22 +30,45 @@ export default function HomeScreen() {
   const deviceType = useDeviceType();
   const adminPin = useDeviceStore((s) => s.adminPin);
   const reset = useDeviceStore((s) => s.reset);
+  const currentEventId = useDeviceStore((s) => s.currentEventId);
+  const currentEventVenue = useDeviceStore((s) => s.currentEventVenue);
+  const currentEventEndAt = useDeviceStore((s) => s.currentEventEndAt);
   // Only admin teams get the Admin tile. Field teams shouldn't see a door they
   // can't open (the layout blocks them anyway if they get there another way).
   const { isAdminTeam } = useTeamAdminAccess();
+
+  // Set by the event watcher when it ends an event on its own, so the crew is
+  // told why the tablet dropped out of the kiosk instead of guessing.
+  const { eventEnded } = useLocalSearchParams<{ eventEnded?: string }>();
+  const justEnded = eventEnded === '1';
 
   const [showResetModal, setShowResetModal] = useState(false);
   const [pinInput, setPinInput] = useState('');
   const [pinError, setPinError] = useState(false);
 
   const isConfigured = teamId !== null && deviceType !== null;
+  const hasEvent = currentEventId !== null;
 
   const handleStartKiosk = () => {
+    if (!hasEvent) {
+      handleChangeEvent();
+      return;
+    }
     router.push('/kiosk' as any);
   };
 
   const handleOpenPhotoHub = () => {
+    if (!hasEvent) {
+      handleChangeEvent();
+      return;
+    }
     router.push('/photo-hub' as any);
+  };
+
+  // Picking the next area never asks for the team code again — the device stays
+  // paired, only the event changes.
+  const handleChangeEvent = () => {
+    router.push('/setup/event-setup' as any);
   };
 
   const handleOpenAdmin = () => {
@@ -73,23 +106,28 @@ export default function HomeScreen() {
     return <Redirect href="/setup" />;
   }
 
+  const endsAtLabel = currentEventEndAt
+    ? new Date(currentEventEndAt).toLocaleTimeString('en-US', {
+        hour: 'numeric',
+        minute: '2-digit',
+      })
+    : null;
+
   return (
     <SafeAreaView className="flex-1 bg-black">
-      <View className="flex-1 px-8 pt-8">
+      <ScrollView
+        className="flex-1"
+        contentContainerStyle={{ paddingHorizontal: 32, paddingTop: 24, paddingBottom: 24 }}
+        showsVerticalScrollIndicator={false}
+      >
         {/* Logo */}
-        <View className="items-center mb-6">
-          <Image
-            source={AATLogo}
-            style={{ width: 180, height: 90 }}
-            resizeMode="contain"
-          />
+        <View className="items-center mb-5">
+          <Image source={AATLogo} style={{ width: 180, height: 90 }} resizeMode="contain" />
         </View>
 
         {/* Header */}
-        <View className="mb-12">
-          <Text className="text-4xl font-bold text-white mb-2">
-            Arrive Alive Tour
-          </Text>
+        <View className="mb-6">
+          <Text className="text-4xl font-bold text-white mb-2">Arrive Alive Tour</Text>
           <View className="flex-row items-center">
             {deviceType === 'tablet' ? (
               <Tablet size={20} color="#a1a1aa" />
@@ -102,34 +140,98 @@ export default function HomeScreen() {
           </View>
         </View>
 
-        {/* Main Action Button */}
+        {/* Event just finished on its own */}
+        {justEnded ? (
+          <View className="flex-row items-start bg-amber-500/10 border border-amber-500/40 rounded-2xl p-4 mb-5">
+            <CheckCircle2 size={22} color="#f59e0b" />
+            <View className="flex-1 ml-3">
+              <Text className="text-amber-400 font-bold text-base">Event finished</Text>
+              <Text className="text-amber-200/80 text-sm mt-1">
+                Everything collected has been saved. Pick the next event area to keep going.
+              </Text>
+            </View>
+          </View>
+        ) : null}
+
+        {/* Current event / area picker */}
+        <Pressable
+          onPress={handleChangeEvent}
+          className={cn(
+            'rounded-2xl p-5 mb-5 border',
+            hasEvent ? 'bg-zinc-900 border-zinc-800' : 'bg-blue-600/10 border-blue-500'
+          )}
+        >
+          <View className="flex-row items-center">
+            <View
+              className={cn(
+                'w-12 h-12 rounded-full items-center justify-center mr-4',
+                hasEvent ? 'bg-zinc-800' : 'bg-blue-600'
+              )}
+            >
+              <MapPin size={24} color={hasEvent ? '#a1a1aa' : '#fff'} />
+            </View>
+            <View className="flex-1">
+              <Text className="text-xs uppercase tracking-wide text-zinc-500 mb-1">
+                {hasEvent ? 'Current Event Area' : 'No Event Selected'}
+              </Text>
+              <Text className="text-xl font-bold text-white" numberOfLines={1}>
+                {currentEventVenue ?? (hasEvent ? 'Event in progress' : 'Choose an event area')}
+              </Text>
+              {hasEvent && endsAtLabel ? (
+                <View className="flex-row items-center mt-1">
+                  <CalendarClock size={14} color="#71717a" />
+                  <Text className="text-zinc-500 text-sm ml-1.5">Ends at {endsAtLabel}</Text>
+                </View>
+              ) : (
+                <Text className="text-zinc-500 text-sm mt-1">
+                  {hasEvent ? 'Tap to switch areas' : 'Tap to pick where you are working'}
+                </Text>
+              )}
+            </View>
+            <ChevronRight size={22} color="#71717a" />
+          </View>
+        </Pressable>
+
+        {/* Survey + Photo options. Both are always offered so a crew can run
+            either station from whichever device is free, with this device's
+            registered role listed first. */}
         <View className="gap-4">
           {deviceType === 'tablet' ? (
-            <Pressable
-              onPress={handleStartKiosk}
-              className="flex-row items-center w-full h-24 px-6 bg-white rounded-2xl active:bg-zinc-200"
-            >
-              <View className="w-16 h-16 rounded-full bg-black items-center justify-center mr-4">
-                <Play size={32} color="#fff" fill="#fff" />
-              </View>
-              <View className="flex-1">
-                <Text className="text-2xl font-bold text-black">Start Kiosk</Text>
-                <Text className="text-base text-zinc-500">Begin survey collection</Text>
-              </View>
-            </Pressable>
+            <>
+              <MenuTile
+                primary
+                Icon={Play}
+                title="Start Survey Kiosk"
+                subtitle="Begin survey collection"
+                onPress={handleStartKiosk}
+                disabled={!hasEvent}
+              />
+              <MenuTile
+                Icon={Camera}
+                title="Photo Hub"
+                subtitle="Take pledge photos"
+                onPress={handleOpenPhotoHub}
+                disabled={!hasEvent}
+              />
+            </>
           ) : (
-            <Pressable
-              onPress={handleOpenPhotoHub}
-              className="flex-row items-center w-full h-24 px-6 bg-white rounded-2xl active:bg-zinc-200"
-            >
-              <View className="w-16 h-16 rounded-full bg-black items-center justify-center mr-4">
-                <Camera size={32} color="#fff" />
-              </View>
-              <View className="flex-1">
-                <Text className="text-2xl font-bold text-black">Open Photo Hub</Text>
-                <Text className="text-base text-zinc-500">Take pledge photos</Text>
-              </View>
-            </Pressable>
+            <>
+              <MenuTile
+                primary
+                Icon={Camera}
+                title="Open Photo Hub"
+                subtitle="Take pledge photos"
+                onPress={handleOpenPhotoHub}
+                disabled={!hasEvent}
+              />
+              <MenuTile
+                Icon={Play}
+                title="Survey Kiosk"
+                subtitle="Begin survey collection"
+                onPress={handleStartKiosk}
+                disabled={!hasEvent}
+              />
+            </>
           )}
 
           {/* Admin - admin teams only, then PIN protected by the admin layout */}
@@ -150,7 +252,7 @@ export default function HomeScreen() {
         </View>
 
         {/* Reset Button - small at bottom */}
-        <View className="flex-1 justify-end pb-8">
+        <View className="pt-10">
           <Pressable
             onPress={handleResetDevice}
             className="flex-row items-center justify-center py-4 active:opacity-70"
@@ -159,7 +261,7 @@ export default function HomeScreen() {
             <Text className="text-zinc-500 ml-2 font-medium">Reset Device</Text>
           </Pressable>
         </View>
-      </View>
+      </ScrollView>
 
       {/* Reset Confirmation Modal */}
       <Modal
@@ -220,5 +322,63 @@ export default function HomeScreen() {
         </View>
       </Modal>
     </SafeAreaView>
+  );
+}
+
+interface MenuTileProps {
+  Icon: typeof Play;
+  title: string;
+  subtitle: string;
+  onPress: () => void;
+  primary?: boolean;
+  disabled?: boolean;
+}
+
+/**
+ * A station option on the main menu. `disabled` is a look, not a block — with
+ * no event chosen the tile still responds and sends the crew to pick an area,
+ * which is what they need to do next anyway.
+ */
+function MenuTile({ Icon, title, subtitle, onPress, primary, disabled }: MenuTileProps) {
+  const dimmed = !!disabled;
+
+  return (
+    <Pressable
+      onPress={onPress}
+      className={cn(
+        'flex-row items-center w-full px-6 rounded-2xl',
+        primary ? 'h-24' : 'h-20',
+        primary && !dimmed ? 'bg-white active:bg-zinc-200' : 'bg-zinc-900 active:bg-zinc-800'
+      )}
+    >
+      <View
+        className={cn(
+          'rounded-full items-center justify-center mr-4',
+          primary ? 'w-16 h-16' : 'w-12 h-12',
+          primary && !dimmed ? 'bg-black' : 'bg-zinc-800'
+        )}
+      >
+        <Icon size={primary ? 32 : 24} color={primary && !dimmed ? '#fff' : '#a1a1aa'} />
+      </View>
+      <View className="flex-1">
+        <Text
+          className={cn(
+            'font-bold',
+            primary ? 'text-2xl' : 'text-xl',
+            primary && !dimmed ? 'text-black' : 'text-white'
+          )}
+        >
+          {title}
+        </Text>
+        <Text
+          className={cn(
+            primary ? 'text-base' : 'text-sm',
+            primary && !dimmed ? 'text-zinc-500' : 'text-zinc-500'
+          )}
+        >
+          {dimmed ? 'Select an event area first' : subtitle}
+        </Text>
+      </View>
+    </Pressable>
   );
 }

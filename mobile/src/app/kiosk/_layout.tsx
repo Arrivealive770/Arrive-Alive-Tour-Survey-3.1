@@ -4,6 +4,8 @@ import { Stack, useRouter } from 'expo-router';
 import * as KeepAwake from 'expo-keep-awake';
 import * as Haptics from 'expo-haptics';
 import { useDeviceStore } from '@/lib/state/device-store';
+import { useSurveyStore } from '@/lib/state/survey-store';
+import { usePledgeStore } from '@/lib/state/pledge-store';
 
 export default function KioskLayout() {
   const router = useRouter();
@@ -50,7 +52,14 @@ export default function KioskLayout() {
     if (tapCountRef.current >= 3) {
       tapCountRef.current = 0;
       Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success).catch(() => {});
+      // Drop whatever the last guest had part-finished. Anything they actually
+      // completed was already queued for sync; leaving the rest in memory would
+      // carry their answers into the next area.
+      useSurveyStore.getState().reset();
+      usePledgeStore.getState().reset();
       exitKioskMode();
+      // Back to the main menu — photo and survey options, plus the picker for
+      // the next event area.
       router.replace('/');
     }
   }, [exitKioskMode, router]);
