@@ -790,4 +790,175 @@ surveysRouter.get("/export/responses.csv", async (c) => {
   ]);
 });
 
+/**
+ * The archive export — the layout the survey results were kept in before this
+ * app existed, so a new season's numbers can be pasted straight underneath the
+ * old ones instead of living in a spreadsheet of their own.
+ *
+ * That layout is one row per date + survey type + grouping, and one column per
+ * question/answer slot named "1A".."9E": question number, then the answer's
+ * position in the question. The cells are counts of how many people picked that
+ * answer, not the answers themselves.
+ *
+ *   Date,Survey_Type,Grouping,1A,1B,1C,1D,1E,2A,...
+ *   08_01_2021,Marijuana,D_D,0,2,3,5,0,0,1,9,0,0,...
+ */
+
+/** "08_25_2026" — the archive's date format, which is not any ISO one. */
+function legacyDate(value: Date): string {
+  const iso = value.toISOString();
+  return `${iso.slice(5, 7)}_${iso.slice(8, 10)}_${iso.slice(0, 4)}`;
+}
+
+/**
+ * Survey type names as the archive spells them.
+ *
+ * The archive uses its own names — "Combo3D_2022" for what this app calls the
+ * combination survey — and the whole point of the export is that the values
+ * line up with the rows already in the file, so the old spelling wins. Types
+ * added since have no archive name; their own name is used, with the spaces
+ * turned into underscores to match the house style.
+ */
+const LEGACY_TYPE_NAMES: Record<string, string> = {
+  alcohol: "Alcohol",
+  impaired: "Impaired",
+  marijuana: "Marijuana",
+  combo: "Combo3D_2022",
+  distracted: "Distracted",
+};
+
+function legacyTypeName(slug: string, name: string): string {
+  return LEGACY_TYPE_NAMES[slug] ?? name.trim().replace(/[^A-Za-z0-9]+/g, "_");
+}
+
+/**
+ * The archive's grouping code, e.g. "B_A".
+ *
+ * The first letter is the age bracket. The second letter is a dimension the
+ * archive tracked that the kiosk does not collect, so it is written as "U" —
+ * an unmistakable placeholder, rather than a letter that would look like real
+ * data and quietly land in the wrong cell of somebody's pivot table.
+ */
+const AGE_LETTERS: Record<string, string> = {
+  "13-17": "A",
+  "18-24": "B",
+  "25-34": "C",
+  "35+": "D",
+};
+
+const UNKNOWN_GROUPING_LETTER = "U";
+
+function legacyGrouping(ageRange: string | null): string {
+  const age = AGE_LETTERS[ageRange ?? ""] ?? UNKNOWN_GROUPING_LETTER;
+  return `${age}_${UNKNOWN_GROUPING_LETTER}`;
+}
+
+// GET /api/surveys/export/legacy.csv - Counts in the pre-app archive layout
+surveysRouter.get("/export/legacy.csv", async (c) => {
+  const filter = responseFilter(exportQuery(c));
+
+  const [surveyTypes, responses] = await Promise.all([
+    prisma.surveyType.findMany({
+      include: { questions: { orderBy: { orderIndex: "asc" } } },
+    }),
+    prisma.surveyResponse.findMany({
+      where: filter,
+      include: { event: { select: { eventDate: true } } },
+    }),
+  ]);
+
+  const typesBySlug = new Map(surveyTypes.map((t) => [t.slug, t]));
+
+  // The archive keeps five answer slots per question even for questions with
+  // fewer answers, which is what makes "column N holds question K" arithmetic
+  // work in the old sheets. A question with more than five answers widens every
+  // block rather than just its own, so that stays true.
+  let slotsPerQuestion = 5;
+  let questionCount = 0;
+
+  for (const response of responses) {
+    const questions = typesBySlug.get(response.surveyTypeSlug)?.questions ?? [];
+    for (const question of questions) {
+      questionCount = Math.max(questionCount, question.orderIndex);
+      const options = JSON.parse(question.options) as string[];
+      slotsPerQuestion = Math.max(slotsPerQuestion, options.length);
+    }
+  }
+
+  /** One row per date + type + grouping, with the counts accumulated into it. */
+  const buckets = new Map<string, {
+    date: string;
+    typeName: string;
+    grouping: string;
+    counts: number[];
+  }>();
+
+  for (const response of responses) {
+    const surveyType = typesBySlug.get(response.surveyTypeSlug);
+    // A response whose type has been deleted has no questions to place its
+    // answers under, so there is no row it can honestly become.
+    if (!surveyType) continue;
+
+    const date = legacyDate(response.event?.eventDate ?? response.completedAt);
+    const typeName = legacyTypeName(surveyType.slug, surveyType.name);
+    const grouping = legacyGrouping(response.ageRange);
+    const key = `${date}|${typeName}|${grouping}`;
+
+    let bucket = buckets.get(key);
+    if (!bucket) {
+      bucket = {
+        date,
+        typeName,
+        grouping,
+        counts: new Array(questionCount * slotsPerQuestion).fill(0),
+      };
+      buckets.set(key, bucket);
+    }
+
+    let answers: Record<string, unknown> = {};
+    try {
+      answers = JSON.parse(response.responses) as Record<string, unknown>;
+    } catch {
+      // Unreadable answers still leave the survey counted in its row's date,
+      // type and grouping; only the answer columns lose it.
+    }
+
+    for (const question of surveyType.questions) {
+      const options = JSON.parse(question.options) as string[];
+      const picked = selectedOptions(answers[`q${question.orderIndex}`], options);
+
+      for (const choice of picked) {
+        const slot = options.indexOf(choice);
+        if (slot < 0) continue;
+        bucket.counts[(question.orderIndex - 1) * slotsPerQuestion + slot]! += 1;
+      }
+    }
+  }
+
+  const letters = "ABCDEFGHIJKLMNOPQRSTUVWXYZ";
+  const header: unknown[] = ["Date", "Survey_Type", "Grouping"];
+  for (let q = 1; q <= questionCount; q++) {
+    for (let slot = 0; slot < slotsPerQuestion; slot++) {
+      header.push(`${q}${letters[slot]}`);
+    }
+  }
+
+  // Oldest first, the order the archive grew in, so an export appends cleanly
+  // to the bottom of the existing file.
+  const rows = [...buckets.values()]
+    .sort((a, b) => {
+      const dateA = `${a.date.slice(6)}${a.date.slice(0, 2)}${a.date.slice(3, 5)}`;
+      const dateB = `${b.date.slice(6)}${b.date.slice(0, 2)}${b.date.slice(3, 5)}`;
+      return dateA.localeCompare(dateB)
+        || a.typeName.localeCompare(b.typeName)
+        || a.grouping.localeCompare(b.grouping);
+    })
+    .map((bucket) => [bucket.date, bucket.typeName, bucket.grouping, ...bucket.counts]);
+
+  return csvResponse(timestampedFilename("survey-archive-format", new Date()), [
+    header,
+    ...rows,
+  ]);
+});
+
 export { surveysRouter };

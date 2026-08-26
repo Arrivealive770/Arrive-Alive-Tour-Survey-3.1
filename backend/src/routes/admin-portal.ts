@@ -684,10 +684,13 @@ adminPortalRouter.get("/", (c) => {
                   <button class="btn btn-primary btn-sm" onclick="exportPieChartReport()">Export Pie Chart Report</button>
                   <button class="btn btn-secondary btn-sm" onclick="downloadSpreadsheet('summary', this)">Spreadsheet: Totals</button>
                   <button class="btn btn-secondary btn-sm" onclick="downloadSpreadsheet('responses', this)">Spreadsheet: Every Response</button>
+                  <button class="btn btn-secondary btn-sm" onclick="downloadSpreadsheet('legacy', this)">Spreadsheet: Old Survey Format</button>
                 </div>
                 <p class="text-muted" style="margin: 8px 0 0; font-size: 12px;">
                   Spreadsheets open in Excel, Google Sheets or Numbers. "Totals" holds the same
                   numbers as the pie charts; "Every Response" is one row per survey taken.
+                  "Old Survey Format" matches the columns of the survey results kept before this
+                  app (Date, Survey_Type, Grouping, 1A…9E), so new rows paste under the old ones.
                 </p>
               </div>
 
@@ -2702,9 +2705,11 @@ adminPortalRouter.get("/", (c) => {
         /**
          * Download the selected events as a spreadsheet.
          *
-         * kind is 'summary' (the pie chart numbers as a table) or 'responses'
-         * (one row per survey taken). The server builds the file from the same
-         * filters shown on this tab, so a download always matches the screen.
+         * kind is 'summary' (the pie chart numbers as a table), 'responses'
+         * (one row per survey taken) or 'legacy' (the column layout the survey
+         * results were kept in before this app). The server builds the file from
+         * the same filters shown on this tab, so a download always matches the
+         * screen.
          */
         async function downloadSpreadsheet(kind, button) {
           const teamId = document.getElementById('dataTeamFilter').value;
@@ -2744,7 +2749,11 @@ adminPortalRouter.get("/", (c) => {
             }
 
             // Prefer the name the server chose; it carries today's date.
-            let filename = kind === 'summary' ? 'survey-summary.csv' : 'survey-responses.csv';
+            let filename = kind === 'summary'
+              ? 'survey-summary.csv'
+              : kind === 'legacy'
+              ? 'survey-archive-format.csv'
+              : 'survey-responses.csv';
             const disposition = res.headers.get('content-disposition') || '';
             const match = /filename="([^"]+)"/.exec(disposition);
             if (match) filename = match[1];
