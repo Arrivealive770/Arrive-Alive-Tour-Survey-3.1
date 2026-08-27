@@ -21,6 +21,7 @@ import {
 } from '@/lib/state/device-store';
 import { useTeamAdminAccess } from '@/lib/team-access';
 import { cn } from '@/lib/cn';
+import { formatEventTime } from '@/lib/events/event-time';
 
 const AATLogo = require('@/assets/aat-logo.png');
 
@@ -33,6 +34,7 @@ export default function HomeScreen() {
   const currentEventId = useDeviceStore((s) => s.currentEventId);
   const currentEventVenue = useDeviceStore((s) => s.currentEventVenue);
   const currentEventEndAt = useDeviceStore((s) => s.currentEventEndAt);
+  const currentEventTimeZone = useDeviceStore((s) => s.currentEventTimeZone);
   // Only admin teams get the Admin tile. Field teams shouldn't see a door they
   // can't open (the layout blocks them anyway if they get there another way).
   const { isAdminTeam } = useTeamAdminAccess();
@@ -106,12 +108,8 @@ export default function HomeScreen() {
     return <Redirect href="/setup" />;
   }
 
-  const endsAtLabel = currentEventEndAt
-    ? new Date(currentEventEndAt).toLocaleTimeString('en-US', {
-        hour: 'numeric',
-        minute: '2-digit',
-      })
-    : null;
+  // Shown in the venue's zone, so this matches the end time the office typed.
+  const endsAtLabel = formatEventTime(currentEventEndAt, currentEventTimeZone);
 
   return (
     <SafeAreaView className="flex-1 bg-black">

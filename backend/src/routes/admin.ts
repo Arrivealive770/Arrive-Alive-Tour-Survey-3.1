@@ -3,16 +3,39 @@ import { prisma } from "../prisma";
 
 const adminRouter = new Hono();
 
+/**
+ * Which events a request is asking about.
+ *
+ * The Data tab lets staff tick any number of events, so `eventIds` is a comma
+ * separated list. `eventId` stays supported for the single-event callers that
+ * were written first. An empty list means "every event", which is what a
+ * request with neither parameter has always meant.
+ *
+ * This used to be single-event only, so ticking three venues quietly reported
+ * the totals for the whole tour instead of those three.
+ */
+function eventScope(c: { req: { query: (key: string) => string | undefined } }) {
+  const ids = (c.req.query("eventIds") ?? "")
+    .split(",")
+    .map((id) => id.trim())
+    .filter(Boolean);
+
+  if (ids.length > 0) return { eventId: { in: ids } };
+
+  const single = c.req.query("eventId");
+  return single ? { eventId: single } : {};
+}
+
 // GET /api/admin/analytics - Dashboard analytics
 adminRouter.get("/analytics", async (c) => {
   const teamId = c.req.query("teamId");
-  const eventId = c.req.query("eventId");
+  const eventWhere = eventScope(c);
   const startDate = c.req.query("startDate");
   const endDate = c.req.query("endDate");
 
   const whereClause = {
     ...(teamId && { teamId }),
-    ...(eventId && { eventId }),
+    ...eventWhere,
     ...(startDate || endDate
       ? {
           completedAt: {
@@ -25,7 +48,7 @@ adminRouter.get("/analytics", async (c) => {
 
   const pledgeWhereClause = {
     ...(teamId && { teamId }),
-    ...(eventId && { eventId }),
+    ...eventWhere,
     ...(startDate || endDate
       ? {
           createdAt: {
@@ -94,7 +117,7 @@ adminRouter.get("/analytics", async (c) => {
   const totalPhotos = await prisma.photo.count({
     where: {
       ...(teamId && { teamId }),
-      ...(eventId && { eventId }),
+      ...eventWhere,
     },
   });
 
@@ -103,7 +126,7 @@ adminRouter.get("/analytics", async (c) => {
     by: ["status"],
     where: {
       ...(teamId && { teamId }),
-      ...(eventId && { eventId }),
+      ...eventWhere,
     },
     _count: { id: true },
   });
@@ -174,14 +197,14 @@ adminRouter.get("/analytics", async (c) => {
 // GET /api/admin/export/csv - Export survey data as CSV
 adminRouter.get("/export/csv", async (c) => {
   const teamId = c.req.query("teamId");
-  const eventId = c.req.query("eventId");
+  const eventWhere = eventScope(c);
   const startDate = c.req.query("startDate");
   const endDate = c.req.query("endDate");
 
   const surveys = await prisma.surveyResponse.findMany({
     where: {
       ...(teamId && { teamId }),
-      ...(eventId && { eventId }),
+      ...eventWhere,
       ...(startDate || endDate
         ? {
             completedAt: {

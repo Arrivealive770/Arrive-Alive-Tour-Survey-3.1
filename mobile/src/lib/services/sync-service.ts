@@ -187,6 +187,12 @@ class SyncService {
       // be dropped once tablets have received them.
       await this.syncPhoneCleanup();
 
+      // Tell the server this device is caught up. The end-of-event purge waits
+      // for every device that worked the event to check in before it deletes
+      // the photos, so a device with nothing left to upload still has to say
+      // so — otherwise the purge sits waiting on it for hours.
+      await this.sendHeartbeat();
+
       // Update sync timestamp
       useSyncStore.getState().setLastSyncAt(new Date().toISOString());
 
@@ -228,6 +234,27 @@ class SyncService {
     } finally {
       this.syncInProgress = false;
       useSyncStore.getState().setSyncing(false);
+    }
+  }
+
+  /**
+   * "This device is up to date." Sent at the end of every successful sync pass.
+   *
+   * The server's end-of-event purge treats a check-in later than the event's
+   * end time as proof the device has nothing left to send. Best-effort: a
+   * failed ping only means the purge waits for the next pass (or, at worst,
+   * for its 24-hour deadline), so it must never fail a sync.
+   */
+  private async sendHeartbeat(): Promise<void> {
+    const deviceId = useDeviceStore.getState().deviceId;
+    if (!deviceId) return;
+
+    try {
+      await fetch(`${this.baseUrl}/api/devices/${encodeURIComponent(deviceId)}/heartbeat`, {
+        method: 'PUT',
+      });
+    } catch (error) {
+      console.log('[SyncService] Heartbeat failed (will retry next sync):', error);
     }
   }
 

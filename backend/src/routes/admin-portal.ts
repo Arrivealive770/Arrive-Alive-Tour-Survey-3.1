@@ -621,15 +621,24 @@ adminPortalRouter.get("/", (c) => {
               <div class="stat-card">
                 <h3>Total Surveys</h3>
                 <div class="value" id="statTotalSurveys">-</div>
+                <div id="statScopeSurveys" style="color: #888; font-size: 12px;">across all events</div>
               </div>
               <div class="stat-card">
                 <h3>Total Photos</h3>
                 <div class="value" id="statTotalPhotos">-</div>
+                <div id="statScopePhotos" style="color: #888; font-size: 12px;">across all events</div>
               </div>
             </div>
 
             <div class="card">
-              <h2>Survey Responses</h2>
+              <div style="display: flex; justify-content: space-between; align-items: center; gap: 12px; flex-wrap: wrap;">
+                <h2 style="margin: 0;">Survey Responses</h2>
+                <button class="btn btn-danger btn-sm" id="deleteSelectedResponses" onclick="deleteSelectedResponses()" disabled>Delete Selected</button>
+              </div>
+              <p class="text-muted" style="margin: 8px 0 16px; font-size: 12px;">
+                Tick a survey and use Delete to remove that one answer — a test run or a
+                double tap. The event, its photos and every other survey are kept.
+              </p>
               <div class="filter-row">
                 <div class="form-group">
                   <label for="dataTeamFilter">Team</label>
@@ -699,6 +708,7 @@ adminPortalRouter.get("/", (c) => {
                 <thead>
                   <!-- Click a heading to sort; click again to reverse it. -->
                   <tr>
+                    <th style="width: 32px;"><input type="checkbox" id="responsesSelectAll" onchange="toggleAllResponses(this.checked)" title="Select every survey shown"></th>
                     <th class="sortable" onclick="sortResponsesBy('date')">Date <span id="responsesSortDate"></span></th>
                     <th class="sortable" onclick="sortResponsesBy('team')">Team <span id="responsesSortTeam"></span></th>
                     <th class="sortable" onclick="sortResponsesBy('name')">Event <span id="responsesSortName"></span></th>
@@ -706,6 +716,7 @@ adminPortalRouter.get("/", (c) => {
                     <th>Survey Type</th>
                     <th>Age Range</th>
                     <th>Duration</th>
+                    <th>Actions</th>
                   </tr>
                 </thead>
                 <tbody id="responsesBody"></tbody>
@@ -899,6 +910,15 @@ adminPortalRouter.get("/", (c) => {
               <input type="text" id="eventVenueState" placeholder="e.g., TX" required>
             </div>
             <div class="form-group">
+              <label for="eventTimeZone">Venue Time Zone</label>
+              <select id="eventTimeZone" onchange="updateTimeZoneLabel()"></select>
+              <div style="color: #888; font-size: 12px; margin-top: 4px;">
+                The zone the venue is in. Start and end times below are read in this
+                zone, and the tablets at the venue show the same clock time — whatever
+                their own clocks are set to.
+              </div>
+            </div>
+            <div class="form-group">
               <label for="eventDate">Event Date</label>
               <input type="datetime-local" id="eventDate" required>
             </div>
@@ -906,9 +926,15 @@ adminPortalRouter.get("/", (c) => {
               <label for="eventEndAt">Event End Time (photos auto-deleted)</label>
               <input type="datetime-local" id="eventEndAt">
               <div style="color: #888; font-size: 12px; margin-top: 4px;">
-                When this time passes, every photo and every participant email address
-                for this event is deleted automatically. Survey answers are kept.
-                Leave blank to purge manually instead.
+                When this time passes the event is over: the tablets go back to the
+                menu, and once their surveys and pledge photos have finished
+                uploading, every photo and participant email address for this event is
+                deleted automatically. Survey answers are kept. Leave blank to purge
+                manually instead.
+              </div>
+              <div style="color: #888; font-size: 12px; margin-top: 4px;">
+                Times are read in <strong id="eventTimeZoneLabel" style="color: #ccc;"></strong>,
+                and the tablets at the venue show exactly what you type here.
               </div>
             </div>
             <div class="form-group">
@@ -1502,7 +1528,7 @@ adminPortalRouter.get("/", (c) => {
                   \${event.picturePledgeEnabled ? '<span class="badge badge-info" style="margin-left: 8px;">Picture Pledge</span>' : ''}
                 </td>
                 <td>\${escapeHtml(event.venueCity)}, \${escapeHtml(event.venueState)}</td>
-                <td>\${new Date(event.eventDate).toLocaleDateString()}</td>
+                <td>\${formatEventInstant(event.eventDate, event.timeZone, { hour: undefined, minute: undefined })}</td>
                 <td>\${describeEventOverlay(event)}</td>
                 <td>\${describePurge(event)}</td>
                 <td>\${event.team ? escapeHtml(event.team.name) : '-'}</td>
@@ -1558,6 +1584,127 @@ adminPortalRouter.get("/", (c) => {
           const date = new Date(isoString);
           const local = new Date(date.getTime() - date.getTimezoneOffset() * 60000);
           return local.toISOString().slice(0, 16);
+        }
+
+        /**
+         * Event times, anchored to the venue's time zone.
+         *
+         * A timestamp is an instant, and an instant renders differently in every
+         * zone. A tablet whose clock was set to UTC showed a 9pm Central end
+         * time as 2am, which read as "this event is already over". So an event
+         * now carries the zone it is run in, the office picks that zone here,
+         * and every screen — portal and tablet — formats against it.
+         */
+        const TIME_ZONE_CHOICES = [
+          ['America/New_York', 'Eastern'],
+          ['America/Chicago', 'Central'],
+          ['America/Denver', 'Mountain'],
+          ['America/Phoenix', 'Arizona'],
+          ['America/Los_Angeles', 'Pacific'],
+          ['America/Anchorage', 'Alaska'],
+          ['Pacific/Honolulu', 'Hawaii'],
+        ];
+
+        function browserTimeZone() {
+          try {
+            return Intl.DateTimeFormat().resolvedOptions().timeZone || 'America/Chicago';
+          } catch (err) {
+            return 'America/Chicago';
+          }
+        }
+
+        /** The wall-clock reading of an instant in a zone, as numbers. */
+        function zoneParts(date, timeZone) {
+          const parts = new Intl.DateTimeFormat('en-US', {
+            timeZone,
+            hour12: false,
+            year: 'numeric', month: '2-digit', day: '2-digit',
+            hour: '2-digit', minute: '2-digit', second: '2-digit',
+          }).formatToParts(date).reduce((acc, p) => {
+            acc[p.type] = p.value;
+            return acc;
+          }, {});
+
+          return {
+            year: Number(parts.year),
+            month: Number(parts.month),
+            day: Number(parts.day),
+            // "24" is how en-US hour12:false spells midnight.
+            hour: Number(parts.hour) % 24,
+            minute: Number(parts.minute),
+            second: Number(parts.second),
+          };
+        }
+
+        /** How far ahead of UTC the zone is at that instant, in milliseconds. */
+        function zoneOffsetMs(date, timeZone) {
+          const p = zoneParts(date, timeZone);
+          return Date.UTC(p.year, p.month - 1, p.day, p.hour, p.minute, p.second) - date.getTime();
+        }
+
+        /** ISO instant -> "YYYY-MM-DDTHH:mm" as read in the venue's zone. */
+        function formatInZone(isoString, timeZone) {
+          if (!isoString) return '';
+          const p = zoneParts(new Date(isoString), timeZone);
+          const pad = n => String(n).padStart(2, '0');
+          return p.year + '-' + pad(p.month) + '-' + pad(p.day) + 'T' + pad(p.hour) + ':' + pad(p.minute);
+        }
+
+        /** "YYYY-MM-DDTHH:mm" typed as venue time -> the ISO instant it means. */
+        function parseInZone(localValue, timeZone) {
+          if (!localValue) return null;
+          // First guess: read the typed time as if it were UTC, then correct by
+          // the zone's offset. Applied twice so a time that lands inside a
+          // daylight-saving change still comes out right.
+          const guess = new Date(localValue + ':00Z').getTime();
+          let utc = guess - zoneOffsetMs(new Date(guess), timeZone);
+          utc = guess - zoneOffsetMs(new Date(utc), timeZone);
+          return new Date(utc).toISOString();
+        }
+
+        /** The zone the event form is currently working in. */
+        function selectedEventTimeZone() {
+          const picker = document.getElementById('eventTimeZone');
+          return (picker && picker.value) || browserTimeZone();
+        }
+
+        // Offers the US zones plus, when an event was saved somewhere else,
+        // whatever zone it already has — so editing never silently moves it.
+        function renderTimeZoneOptions(selected) {
+          const picker = document.getElementById('eventTimeZone');
+          const zones = TIME_ZONE_CHOICES.slice();
+          if (selected && !zones.some(z => z[0] === selected)) {
+            zones.unshift([selected, selected]);
+          }
+          picker.innerHTML = zones
+            .map(z => '<option value="' + escapeHtml(z[0]) + '"' +
+              (z[0] === selected ? ' selected' : '') + '>' +
+              escapeHtml(z[1]) + ' — ' + escapeHtml(z[0]) + '</option>')
+            .join('');
+          updateTimeZoneLabel();
+        }
+
+        function updateTimeZoneLabel() {
+          const zone = selectedEventTimeZone();
+          const match = TIME_ZONE_CHOICES.find(z => z[0] === zone);
+          document.getElementById('eventTimeZoneLabel').textContent = match ? match[1] + ' time' : zone;
+        }
+
+        /** Event times as the venue reads them, for tables and badges. */
+        function formatEventInstant(isoString, timeZone, options) {
+          if (!isoString) return '';
+          const zone = timeZone || browserTimeZone();
+          const settings = Object.assign(
+            { timeZone: zone, month: 'short', day: 'numeric', year: 'numeric',
+              hour: 'numeric', minute: '2-digit' },
+            options || {}
+          );
+          try {
+            return new Intl.DateTimeFormat('en-US', settings).format(new Date(isoString));
+          } catch (err) {
+            // An unknown zone must not blank out the whole table.
+            return new Date(isoString).toLocaleString();
+          }
         }
 
         // The event form offers exactly the surveys that have been built on the
@@ -1634,6 +1781,9 @@ adminPortalRouter.get("/", (c) => {
           document.getElementById('eventVenueState').value = '';
           document.getElementById('eventDate').value = '';
           document.getElementById('eventEndAt').value = '';
+          // A new event is assumed to run in the zone the office is sitting in;
+          // the picker is right there if the venue is somewhere else.
+          renderTimeZoneOptions(browserTimeZone());
           document.getElementById('eventOverlaySearch').value = '';
           document.getElementById('eventOverlay').value = '';
           // New events default to the stock frame.
@@ -1653,13 +1803,15 @@ adminPortalRouter.get("/", (c) => {
               document.getElementById('eventVenueCity').value = event.venueCity;
               document.getElementById('eventVenueState').value = event.venueState;
 
-              // Format date for datetime-local input
-              const date = new Date(event.eventDate);
-              const localDate = new Date(date.getTime() - date.getTimezoneOffset() * 60000);
-              document.getElementById('eventDate').value = localDate.toISOString().slice(0, 16);
+              // Times are shown in the event's own zone, so a tour manager in
+              // another state edits the venue's clock rather than their own.
+              // Events saved before zones existed fall back to this browser.
+              const zone = event.timeZone || browserTimeZone();
+              renderTimeZoneOptions(zone);
 
+              document.getElementById('eventDate').value = formatInZone(event.eventDate, zone);
               document.getElementById('eventEndAt').value = event.eventEndAt
-                ? toDateTimeLocal(event.eventEndAt)
+                ? formatInZone(event.eventEndAt, zone)
                 : '';
 
               // Read back from overlayId, matching what the dropdown stores.
@@ -1753,19 +1905,62 @@ adminPortalRouter.get("/", (c) => {
         }
 
         // What the Photo Deletion column shows for one event.
+        //
+        // An event that is over but not yet purged is not stuck: the purge holds
+        // off until the tablets have finished uploading their surveys and pledge
+        // photos. The badge is clickable and says exactly what it is waiting on.
         function describePurge(event) {
           if (event.photosPurgedAt) {
             return '<span class="badge badge-success">Deleted ' +
-              new Date(event.photosPurgedAt).toLocaleString() + '</span>';
+              formatEventInstant(event.photosPurgedAt, event.timeZone) + '</span>';
           }
-          if (!event.eventEndAt) {
+
+          const endsAt = event.eventEndAt ? new Date(event.eventEndAt) : null;
+          const isOver = (endsAt && endsAt <= new Date()) || event.status === 'completed';
+
+          if (isOver) {
+            return '<span class="badge badge-warning" style="cursor: pointer;" ' +
+              'onclick="showPurgeReadiness(\\'' + event.id + '\\')" ' +
+              'title="Click to see what the purge is waiting for">Waiting for uploads</span>';
+          }
+
+          if (!endsAt) {
             return '<span class="badge badge-warning">Manual only</span>';
           }
-          const endsAt = new Date(event.eventEndAt);
-          const label = endsAt.toLocaleString();
-          return endsAt <= new Date()
-            ? '<span class="badge badge-warning">Due ' + label + '</span>'
-            : '<span class="badge badge-info">Auto ' + label + '</span>';
+
+          return '<span class="badge badge-info">Auto ' +
+            formatEventInstant(event.eventEndAt, event.timeZone) + '</span>';
+        }
+
+        // "Why hasn't this deleted the photos yet?" answered on screen.
+        async function showPurgeReadiness(eventId) {
+          try {
+            const res = await fetch(API_BASE + '/events/' + eventId + '/purge-readiness');
+            const data = await res.json();
+
+            if (data.error) {
+              alert('Could not check: ' + data.error.message);
+              return;
+            }
+
+            const readiness = data.data;
+
+            if (readiness.ready) {
+              alert('Everything is in. The photos and email addresses for this event ' +
+                'are deleted on the next check (within 5 minutes), or press "Purge Now".');
+              return;
+            }
+
+            alert(
+              'The automatic deletion is waiting for:\\n\\n' +
+              readiness.waitingOn.map(reason => '  - ' + reason).join('\\n') +
+              '\\n\\nIt runs on its own as soon as those finish, and no later than 24 ' +
+              'hours after the event ended. "Purge Now" does it immediately.'
+            );
+          } catch (err) {
+            console.error('Error checking purge readiness:', err);
+            alert('Error checking the event');
+          }
         }
 
         // Post-event privacy purge, run on demand. Deletes the photos and the
@@ -1973,14 +2168,18 @@ adminPortalRouter.get("/", (c) => {
             const url = id ? API_BASE + '/events/' + id : API_BASE + '/events';
             const method = id ? 'PUT' : 'POST';
 
+            // Both times are read as venue-local wall clock and sent as full ISO
+            // instants, so neither the server's zone nor the tablet's can shift
+            // them. The zone travels with the event for display.
+            const timeZone = selectedEventTimeZone();
+
             const body = {
               venueName,
               venueCity,
               venueState,
-              eventDate,
-              // Sent as a full ISO timestamp so the server stores the same
-              // instant the staff member picked, not a UTC-shifted one.
-              eventEndAt: eventEndAtRaw ? new Date(eventEndAtRaw).toISOString() : null,
+              eventDate: parseInZone(eventDate, timeZone),
+              eventEndAt: eventEndAtRaw ? parseInZone(eventEndAtRaw, timeZone) : null,
+              timeZone,
               surveyTypes,
               picturePledgeEnabled
             };
@@ -2416,21 +2615,51 @@ adminPortalRouter.get("/", (c) => {
         // Analytics & Data
         let allEventsForData = [];
 
-        async function loadAnalytics() {
+        /**
+         * The filters every part of the Data tab reads from: the team, the
+         * survey type, and the ticked events.
+         *
+         * Every number on this tab is built from the same query string, so the
+         * counts, the pie charts and the spreadsheets can never disagree about
+         * which events they are describing. Ticking three venues used to leave
+         * the counts showing the whole tour, because only a single event id was
+         * ever sent.
+         */
+        function dataTabParams(options) {
+          const params = new URLSearchParams();
           const teamId = document.getElementById('dataTeamFilter').value;
-          const selectedEvents = getSelectedEventIds();
+          const eventIds = getSelectedEventIds();
 
-          let url = API_BASE + '/admin/analytics?';
-          if (teamId) url += 'teamId=' + teamId + '&';
-          if (selectedEvents.length === 1) url += 'eventId=' + selectedEvents[0] + '&';
+          if (teamId) params.set('teamId', teamId);
+          if (eventIds.length > 0) params.set('eventIds', eventIds.join(','));
+
+          if (options && options.withSurveyType) {
+            const slug = document.getElementById('dataSurveyTypeFilter').value;
+            if (slug) params.set('surveyTypeSlug', slug);
+          }
+
+          return params;
+        }
+
+        /** "3 selected events" / "all events" — used to label what is on screen. */
+        function selectionLabel() {
+          const count = getSelectedEventIds().length;
+          if (count === 0) return 'all events';
+          return count === 1 ? '1 selected event' : count + ' selected events';
+        }
+
+        async function loadAnalytics() {
+          const params = dataTabParams();
 
           try {
-            const res = await fetch(url);
+            const res = await fetch(API_BASE + '/admin/analytics?' + params.toString());
             const data = await res.json();
             analytics = data.data;
 
             document.getElementById('statTotalSurveys').textContent = analytics.totalSurveys;
             document.getElementById('statTotalPhotos').textContent = analytics.totalPhotos;
+            document.getElementById('statScopeSurveys').textContent = 'across ' + selectionLabel();
+            document.getElementById('statScopePhotos').textContent = 'across ' + selectionLabel();
 
             // Surveys by type
             const typeDiv = document.getElementById('surveysByType');
@@ -2558,6 +2787,21 @@ adminPortalRouter.get("/", (c) => {
             selectedEventIds.delete(eventId);
           }
           updateSelectedEventsCount();
+          refreshDataForSelection();
+        }
+
+        /**
+         * Re-read the counts and the responses table for whatever is ticked.
+         *
+         * Debounced because ticking several events in a row would otherwise
+         * fire a request per click, and the answers can come back out of order.
+         */
+        let selectionRefreshTimer = null;
+        function refreshDataForSelection() {
+          clearTimeout(selectionRefreshTimer);
+          selectionRefreshTimer = setTimeout(() => {
+            loadSurveyResponses(); // refreshes the counts too
+          }, 250);
         }
 
         function getSelectedEventIds() {
@@ -2585,11 +2829,13 @@ adminPortalRouter.get("/", (c) => {
           // "All" means everything on screen, matching what the search shows.
           visibleEventsForData().forEach(e => selectedEventIds.add(e.id));
           renderEventsCheckboxList();
+          refreshDataForSelection();
         }
 
         function deselectAllEvents() {
           selectedEventIds.clear();
           renderEventsCheckboxList();
+          refreshDataForSelection();
         }
 
         async function loadSurveyResponses() {
@@ -2597,22 +2843,25 @@ adminPortalRouter.get("/", (c) => {
           document.getElementById('responsesTable').style.display = 'none';
           document.getElementById('responsesEmpty').style.display = 'none';
 
-          const teamId = document.getElementById('dataTeamFilter').value;
-          const surveyType = document.getElementById('dataSurveyTypeFilter').value;
-
-          let url = API_BASE + '/surveys/responses?';
-          if (teamId) url += 'teamId=' + teamId + '&';
-          if (surveyType) url += 'surveyTypeSlug=' + surveyType + '&';
+          const params = dataTabParams({ withSurveyType: true });
 
           try {
-            const res = await fetch(url);
+            const res = await fetch(API_BASE + '/surveys/responses?' + params.toString());
             const data = await res.json();
             allSurveyResponses = data.data || [];
+            // Rows that vanished with the last filter change must not stay
+            // ticked, or "Delete Selected" would remove something off screen.
+            const visibleIds = new Set(allSurveyResponses.map(r => r.id));
+            selectedResponseIds.forEach(id => {
+              if (!visibleIds.has(id)) selectedResponseIds.delete(id);
+            });
 
             if (allSurveyResponses.length === 0) {
               document.getElementById('responsesLoading').style.display = 'none';
               document.getElementById('responsesTruncated').style.display = 'none';
               document.getElementById('responsesEmpty').style.display = 'block';
+              updateResponseSelectionUi();
+              loadAnalytics();
               return;
             }
 
@@ -2630,6 +2879,10 @@ adminPortalRouter.get("/", (c) => {
         let allSurveyResponses = [];
         let responsesSortKey = 'date';
         let responsesSortDir = 'desc';
+
+        // Surveys ticked for deletion. Held here, not read off the DOM, for the
+        // same reason as the event ticks: sorting re-renders the rows.
+        let selectedResponseIds = new Set();
 
         // Same heading clicked twice reverses it; a new heading starts on the
         // order that reads naturally for that column (A–Z, newest first).
@@ -2674,8 +2927,10 @@ adminPortalRouter.get("/", (c) => {
           });
 
           const tbody = document.getElementById('responsesBody');
-          tbody.innerHTML = sorted.slice(0, RESPONSE_LIMIT).map(r => \`
+          const shown = sorted.slice(0, RESPONSE_LIMIT);
+          tbody.innerHTML = shown.map(r => \`
             <tr>
+              <td><input type="checkbox" class="response-checkbox" value="\${r.id}" \${selectedResponseIds.has(r.id) ? 'checked' : ''} onchange="toggleResponseSelection('\${r.id}', this.checked)"></td>
               <td>\${new Date(r.completedAt).toLocaleString()}</td>
               <td>\${r.team ? escapeHtml(r.team.name) : '-'}</td>
               <td>\${r.event ? escapeHtml(r.event.venueName) : '-'}</td>
@@ -2683,8 +2938,11 @@ adminPortalRouter.get("/", (c) => {
               <td><span class="badge badge-info">\${escapeHtml(r.surveyTypeSlug)}</span></td>
               <td>\${r.ageRange || '-'}</td>
               <td>\${r.durationSeconds ? r.durationSeconds + 's' : '-'}</td>
+              <td><button class="btn btn-danger btn-sm" onclick="deleteSurveyResponse('\${r.id}')">Delete</button></td>
             </tr>
           \`).join('');
+
+          updateResponseSelectionUi();
 
           // The table has always shown at most 100 rows. Say so, rather than
           // letting it look like the whole data set.
@@ -2700,6 +2958,122 @@ adminPortalRouter.get("/", (c) => {
           document.getElementById('responsesLoading').style.display = 'none';
           document.getElementById('responsesEmpty').style.display = 'none';
           document.getElementById('responsesTable').style.display = 'table';
+        }
+
+        /**
+         * Removing individual surveys.
+         *
+         * A practice run or a double tap used to be stuck in the numbers for
+         * good: the only delete on offer took the whole event with it. These
+         * remove survey rows only — the event, its photos and its pledges stay
+         * exactly as they are.
+         */
+
+        function toggleResponseSelection(id, checked) {
+          if (checked) {
+            selectedResponseIds.add(id);
+          } else {
+            selectedResponseIds.delete(id);
+          }
+          updateResponseSelectionUi();
+        }
+
+        // Ticks the rows on screen. Rows past the 100-row display limit are
+        // deliberately left alone — nothing gets deleted that can't be seen.
+        function toggleAllResponses(checked) {
+          document.querySelectorAll('.response-checkbox').forEach(cb => {
+            cb.checked = checked;
+            if (checked) {
+              selectedResponseIds.add(cb.value);
+            } else {
+              selectedResponseIds.delete(cb.value);
+            }
+          });
+          updateResponseSelectionUi();
+        }
+
+        function updateResponseSelectionUi() {
+          const count = selectedResponseIds.size;
+          const button = document.getElementById('deleteSelectedResponses');
+          if (!button) return;
+
+          button.textContent = count > 0 ? 'Delete Selected (' + count + ')' : 'Delete Selected';
+          button.disabled = count === 0;
+
+          const headerBox = document.getElementById('responsesSelectAll');
+          if (headerBox) {
+            const boxes = document.querySelectorAll('.response-checkbox');
+            headerBox.checked = boxes.length > 0 &&
+              Array.from(boxes).every(cb => selectedResponseIds.has(cb.value));
+          }
+        }
+
+        async function deleteSurveyResponse(id) {
+          const response = allSurveyResponses.find(r => r.id === id);
+          const where = response && response.event ? response.event.venueName : 'this event';
+          const when = response ? new Date(response.completedAt).toLocaleString() : '';
+
+          if (!confirm(
+            'Delete this one survey?\\n\\n' +
+            where + (when ? ' — ' + when : '') + '\\n\\n' +
+            'The event, its photos and everyone else\\'s answers are kept.\\n' +
+            'This cannot be undone.'
+          )) return;
+
+          try {
+            const res = await fetch(API_BASE + '/surveys/responses/' + id, { method: 'DELETE' });
+            const data = await res.json();
+
+            if (data.error) {
+              alert('Could not delete: ' + data.error.message);
+              return;
+            }
+
+            selectedResponseIds.delete(id);
+            loadSurveyResponses();
+          } catch (err) {
+            console.error('Error deleting survey response:', err);
+            alert('Error deleting survey');
+          }
+        }
+
+        async function deleteSelectedResponses() {
+          const ids = Array.from(selectedResponseIds);
+          if (ids.length === 0) return;
+
+          if (!confirm(
+            'Delete ' + ids.length + ' survey' + (ids.length === 1 ? '' : 's') + '?\\n\\n' +
+            'Only these answers are removed. The events they belong to, their\\n' +
+            'photos and every other survey are kept.\\n\\n' +
+            'This cannot be undone.'
+          )) return;
+
+          try {
+            const res = await fetch(API_BASE + '/surveys/responses/delete', {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({ ids, confirm: 'DELETE' })
+            });
+            const data = await res.json();
+
+            if (data.error) {
+              alert('Could not delete: ' + data.error.message);
+              return;
+            }
+
+            selectedResponseIds.clear();
+
+            const missing = (data.data.missingIds || []).length;
+            if (missing > 0) {
+              alert('Deleted ' + data.data.deletedCount + ' survey(s). ' + missing +
+                ' had already been removed by someone else.');
+            }
+
+            loadSurveyResponses();
+          } catch (err) {
+            console.error('Error deleting survey responses:', err);
+            alert('Error deleting surveys');
+          }
         }
 
         /**
@@ -3376,8 +3750,14 @@ adminPortalRouter.get("/", (c) => {
           const survey = surveyTypes.find(s => s.slug === slug);
           document.getElementById('surveyResultsTitle').textContent = survey ? survey.name + ' - Results' : 'Survey Results';
 
+          // Scoped to whatever is ticked on the Data tab. These charts are what
+          // gets read out in a debrief, and a chart labelled with one venue but
+          // built from the whole tour's answers is worse than no chart.
+          const params = dataTabParams();
+          const scope = selectionLabel();
+
           try {
-            const res = await fetch(API_BASE + '/surveys/results/' + slug);
+            const res = await fetch(API_BASE + '/surveys/results/' + slug + '?' + params.toString());
             const data = await res.json();
 
             if (data.error) {
@@ -3388,13 +3768,16 @@ adminPortalRouter.get("/", (c) => {
             const results = data.data;
 
             if (results.totalResponses === 0) {
-              document.getElementById('surveyResultsContent').innerHTML = '<p class="text-muted">No responses yet for this survey.</p>';
+              document.getElementById('surveyResultsContent').innerHTML =
+                '<p class="text-muted">No responses for this survey across ' + escapeHtml(scope) +
+                '. Tick the events you want on the Data tab.</p>';
               return;
             }
 
             let html = \`
               <div style="margin-bottom: 20px;">
                 <p style="color: #888;">Total Responses: <strong style="color: #fff;">\${results.totalResponses}</strong></p>
+                <p style="color: #888; font-size: 13px;">Counting \${escapeHtml(scope)} — change the tick boxes on the Data tab to narrow this down.</p>
               </div>
             \`;
 

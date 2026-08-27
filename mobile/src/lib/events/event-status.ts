@@ -8,17 +8,19 @@
  *  - the calendar day it was scheduled for has passed — this is the offline
  *    safety net, because a tablet left running overnight has no other way to
  *    know yesterday's event is done.
+ *
+ * All of it is judged in the venue's time zone (see event-time.ts), so the
+ * tablet's own clock setting can't end an event early or late.
  */
+
+import { dayKeyInZone } from './event-time';
 
 export interface EventTiming {
   status?: 'active' | 'completed' | string | null;
   eventDate?: string | null;
   eventEndAt?: string | null;
-}
-
-/** Local midnight at the start of the day the given instant falls in. */
-function startOfDay(date: Date): Date {
-  return new Date(date.getFullYear(), date.getMonth(), date.getDate());
+  /** Venue's IANA zone; the day rollover is judged in it, not the tablet's. */
+  timeZone?: string | null;
 }
 
 export function isEventOver(event: EventTiming | null | undefined, now: Date = new Date()): boolean {
@@ -34,13 +36,16 @@ export function isEventOver(event: EventTiming | null | undefined, now: Date = n
   }
 
   if (event.eventDate) {
-    const eventDay = new Date(event.eventDate);
-    if (!Number.isNaN(eventDay.getTime())) {
-      // Strictly before today — an event still on its own day is never expired
-      // by date alone, however late it runs.
-      if (startOfDay(eventDay).getTime() < startOfDay(now).getTime()) {
-        return true;
-      }
+    // Days are counted the way the venue counts them. A tablet on UTC would
+    // otherwise roll over to "tomorrow" at 7pm Central and close the event
+    // hours early.
+    const eventDay = dayKeyInZone(event.eventDate, event.timeZone);
+    const today = dayKeyInZone(now, event.timeZone);
+
+    // Strictly before today — an event still on its own day is never expired
+    // by date alone, however late it runs.
+    if (eventDay && today && eventDay < today) {
+      return true;
     }
   }
 

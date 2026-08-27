@@ -26,6 +26,7 @@ import * as ImagePicker from 'expo-image-picker';
 import * as ImageManipulator from 'expo-image-manipulator';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { EventCard } from '@/components/admin/EventCard';
+import { formatEventDate } from '@/lib/events/event-time';
 import { useDeviceStore } from '@/lib/state/device-store';
 import { api } from '@/lib/api/api';
 import { useSurveyTypes } from '@/lib/survey-questions';
@@ -393,6 +394,7 @@ export default function EventsScreen() {
                     city={event.venueCity}
                     state={event.venueState}
                     date={event.eventDate}
+                    timeZone={event.timeZone}
                     surveyCount={event._count?.surveyResponses || 0}
                     status={event.status}
                     onPress={() => handleEventPress(event)}
@@ -420,6 +422,7 @@ export default function EventsScreen() {
                     city={event.venueCity}
                     state={event.venueState}
                     date={event.eventDate}
+                    timeZone={event.timeZone}
                     surveyCount={event._count?.surveyResponses || 0}
                     status={event.status}
                     onPress={() => handleEventPress(event)}
@@ -473,7 +476,11 @@ export default function EventsScreen() {
                 <View className="flex-row items-center mb-4">
                   <Calendar size={16} color="#71717a" />
                   <Text className="text-zinc-400 ml-1">
-                    {new Date(selectedEvent.eventDate).toLocaleDateString()}
+                    {formatEventDate(selectedEvent.eventDate, selectedEvent.timeZone, {
+                      month: 'short',
+                      day: 'numeric',
+                      year: 'numeric',
+                    })}
                   </Text>
                 </View>
 

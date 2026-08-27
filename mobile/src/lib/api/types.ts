@@ -67,6 +67,13 @@ export interface Event {
    * calendar day rolling over, ends it.
    */
   eventEndAt?: string | null;
+  /**
+   * IANA zone the venue is in ("America/Chicago"), set by the admin portal.
+   * Times are stored as instants, so this is what keeps a 9pm end time from
+   * showing up as 2am on a tablet whose clock is set to another zone. Null on
+   * events saved before the portal started asking for it.
+   */
+  timeZone?: string | null;
   surveyTypes: SurveyTypeSlug[];
   overlayType: string; // Now an overlay ID
   overlayId?: string | null; // Assigned custom overlay id

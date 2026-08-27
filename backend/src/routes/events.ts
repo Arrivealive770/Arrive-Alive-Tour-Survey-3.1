@@ -5,6 +5,7 @@ import { prisma } from "../prisma";
 import { purgeEventParticipantData } from "../lib/pledge-privacy";
 import { describeEventDeletion, deleteEventCompletely } from "../lib/hard-delete";
 import { eventPurgeScheduler } from "../lib/event-purge";
+import { describeEventReadiness } from "../lib/event-readiness";
 import { storeFile } from "../lib/file-storage";
 import { overlayForEvent } from "../lib/event-overlay";
 
@@ -142,6 +143,10 @@ const createEventSchema = z.object({
     .transform((str) => new Date(str))
     .nullable()
     .optional(),
+  // IANA zone the venue is in, e.g. "America/Chicago". Sent by the admin portal
+  // so tablets show the end time the office typed rather than re-rendering the
+  // stored instant in whatever zone the tablet's clock happens to be set to.
+  timeZone: z.string().min(1).nullable().optional(),
   surveyTypes: z.array(z.string()).min(1, "At least one survey type is required"),
   // Only meaningful when Picture Pledge is on. A survey-only event has no
   // photos to brand, and demanding an overlay for one made it impossible to
@@ -174,6 +179,7 @@ eventsRouter.post(
         venueState: data.venueState,
         eventDate: data.eventDate,
         eventEndAt: data.eventEndAt ?? null,
+        timeZone: data.timeZone ?? null,
         surveyTypes: JSON.stringify(data.surveyTypes),
         overlayType: data.overlayType,
         ...(data.overlayId && { overlayId: data.overlayId }),
@@ -201,6 +207,11 @@ const updateEventSchema = z.object({
   eventEndAt: z
     .union([z.string(), z.null()])
     .transform((value) => (value ? new Date(value) : null))
+    .optional(),
+  // "" or null clears it; a zone name re-anchors how tablets display the times.
+  timeZone: z
+    .union([z.string(), z.null()])
+    .transform((value) => (value ? value : null))
     .optional(),
   surveyTypes: z.array(z.string()).optional(),
   overlayType: z.string().min(1).optional(),
@@ -242,6 +253,7 @@ eventsRouter.put(
         ...(data.venueState && { venueState: data.venueState }),
         ...(data.eventDate && { eventDate: data.eventDate }),
         ...(data.eventEndAt !== undefined && { eventEndAt: data.eventEndAt }),
+        ...(data.timeZone !== undefined && { timeZone: data.timeZone }),
         // Pushing the end time into the future (the event ran long) re-arms the
         // purge for an event that was already cleaned up.
         ...(data.eventEndAt && data.eventEndAt > new Date() && { photosPurgedAt: null }),
@@ -251,6 +263,12 @@ eventsRouter.put(
         ...(data.overlayId !== undefined && { overlayId: data.overlayId }),
         ...(data.picturePledgeEnabled !== undefined && { picturePledgeEnabled: data.picturePledgeEnabled }),
         ...(data.status && { status: data.status }),
+        // The auto-purge measures its wait from here, so completing an event
+        // by hand has to leave a timestamp. Re-opening one clears it.
+        ...(data.status === "completed" && existingEvent.status !== "completed"
+          ? { completedAt: new Date() }
+          : {}),
+        ...(data.status === "active" ? { completedAt: null } : {}),
       },
       include: {
         team: {
@@ -350,6 +368,9 @@ eventsRouter.put("/:id/complete", async (c) => {
     where: { id },
     data: {
       status: "completed",
+      // Stamped so the auto-purge knows when the wait for the last uploads
+      // started. Kept if the event was already completed.
+      completedAt: existingEvent.completedAt ?? new Date(),
     },
     include: {
       team: {
@@ -385,6 +406,22 @@ eventsRouter.post("/:id/purge", async (c) => {
   const result = await purgeEventParticipantData(id);
 
   return c.json({ data: result });
+});
+
+// GET /api/events/:id/purge-readiness - Is this event's data all in yet?
+//
+// The admin portal shows this so "why hasn't it deleted the photos?" has an
+// answer on screen: the purge waits for the tablets to finish uploading.
+eventsRouter.get("/:id/purge-readiness", async (c) => {
+  const id = c.req.param("id");
+
+  const readiness = await describeEventReadiness(id);
+
+  if (!readiness) {
+    return c.json({ error: { message: "Event not found", code: "NOT_FOUND" } }, 404);
+  }
+
+  return c.json({ data: readiness });
 });
 
 // POST /api/events/purge-due - Run the scheduled purge immediately for every

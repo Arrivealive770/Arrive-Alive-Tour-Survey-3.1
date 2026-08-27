@@ -123,6 +123,12 @@ model Event {
   // address belonging to this event. Null = no scheduled purge; staff must run
   // "Purge Now" from the admin portal instead.
   eventEndAt           DateTime?
+  // IANA time zone the event is actually run in ("America/Chicago"), captured
+  // from the admin portal when the event is saved. Timestamps are stored as
+  // instants (UTC), so a tablet whose clock is set to another zone used to show
+  // a 9pm end time as 2am. Every screen formats against this instead of the
+  // device zone, so the venue always sees the time the office typed.
+  timeZone             String?
   // Set by the purge once it has finished for this event. Also stops the purge
   // from re-running against the same event every tick.
   photosPurgedAt       DateTime?
@@ -131,6 +137,10 @@ model Event {
   overlayId            String?  // Custom uploaded overlay assigned to this event
   picturePledgeEnabled Boolean  @default(false) // Whether picture pledge feature is enabled
   status               String   @default("active") // "active" | "completed"
+  // When the event was marked completed. The auto-purge needs a moment the
+  // event ended from, and an event finished early by hand has no eventEndAt to
+  // measure against.
+  completedAt          DateTime?
   createdAt            DateTime @default(now())
 
   // Relations

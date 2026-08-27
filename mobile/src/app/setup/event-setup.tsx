@@ -9,18 +9,13 @@ import { useDatabase } from '@/providers/DatabaseProvider';
 import { api } from '@/lib/api/api';
 import { cacheEventOverlay } from '@/lib/overlays/overlay-cache';
 import { isEventOver } from '@/lib/events/event-status';
+import { formatEventDate, formatEventTime, isEventToday } from '@/lib/events/event-time';
 import { cn } from '@/lib/cn';
 import type { Event, Team } from '@/lib/api/types';
 
-// Helper to check if event date is today
-function isToday(dateString: string): boolean {
-  const eventDate = new Date(dateString);
-  const today = new Date();
-  return (
-    eventDate.getFullYear() === today.getFullYear() &&
-    eventDate.getMonth() === today.getMonth() &&
-    eventDate.getDate() === today.getDate()
-  );
+// "Today" as the venue counts it, not as this tablet's clock does.
+function isToday(event: Event): boolean {
+  return isEventToday(event.eventDate, event.timeZone);
 }
 
 export default function EventSetupScreen() {
@@ -62,7 +57,7 @@ export default function EventSetupScreen() {
   // Auto-select today's event
   useEffect(() => {
     if (selectableEvents.length > 0 && !autoSelected) {
-      const todayEvent = selectableEvents.find((e) => isToday(e.eventDate));
+      const todayEvent = selectableEvents.find((e) => isToday(e));
       if (todayEvent) {
         setSelectedEventId(todayEvent.id);
         setAutoSelected(true);
@@ -91,6 +86,7 @@ export default function EventSetupScreen() {
       currentEventDate: event.eventDate,
       currentEventEndAt: event.eventEndAt ?? null,
       currentEventStatus: event.status,
+      currentEventTimeZone: event.timeZone ?? null,
     });
 
     // Pull the event's frame down now, while the device is provably online —
@@ -125,7 +121,7 @@ export default function EventSetupScreen() {
   };
 
   const selectedEvent = selectableEvents.find((e) => e.id === selectedEventId);
-  const todayCount = selectableEvents.filter((e) => isToday(e.eventDate)).length;
+  const todayCount = selectableEvents.filter((e) => isToday(e)).length;
 
   return (
     <SafeAreaView className="flex-1 bg-black">
@@ -179,7 +175,7 @@ export default function EventSetupScreen() {
 
               <View className="gap-3">
                 {selectableEvents.map((event) => {
-                  const today = isToday(event.eventDate);
+                  const today = isToday(event);
                   const isSelected = selectedEventId === event.id;
 
                   return (
@@ -217,22 +213,14 @@ export default function EventSetupScreen() {
                       <View className="flex-row items-center flex-wrap mb-4">
                         <Calendar size={16} color="#71717a" />
                         <Text className="text-zinc-400 ml-2">
-                          {new Date(event.eventDate).toLocaleDateString('en-US', {
-                            weekday: 'short',
-                            month: 'long',
-                            day: 'numeric',
-                          })}
+                          {formatEventDate(event.eventDate, event.timeZone)}
                         </Text>
                         {event.eventEndAt ? (
                           <>
                             <Text className="text-zinc-600 mx-2">•</Text>
                             <Clock size={14} color="#71717a" />
                             <Text className="text-zinc-400 ml-1.5">
-                              ends{' '}
-                              {new Date(event.eventEndAt).toLocaleTimeString('en-US', {
-                                hour: 'numeric',
-                                minute: '2-digit',
-                              })}
+                              ends {formatEventTime(event.eventEndAt, event.timeZone)}
                             </Text>
                           </>
                         ) : null}

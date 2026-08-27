@@ -546,6 +546,77 @@ surveysRouter.post(
   }
 );
 
+/**
+ * Removing individual surveys.
+ *
+ * A test run, a double tap, a survey a teacher filled in to demonstrate the
+ * kiosk — until now the only way to get one of those out of the numbers was to
+ * delete the whole event, which took every real answer with it. These delete
+ * survey rows and nothing else: the event, its photos and its pledges are
+ * untouched.
+ *
+ * There is no "delete everything matching a filter" endpoint on purpose. Every
+ * deletion has to name the rows it is removing.
+ */
+
+// DELETE /api/surveys/responses/:id - Delete one survey response
+surveysRouter.delete("/responses/:id", async (c) => {
+  const id = c.req.param("id");
+
+  const existing = await prisma.surveyResponse.findUnique({
+    where: { id },
+    select: { id: true, eventId: true, surveyTypeSlug: true, completedAt: true },
+  });
+
+  if (!existing) {
+    return c.json({ error: { message: "Survey response not found", code: "NOT_FOUND" } }, 404);
+  }
+
+  await prisma.surveyResponse.delete({ where: { id } });
+
+  console.log(
+    `[Surveys] Deleted response ${id} (${existing.surveyTypeSlug}, event ${existing.eventId})`
+  );
+
+  return c.json({ data: { deletedCount: 1, ...existing } });
+});
+
+// POST /api/surveys/responses/delete - Delete several survey responses at once
+const deleteResponsesSchema = z.object({
+  ids: z.array(z.string().min(1)).min(1, "At least one response id is required").max(500),
+  // Spelled out by the caller so a stray request can't clear a batch of rows.
+  confirm: z.literal("DELETE"),
+});
+
+surveysRouter.post(
+  "/responses/delete",
+  zValidator("json", deleteResponsesSchema),
+  async (c) => {
+    const { ids } = c.req.valid("json");
+
+    // Ids that no longer exist are reported rather than silently ignored, so
+    // the portal can say "3 of 4 removed" instead of claiming a clean sweep.
+    const found = await prisma.surveyResponse.findMany({
+      where: { id: { in: ids } },
+      select: { id: true },
+    });
+
+    const deleted = await prisma.surveyResponse.deleteMany({
+      where: { id: { in: found.map((r) => r.id) } },
+    });
+
+    console.log(`[Surveys] Deleted ${deleted.count} response(s) by id`);
+
+    return c.json({
+      data: {
+        deletedCount: deleted.count,
+        requestedCount: ids.length,
+        missingIds: ids.filter((id) => !found.some((r) => r.id === id)),
+      },
+    });
+  }
+);
+
 // GET /api/surveys/results/:slug - Get aggregated survey results for pie charts
 surveysRouter.get("/results/:slug", async (c) => {
   const slug = c.req.param("slug");

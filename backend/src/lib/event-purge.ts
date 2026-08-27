@@ -1,13 +1,18 @@
 import { prisma } from "../prisma";
 import { purgeEventParticipantData, type EventPurgeResult } from "./pledge-privacy";
+import { describeEventReadiness } from "./event-readiness";
 
 /**
  * Scheduled end-of-event purge.
  *
- * Every event can be given a designated end time (`Event.eventEndAt`). Once
- * that time passes, every photo and every participant email address belonging
- * to that event is deleted automatically — nobody has to remember to press a
- * button. Survey answers are never touched.
+ * An event is due once it is over — its designated end time (`Event.eventEndAt`)
+ * has passed, or staff marked it completed. Every photo and every participant
+ * email address belonging to it is then deleted automatically; nobody has to
+ * remember to press a button. Survey answers are never touched.
+ *
+ * The purge does not fire the instant the clock strikes: it waits until the
+ * surveys and pledge photos have finished uploading (see event-readiness.ts),
+ * so an event is never wiped out from under a tablet that is still catching up.
  *
  * `Event.photosPurgedAt` is stamped when an event has been handled, so an event
  * is only ever purged once.
@@ -47,8 +52,8 @@ class EventPurgeScheduler {
   }
 
   /**
-   * Purge every event whose designated end time has passed. Safe to call
-   * directly (the admin portal exposes it as POST /api/events/purge-due).
+   * Purge every finished event whose uploads have landed. Safe to call directly
+   * (the admin portal exposes it as POST /api/events/purge-due).
    */
   async runOnce(): Promise<EventPurgeResult[]> {
     // A slow purge must not overlap with the next tick.
@@ -56,12 +61,15 @@ class EventPurgeScheduler {
     this.isPurging = true;
 
     try {
+      const now = new Date();
+
+      // Either kind of "over": the clock ran out, or staff called it a night.
       const dueEvents = await prisma.event.findMany({
         where: {
-          eventEndAt: { not: null, lte: new Date() },
           photosPurgedAt: null,
+          OR: [{ eventEndAt: { not: null, lte: now } }, { status: "completed" }],
         },
-        select: { id: true, venueName: true, eventEndAt: true },
+        select: { id: true, venueName: true, eventEndAt: true, status: true },
       });
 
       if (dueEvents.length === 0) return [];
@@ -70,10 +78,39 @@ class EventPurgeScheduler {
 
       for (const event of dueEvents) {
         try {
+          const readiness = await describeEventReadiness(event.id, now);
+
+          if (!readiness?.ready) {
+            // Normal on the first ticks after an event ends. Logged so staff
+            // watching the server can see the purge is waiting, not stuck.
+            console.log(
+              `[EventPurge] "${event.venueName}" not ready yet — waiting on ` +
+                `${readiness?.waitingOn.join(", ") || "unknown"}`
+            );
+            continue;
+          }
+
+          if (readiness.forced) {
+            console.warn(
+              `[EventPurge] "${event.venueName}" hit the 24h limit with uploads ` +
+                `outstanding (${readiness.waitingOn.join(", ")}) — purging anyway`
+            );
+          }
+
           const result = await purgeEventParticipantData(event.id);
+
+          // An event that has been purged is finished by definition, so the
+          // tablets should stop offering it even if nobody closed it by hand.
+          if (event.status !== "completed") {
+            await prisma.event.update({
+              where: { id: event.id },
+              data: { status: "completed", completedAt: readiness.endedAt ?? now },
+            });
+          }
+
           results.push(result);
           console.log(
-            `[EventPurge] "${event.venueName}" ended ${event.eventEndAt?.toISOString()} — ` +
+            `[EventPurge] "${event.venueName}" ended ${readiness.endedAt?.toISOString()} — ` +
               `deleted ${result.purgedPhotoCount} photo(s), ` +
               `${result.purgedPledgeCount} email address(es), ` +
               `${result.purgedQueuedEmailCount} unsent email(s); ` +

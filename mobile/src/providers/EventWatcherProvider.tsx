@@ -36,6 +36,7 @@ export function EventWatcher() {
   const currentEventDate = useDeviceStore((s) => s.currentEventDate);
   const currentEventEndAt = useDeviceStore((s) => s.currentEventEndAt);
   const currentEventStatus = useDeviceStore((s) => s.currentEventStatus);
+  const currentEventTimeZone = useDeviceStore((s) => s.currentEventTimeZone);
 
   // Guards against two timers both firing an end for the same event.
   const endingRef = useRef(false);
@@ -90,6 +91,7 @@ export function EventWatcher() {
       currentEventDate: serverEvent.eventDate,
       currentEventEndAt: serverEvent.eventEndAt ?? null,
       currentEventStatus: serverEvent.status,
+      currentEventTimeZone: serverEvent.timeZone ?? null,
     });
   }, [serverEvent, currentEventId]);
 
@@ -103,6 +105,7 @@ export function EventWatcher() {
         status: currentEventStatus,
         eventDate: currentEventDate,
         eventEndAt: currentEventEndAt,
+        timeZone: currentEventTimeZone,
       });
       if (over) {
         endEvent();
@@ -126,6 +129,7 @@ export function EventWatcher() {
     currentEventStatus,
     currentEventDate,
     currentEventEndAt,
+    currentEventTimeZone,
     endEvent,
   ]);
 

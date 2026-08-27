@@ -30,6 +30,12 @@ interface DeviceState {
   currentEventEndAt: string | null;
   /** Server status of the running event. 'completed' means it is over. */
   currentEventStatus: 'active' | 'completed' | null;
+  /**
+   * Venue's IANA time zone. Every event time on screen is formatted against
+   * this, so the tablet shows the hour the office typed even if its own clock
+   * is set to another zone.
+   */
+  currentEventTimeZone: string | null;
 
   // Picture pledge settings for current event
   picturePledgeEnabled: boolean;
@@ -76,6 +82,7 @@ const initialState: DeviceState = {
   currentEventDate: null,
   currentEventEndAt: null,
   currentEventStatus: null,
+  currentEventTimeZone: null,
   picturePledgeEnabled: false,
   currentEventOverlayId: null,
   isKioskMode: false,
@@ -108,6 +115,7 @@ export const useDeviceStore = create<DeviceState & DeviceActions & DeviceHydrati
           currentEventDate: null,
           currentEventEndAt: null,
           currentEventStatus: null,
+          currentEventTimeZone: null,
           currentEventOverlayId: null,
           picturePledgeEnabled: false,
           isKioskMode: false,
@@ -149,6 +157,7 @@ export const useDeviceStore = create<DeviceState & DeviceActions & DeviceHydrati
         currentEventDate: state.currentEventDate,
         currentEventEndAt: state.currentEventEndAt,
         currentEventStatus: state.currentEventStatus,
+        currentEventTimeZone: state.currentEventTimeZone,
         picturePledgeEnabled: state.picturePledgeEnabled,
         currentEventOverlayId: state.currentEventOverlayId,
         // Don't persist isKioskMode - kiosk should never be locked on cold start
