@@ -101,14 +101,22 @@ export function EventWatcher() {
     if (!currentEventId || !navigatorReady) return;
 
     const check = () => {
-      const over = isEventOver({
-        status: currentEventStatus,
-        eventDate: currentEventDate,
-        eventEndAt: currentEventEndAt,
-        timeZone: currentEventTimeZone,
-      });
-      if (over) {
-        endEvent();
+      // Belt and braces: this runs on mount, on a timer and on resume, from a
+      // provider that wraps the whole app. A throw in here would close the app
+      // on the menu screen rather than surface anywhere useful, so an event is
+      // left running if the check itself ever fails.
+      try {
+        const over = isEventOver({
+          status: currentEventStatus,
+          eventDate: currentEventDate,
+          eventEndAt: currentEventEndAt,
+          timeZone: currentEventTimeZone,
+        });
+        if (over) {
+          endEvent();
+        }
+      } catch (err) {
+        console.error('[EventWatcher] Could not work out whether the event is over:', err);
       }
     };
 

@@ -9,6 +9,13 @@
  *
  * Events saved before that column existed have no zone; those fall back to the
  * device's own zone, which is what the app did all along.
+ *
+ * IMPORTANT — everything here has to survive Hermes, the engine the tablets
+ * run. Its Intl support is partial: `Intl.DateTimeFormat.prototype.formatToParts`
+ * is missing, and an unknown zone name throws. Nothing in this file may call
+ * anything beyond `toLocaleDateString` / `toLocaleTimeString`, and every
+ * function must return a value rather than throw — a formatting helper is not
+ * worth closing the app over in the middle of an event.
  */
 
 /** The tablet's own zone — the fallback when an event has no zone recorded. */
@@ -20,28 +27,51 @@ export function deviceTimeZone(): string {
   }
 }
 
-function zoneOrDevice(timeZone?: string | null): string {
-  return timeZone && timeZone.trim() ? timeZone : deviceTimeZone();
+function zoneOrDevice(timeZone?: string | null): string | undefined {
+  if (timeZone && timeZone.trim()) return timeZone;
+  try {
+    return Intl.DateTimeFormat().resolvedOptions().timeZone || undefined;
+  } catch {
+    // No Intl at all: let the engine use its own zone by passing nothing.
+    return undefined;
+  }
+}
+
+function toDate(value: string | Date | null | undefined): Date | null {
+  if (!value) return null;
+  const date = value instanceof Date ? value : new Date(value);
+  return Number.isNaN(date.getTime()) ? null : date;
 }
 
 /**
- * Format an instant in a specific zone, falling back to the device zone if the
- * platform rejects it (an unknown zone name throws on some Android builds).
+ * Run a locale format in the venue's zone, then without it if the engine
+ * rejects the zone, then give up quietly. Never throws.
  */
-function formatInZone(
-  value: string | Date | null | undefined,
+function safeFormat(
+  date: Date,
   timeZone: string | null | undefined,
-  options: Intl.DateTimeFormatOptions
+  options: Intl.DateTimeFormatOptions,
+  kind: 'date' | 'time'
 ): string | null {
-  if (!value) return null;
+  const format = (opts: Intl.DateTimeFormatOptions): string =>
+    kind === 'time'
+      ? date.toLocaleTimeString('en-US', opts)
+      : date.toLocaleDateString('en-US', opts);
 
-  const date = value instanceof Date ? value : new Date(value);
-  if (Number.isNaN(date.getTime())) return null;
+  const zone = zoneOrDevice(timeZone);
+
+  if (zone) {
+    try {
+      return format({ ...options, timeZone: zone });
+    } catch {
+      // Unknown zone name, or an engine built without zone support.
+    }
+  }
 
   try {
-    return date.toLocaleString('en-US', { ...options, timeZone: zoneOrDevice(timeZone) });
+    return format(options);
   } catch {
-    return date.toLocaleString('en-US', options);
+    return null;
   }
 }
 
@@ -50,7 +80,9 @@ export function formatEventTime(
   value: string | Date | null | undefined,
   timeZone?: string | null
 ): string | null {
-  return formatInZone(value, timeZone, { hour: 'numeric', minute: '2-digit' });
+  const date = toDate(value);
+  if (!date) return null;
+  return safeFormat(date, timeZone, { hour: 'numeric', minute: '2-digit' }, 'time');
 }
 
 /** "Fri, October 3" in the venue's zone. */
@@ -59,7 +91,14 @@ export function formatEventDate(
   timeZone?: string | null,
   options: Intl.DateTimeFormatOptions = { weekday: 'short', month: 'long', day: 'numeric' }
 ): string | null {
-  return formatInZone(value, timeZone, options);
+  const date = toDate(value);
+  if (!date) return null;
+  return safeFormat(date, timeZone, options, 'date');
+}
+
+/** Zero-padded, so day keys compare as plain strings. */
+function pad(value: number): string {
+  return value < 10 ? `0${value}` : String(value);
 }
 
 /**
@@ -67,39 +106,37 @@ export function formatEventDate(
  *
  * Comparing these strings is how "is this today?" and "has the event day
  * passed?" are answered without the device's own midnight getting a vote.
+ *
+ * Read out of a formatted date string rather than `formatToParts`, which
+ * Hermes does not have. If the zone can't be applied the device's own day is
+ * returned — the same answer the app gave before zones existed.
  */
 export function dayKeyInZone(
   value: string | Date | null | undefined,
   timeZone?: string | null
 ): string | null {
-  if (!value) return null;
+  const date = toDate(value);
+  if (!date) return null;
 
-  const date = value instanceof Date ? value : new Date(value);
-  if (Number.isNaN(date.getTime())) return null;
+  const text = safeFormat(
+    date,
+    timeZone,
+    { year: 'numeric', month: '2-digit', day: '2-digit' },
+    'date'
+  );
 
-  const options: Intl.DateTimeFormatOptions = {
-    year: 'numeric',
-    month: '2-digit',
-    day: '2-digit',
-  };
+  if (text) {
+    // "2026-10-03" on engines that answer in ISO order...
+    const iso = text.match(/(\d{4})\D+(\d{1,2})\D+(\d{1,2})/);
+    if (iso) return `${iso[1]}-${pad(Number(iso[2]))}-${pad(Number(iso[3]))}`;
 
-  let parts: Intl.DateTimeFormatPart[];
-  try {
-    parts = new Intl.DateTimeFormat('en-US', {
-      ...options,
-      timeZone: zoneOrDevice(timeZone),
-    }).formatToParts(date);
-  } catch {
-    parts = new Intl.DateTimeFormat('en-US', options).formatToParts(date);
+    // ...and "10/03/2026" on the ones that answer the American way.
+    const us = text.match(/(\d{1,2})\D+(\d{1,2})\D+(\d{4})/);
+    if (us) return `${us[3]}-${pad(Number(us[1]))}-${pad(Number(us[2]))}`;
   }
 
-  const get = (type: string) => parts.find((part) => part.type === type)?.value ?? '';
-  const year = get('year');
-  const month = get('month');
-  const day = get('day');
-
-  if (!year || !month || !day) return null;
-  return `${year}-${month}-${day}`;
+  // Nothing parseable came back; fall back to the device's own calendar.
+  return `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())}`;
 }
 
 /** Is this event's date today, as the venue counts days? */
