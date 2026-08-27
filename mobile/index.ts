@@ -54,11 +54,6 @@ function registerBootErrorScreen(error: unknown): void {
 }
 
 try {
-  // First, before anything else can throw: an error from a timer or an
-  // unawaited promise closes the app outright in a release build, and this
-  // is what turns that into a recorded message instead of a vanishing act.
-  require("./src/lib/crash-guard").installCrashGuard();
-
   require("react-native-get-random-values");
   require("react-native-reanimated");
   require("expo-router/entry");

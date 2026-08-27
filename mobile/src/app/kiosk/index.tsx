@@ -89,7 +89,6 @@ export default function KioskHome() {
               currentEventDate: event.eventDate,
               currentEventEndAt: event.eventEndAt ?? null,
               currentEventStatus: event.status,
-              currentEventTimeZone: event.timeZone ?? null,
             });
           } catch (err) {
             console.error('[KioskHome] Failed to refresh event from server:', err);

@@ -1,7 +1,6 @@
 import { View, Text, Pressable } from 'react-native';
 import { MapPin, Calendar, Users, CheckCircle2, Clock } from 'lucide-react-native';
 import { cn } from '@/lib/cn';
-import { formatEventDate } from '@/lib/events/event-time';
 
 export interface EventCardProps {
   id: string;
@@ -9,8 +8,6 @@ export interface EventCardProps {
   city: string;
   state: string;
   date: string;
-  /** Venue's IANA zone, so the date reads the same as in the admin portal. */
-  timeZone?: string | null;
   surveyCount: number;
   status: 'active' | 'completed';
   onPress?: () => void;
@@ -21,19 +18,20 @@ export function EventCard({
   city,
   state,
   date,
-  timeZone,
   surveyCount,
   status,
   onPress,
 }: EventCardProps) {
   const isActive = status === 'active';
 
-  const formatDate = (dateString: string) =>
-    formatEventDate(dateString, timeZone, {
+  const formatDate = (dateString: string) => {
+    const date = new Date(dateString);
+    return date.toLocaleDateString('en-US', {
       month: 'short',
       day: 'numeric',
       year: 'numeric',
-    }) ?? '';
+    });
+  };
 
   return (
     <Pressable

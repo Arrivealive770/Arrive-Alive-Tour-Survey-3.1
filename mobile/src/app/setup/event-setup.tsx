@@ -9,13 +9,18 @@ import { useDatabase } from '@/providers/DatabaseProvider';
 import { api } from '@/lib/api/api';
 import { cacheEventOverlay } from '@/lib/overlays/overlay-cache';
 import { isEventOver } from '@/lib/events/event-status';
-import { formatEventDate, formatEventTime, isEventToday } from '@/lib/events/event-time';
 import { cn } from '@/lib/cn';
 import type { Event, Team } from '@/lib/api/types';
 
-// "Today" as the venue counts it, not as this tablet's clock does.
-function isToday(event: Event): boolean {
-  return isEventToday(event.eventDate, event.timeZone);
+// Helper to check if event date is today
+function isToday(dateString: string): boolean {
+  const eventDate = new Date(dateString);
+  const today = new Date();
+  return (
+    eventDate.getFullYear() === today.getFullYear() &&
+    eventDate.getMonth() === today.getMonth() &&
+    eventDate.getDate() === today.getDate()
+  );
 }
 
 export default function EventSetupScreen() {
@@ -44,10 +49,9 @@ export default function EventSetupScreen() {
     enabled: !!teamId,
   });
 
-  // Only events the home office has marked complete are dropped. A scheduled
-  // end time that has already passed does NOT hide an event — crews run late,
-  // and the times listed below are information, not a cut-off. Soonest first,
-  // so the area the crew is heading to next is at the top.
+  // Anything already past its end time or day is no longer a place to work,
+  // even if the home office hasn't marked it complete yet. Soonest first, so
+  // the area the crew is heading to next is at the top.
   const selectableEvents = useMemo(() => {
     if (!events) return [];
     return events
@@ -58,7 +62,7 @@ export default function EventSetupScreen() {
   // Auto-select today's event
   useEffect(() => {
     if (selectableEvents.length > 0 && !autoSelected) {
-      const todayEvent = selectableEvents.find((e) => isToday(e));
+      const todayEvent = selectableEvents.find((e) => isToday(e.eventDate));
       if (todayEvent) {
         setSelectedEventId(todayEvent.id);
         setAutoSelected(true);
@@ -87,7 +91,6 @@ export default function EventSetupScreen() {
       currentEventDate: event.eventDate,
       currentEventEndAt: event.eventEndAt ?? null,
       currentEventStatus: event.status,
-      currentEventTimeZone: event.timeZone ?? null,
     });
 
     // Pull the event's frame down now, while the device is provably online —
@@ -122,7 +125,7 @@ export default function EventSetupScreen() {
   };
 
   const selectedEvent = selectableEvents.find((e) => e.id === selectedEventId);
-  const todayCount = selectableEvents.filter((e) => isToday(e)).length;
+  const todayCount = selectableEvents.filter((e) => isToday(e.eventDate)).length;
 
   return (
     <SafeAreaView className="flex-1 bg-black">
@@ -176,7 +179,7 @@ export default function EventSetupScreen() {
 
               <View className="gap-3">
                 {selectableEvents.map((event) => {
-                  const today = isToday(event);
+                  const today = isToday(event.eventDate);
                   const isSelected = selectedEventId === event.id;
 
                   return (
@@ -214,14 +217,22 @@ export default function EventSetupScreen() {
                       <View className="flex-row items-center flex-wrap mb-4">
                         <Calendar size={16} color="#71717a" />
                         <Text className="text-zinc-400 ml-2">
-                          {formatEventDate(event.eventDate, event.timeZone)}
+                          {new Date(event.eventDate).toLocaleDateString('en-US', {
+                            weekday: 'short',
+                            month: 'long',
+                            day: 'numeric',
+                          })}
                         </Text>
                         {event.eventEndAt ? (
                           <>
                             <Text className="text-zinc-600 mx-2">•</Text>
                             <Clock size={14} color="#71717a" />
                             <Text className="text-zinc-400 ml-1.5">
-                              ends {formatEventTime(event.eventEndAt, event.timeZone)}
+                              ends{' '}
+                              {new Date(event.eventEndAt).toLocaleTimeString('en-US', {
+                                hour: 'numeric',
+                                minute: '2-digit',
+                              })}
                             </Text>
                           </>
                         ) : null}

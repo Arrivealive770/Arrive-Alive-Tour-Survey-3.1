@@ -29,20 +29,6 @@ module.exports = ({ config }) => ({
   updates: {
     ...config.updates,
     url: `https://u.expo.dev/${PROJECT_ID}`,
-    // Wait at the splash screen for an update before starting the app.
-    //
-    // Without this, a new bundle downloads in the background and only takes
-    // effect the NEXT time the app opens. That is fine until a build crashes
-    // on startup: the app dies before the download finishes, every launch,
-    // and the tablet can never pull the fix that would save it. Waiting here
-    // means a broken build can always be replaced over the air.
-    //
-    // 12s is the ceiling, not the cost — with no signal the check fails in
-    // well under a second and the app starts on the bundle it already has.
-    //
-    // This is baked into the APK at build time, so it only protects tablets
-    // running a build made after this line was added.
-    fallbackToCacheTimeout: 12000,
   },
   runtimeVersion: {
     policy: 'appVersion',

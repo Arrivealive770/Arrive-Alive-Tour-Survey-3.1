@@ -179,32 +179,6 @@ export class DatabaseService {
     saveData(this.data);
   }
 
-  /** See the native implementation — puts an unanswered batch back in the queue. */
-  async markSurveysPending(localIds: string[]): Promise<void> {
-    this.ensureInitialized();
-    for (const id of localIds) {
-      if (this.data.survey_queue[id]) {
-        this.data.survey_queue[id].syncStatus = SYNC_STATUS.PENDING as 'pending';
-      }
-    }
-    saveData(this.data);
-  }
-
-  /** See the native implementation — requeues anything left mid-flight. */
-  async recoverInterruptedSyncs(): Promise<{ surveys: number; photos: number }> {
-    this.ensureInitialized();
-    let surveys = 0;
-    for (const survey of Object.values(this.data.survey_queue)) {
-      if (survey.syncStatus === SYNC_STATUS.SYNCING) {
-        survey.syncStatus = SYNC_STATUS.PENDING as 'pending';
-        surveys++;
-      }
-    }
-    saveData(this.data);
-    // The web build has no photo queue to recover.
-    return { surveys, photos: 0 };
-  }
-
   async getSurveyQueueCount(): Promise<{ pending: number; synced: number; failed: number }> {
     this.ensureInitialized();
     const counts = { pending: 0, synced: 0, failed: 0 };

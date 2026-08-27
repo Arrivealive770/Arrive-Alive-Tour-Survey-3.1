@@ -1,36 +1,55 @@
 /**
- * Whether an event has been finished — deliberately, by a person.
+ * One definition of "this event is over", used by every screen that has to
+ * decide whether to keep collecting for it.
  *
- * The clock used to get a vote here. An event ended when its `eventEndAt`
- * passed, or when its calendar day rolled over, and the event watcher acted on
- * that by clearing the event and sending the tablet back to the menu.
- *
- * That was wrong for how the tour actually runs. Events overrun, crews stay
- * late, and a tablet that decides on its own that the night is over is worse
- * than useless — it took the app down with it. The teardown fired from a
- * provider wrapping the whole app, so when it landed mid-survey it pulled the
- * kiosk stack out from under a screen that was still animating.
- *
- * Now nothing ends an event except a person: the crew ending it on the tablet,
- * or the home office marking it complete in the admin portal. Scheduled times
- * are still recorded and still shown when picking an area — they just don't
- * decide anything.
+ * An event ends when any of these is true:
+ *  - the home office marked it completed in the admin portal
+ *  - its scheduled end time (eventEndAt) has passed
+ *  - the calendar day it was scheduled for has passed — this is the offline
+ *    safety net, because a tablet left running overnight has no other way to
+ *    know yesterday's event is done.
  */
 
 export interface EventTiming {
   status?: 'active' | 'completed' | string | null;
-  /** Kept for display and sorting. No longer used to decide anything. */
   eventDate?: string | null;
-  /** Kept for display. No longer used to decide anything. */
   eventEndAt?: string | null;
-  timeZone?: string | null;
 }
 
-/**
- * True only when someone marked this event complete. Never true because of the
- * time of day or the date.
- */
-export function isEventOver(event: EventTiming | null | undefined): boolean {
+/** Local midnight at the start of the day the given instant falls in. */
+function startOfDay(date: Date): Date {
+  return new Date(date.getFullYear(), date.getMonth(), date.getDate());
+}
+
+export function isEventOver(event: EventTiming | null | undefined, now: Date = new Date()): boolean {
   if (!event) return false;
-  return event.status === 'completed';
+
+  if (event.status === 'completed') return true;
+
+  if (event.eventEndAt) {
+    const endAt = new Date(event.eventEndAt);
+    if (!Number.isNaN(endAt.getTime()) && now.getTime() >= endAt.getTime()) {
+      return true;
+    }
+  }
+
+  if (event.eventDate) {
+    const eventDay = new Date(event.eventDate);
+    if (!Number.isNaN(eventDay.getTime())) {
+      // Strictly before today — an event still on its own day is never expired
+      // by date alone, however late it runs.
+      if (startOfDay(eventDay).getTime() < startOfDay(now).getTime()) {
+        return true;
+      }
+    }
+  }
+
+  return false;
+}
+
+/** Short reason to show the crew on the menu after an event auto-ends. */
+export function eventOverReason(event: EventTiming | null | undefined): string {
+  if (event?.status === 'completed') return 'This event was marked complete by the home office.';
+  if (event?.eventEndAt) return 'This event has reached its scheduled end time.';
+  return 'This event day has ended.';
 }

@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useState } from 'react';
 import { View, Text, Pressable, useWindowDimensions } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useRouter, useLocalSearchParams } from 'expo-router';
@@ -34,6 +34,10 @@ export default function ThankYouScreen() {
   const params = useLocalSearchParams<{ declined?: string }>();
   const declined = params.declined === '1';
 
+  const [countdown, setCountdown] = useState(
+    declined ? DECLINED_COUNTDOWN_SECONDS : COUNTDOWN_SECONDS
+  );
+
   const resetPledge = usePledgeStore((s) => s.reset);
   const resetSurvey = useSurveyStore((s) => s.reset);
   const startPledge = usePledgeStore((s) => s.startPledge);
@@ -44,9 +48,7 @@ export default function ThankYouScreen() {
 
   // Animate check mark on mount
   useEffect(() => {
-    // A tablet with no vibration motor rejects this; unhandled, that surfaces
-    // as an error with no owner at the exact moment the screen appears.
-    Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success).catch(() => {});
+    Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
 
     checkScale.value = withDelay(
       200,
@@ -57,12 +59,23 @@ export default function ThankYouScreen() {
     );
   }, [checkScale]);
 
-  const finishedRef = useRef(false);
+  // Countdown timer
+  useEffect(() => {
+    const timer = setInterval(() => {
+      setCountdown((prev) => {
+        if (prev <= 1) {
+          clearInterval(timer);
+          handleFinish();
+          return 0;
+        }
+        return prev - 1;
+      });
+    }, 1000);
+
+    return () => clearInterval(timer);
+  }, []);
 
   const handleFinish = useCallback(() => {
-    if (finishedRef.current) return;
-    finishedRef.current = true;
-
     resetPledge();
     resetSurvey();
     router.replace('/kiosk' as any);
@@ -70,7 +83,7 @@ export default function ThankYouScreen() {
 
   // Persistent opt-in: relaunch the SAME pledge photo process later.
   const handleTakePledge = useCallback(() => {
-    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Heavy).catch(() => {});
+    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Heavy);
     startPledge('');
     if (picturePledgeEnabled) {
       router.replace('/kiosk/pledge' as any);
@@ -245,52 +258,19 @@ export default function ThankYouScreen() {
             </Text>
           </Pressable>
 
-          <Countdown
-            seconds={declined ? DECLINED_COUNTDOWN_SECONDS : COUNTDOWN_SECONDS}
-            onDone={handleFinish}
-          />
+          <Text
+            style={{
+              color: '#52525b',
+              fontSize: 14,
+            }}
+          >
+            Returning to survey in{' '}
+            <Text style={{ color: '#71717a', fontWeight: '600' }}>{countdown}</Text>
+            {' '}seconds...
+          </Text>
         </Animated.View>
       </View>
     </SafeAreaView>
-  );
-}
-
-/**
- * The "returning in N seconds" line, and the timer behind it.
- *
- * This is a separate component for one reason: it changes every second, and
- * everything around it on this screen is a Reanimated entering animation. Held
- * in the screen itself, the count re-rendered the whole tree once a second —
- * including views whose entry animations were still running, which Android's
- * animation manager does not take kindly to. Keeping the state down here means
- * the screen renders once and only this line updates.
- *
- * Finishing happens in an effect, never inside the state updater: React runs
- * updaters while working out the next render, where resetting other components
- * and changing route are both out of bounds.
- */
-function Countdown({ seconds, onDone }: { seconds: number; onDone: () => void }) {
-  const [remaining, setRemaining] = useState(seconds);
-
-  useEffect(() => {
-    const timer = setInterval(() => {
-      setRemaining((prev) => (prev <= 1 ? 0 : prev - 1));
-    }, 1000);
-
-    return () => clearInterval(timer);
-  }, []);
-
-  useEffect(() => {
-    if (remaining > 0) return;
-    onDone();
-  }, [remaining, onDone]);
-
-  return (
-    <Text style={{ color: '#52525b', fontSize: 14 }}>
-      Returning to survey in{' '}
-      <Text style={{ color: '#71717a', fontWeight: '600' }}>{remaining}</Text>
-      {' '}seconds...
-    </Text>
   );
 }
 

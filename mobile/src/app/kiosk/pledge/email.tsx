@@ -111,7 +111,7 @@ export default function EmailScreen() {
     setIsSubmitting(true);
     setError(null);
     Keyboard.dismiss();
-    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium).catch(() => {});
+    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
 
     // No photo selected (skipped or no photos): just queue the email pledge.
     if (!selectedPhotoId) {
@@ -184,7 +184,7 @@ export default function EmailScreen() {
     setIsSubmitting(true);
     setError(null);
     Keyboard.dismiss();
-    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light).catch(() => {});
+    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
 
     try {
       // Skipping email: no photo is delivered. Release any selected photo.
