@@ -21,9 +21,28 @@
  * process anyway, the next launch can still show what went wrong.
  */
 
-import AsyncStorage from '@react-native-async-storage/async-storage';
-
 const STORAGE_KEY = 'last-crash';
+
+/**
+ * Storage is loaded on demand rather than imported at the top of this file.
+ *
+ * index.ts loads this module first of all — ahead of Reanimated, which is
+ * documented as needing to come before anything else in the entry file.
+ * Dragging a native module in front of it, at boot, for something only needed
+ * at the moment a crash is written down, is not a trade worth making. If the
+ * import fails the record simply stays in memory for this run.
+ */
+function storage(): {
+  setItem(key: string, value: string): Promise<void>;
+  getItem(key: string): Promise<string | null>;
+  removeItem(key: string): Promise<void>;
+} | null {
+  try {
+    return require('@react-native-async-storage/async-storage').default ?? null;
+  } catch {
+    return null;
+  }
+}
 
 export interface CrashRecord {
   message: string;
@@ -70,7 +89,11 @@ export function recordCrash(error: unknown, fatal = false): CrashRecord {
   lastCrash = record;
 
   // Best effort — if storage is what broke, there is nothing more to do.
-  AsyncStorage.setItem(STORAGE_KEY, JSON.stringify(record)).catch(() => {});
+  try {
+    storage()?.setItem(STORAGE_KEY, JSON.stringify(record)).catch(() => {});
+  } catch {
+    // Keep the in-memory copy and move on.
+  }
 
   return record;
 }
@@ -114,7 +137,7 @@ export function getCrashInMemory(): CrashRecord | null {
 export async function getLastCrash(): Promise<CrashRecord | null> {
   if (lastCrash) return lastCrash;
   try {
-    const raw = await AsyncStorage.getItem(STORAGE_KEY);
+    const raw = await storage()?.getItem(STORAGE_KEY);
     if (!raw) return null;
     return JSON.parse(raw) as CrashRecord;
   } catch {
@@ -126,7 +149,7 @@ export async function getLastCrash(): Promise<CrashRecord | null> {
 export async function clearLastCrash(): Promise<void> {
   lastCrash = null;
   try {
-    await AsyncStorage.removeItem(STORAGE_KEY);
+    await storage()?.removeItem(STORAGE_KEY);
   } catch {
     // Nothing useful to do; the record is gone from memory either way.
   }

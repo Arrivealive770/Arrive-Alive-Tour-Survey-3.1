@@ -7,8 +7,11 @@
  *    downloads a new bundle in the background and only swaps it in on the
  *    NEXT launch. If the app closes a second after opening, the download is
  *    killed halfway every single time and the tablet is stranded on the
- *    broken bundle forever. So we fetch and reload immediately at startup
- *    instead of waiting for a next launch that may never get far enough.
+ *    broken bundle forever. The fix for that is fallbackToCacheTimeout in
+ *    app.config.js — the native side waits at the splash screen before any
+ *    JavaScript runs — plus the manual "tap the build stamp" route below.
+ *    Restarting the app from JavaScript during startup was tried and is not
+ *    the answer; see useStartupUpdate.
  *
  * 2. Nobody could tell what a tablet was running. "Is it still crashing, or
  *    did it never get the fix?" is unanswerable without a build stamp you can
@@ -88,13 +91,28 @@ export async function fetchAndApplyUpdate(): Promise<UpdateCheckResult> {
 }
 
 /**
- * Runs one update check per app start, in the background.
+ * Downloads a waiting update in the background, once per app start.
  *
- * Returns true while an update is being downloaded, so the caller can say so
- * on screen instead of the tablet appearing to freeze before it restarts.
+ * It deliberately does NOT restart the app.
  *
- * There is no reload loop to worry about: after the restart the new bundle is
- * the newest one, so the next check finds nothing available.
+ * An earlier version of this called reloadAsync() the moment a new bundle
+ * arrived, so a tablet could rescue itself from a build that crashed on
+ * startup. In practice that meant the app relaunched itself while it was
+ * still opening — which, from the far side of a tablet screen, is
+ * indistinguishable from the app crashing on open, and turned every publish
+ * into a support call. Restarting an app during its own startup is not
+ * something to do behind the crew's back.
+ *
+ * The update still lands; it just takes effect the next time the app is
+ * opened, which is the reopen the crew were doing anyway. Two safer routes
+ * cover the case this was meant to solve:
+ *
+ *   - fallbackToCacheTimeout in app.config.js, which waits for an update at
+ *     the splash screen, natively, before any JavaScript runs at all
+ *   - the build stamp on the menu screen, which fetches and restarts on
+ *     demand — a deliberate tap, not a surprise
+ *
+ * Returns true while the download is running.
  */
 export function useStartupUpdate(): boolean {
   const [checking, setChecking] = useState(false);
@@ -109,7 +127,18 @@ export function useStartupUpdate(): boolean {
     let cancelled = false;
     setChecking(true);
 
-    fetchAndApplyUpdate()
+    // Nothing here may throw: this runs from the root layout, where an escaped
+    // error takes the whole app down before there is a screen to show it on.
+    (async () => {
+      try {
+        const check = await Updates.checkForUpdateAsync();
+        if (!check.isAvailable) return;
+        await Updates.fetchUpdateAsync();
+        console.log('[Updates] Downloaded — it will be used next time the app opens.');
+      } catch (err) {
+        console.warn('[Updates] Background update check failed:', err);
+      }
+    })()
       .catch(() => undefined)
       .finally(() => {
         if (!cancelled) setChecking(false);
