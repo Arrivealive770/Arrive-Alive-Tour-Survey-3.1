@@ -1,7 +1,8 @@
 /**
- * Catches the crashes nothing else can, and remembers them.
+ * Catches the crashes nothing else can, remembers them, and gets the tablet
+ * back on its feet.
  *
- * There were already two safety nets and neither covered the case that keeps
+ * There were already two safety nets and neither covered the case that kept
  * closing the tablets:
  *
  *   index.ts        catches a failure while modules are still loading
@@ -10,18 +11,47 @@
  * Neither sees an error thrown from a timer, an event listener, or a promise
  * nobody awaited. React Native's default behaviour for one of those in a
  * release build is to kill the process — no message, no screen, the app just
- * closes a second after opening. Which is exactly what the crews described,
- * and exactly why there was nothing to read afterwards.
+ * closes. Which is what the crews described, and why there was nothing to read
+ * afterwards.
  *
- * So: keep the app alive, and write down what happened. A kiosk mid-event is
- * better off running with one broken background job than vanishing, and the
- * saved record is the difference between "it crashes" and knowing the reason.
+ * The first attempt at this simply swallowed everything and returned, on the
+ * theory that a kiosk mid-event is better off limping than vanishing. That was
+ * wrong, and it is what produced the grey screen.
  *
- * The record survives the app closing, so even if something later kills the
- * process anyway, the next launch can still show what went wrong.
+ * A *fatal* error means the JS context was already torn in the middle of doing
+ * something — very often React's own commit phase. Declining to let the process
+ * die does not put any of that back. React is left half-committed and never
+ * renders again, so the app sits there alive with a dead UI: a grey rectangle,
+ * no error screen, nothing to tap. Worse than closing, because closing at least
+ * tells you something happened.
+ *
+ * So the rule is split by severity:
+ *
+ *   not fatal   swallow it. A background job failed; the app is fine. This is
+ *               the case the original guard was actually right about.
+ *   fatal       write it down, then reload the JS bundle. A clean restart puts
+ *               the crew back on the menu in about two seconds with the record
+ *               waiting on screen, instead of a brick or a silent exit.
+ *
+ * Auto-reload is deliberately refused during the first 20 seconds of a run. A
+ * crash that happens at boot would otherwise reload into the same crash for
+ * ever. In that case the error is handed to the default handler — the app
+ * closes, but the record is saved, and the next launch can show it.
  */
 
 const STORAGE_KEY = 'last-crash';
+
+/**
+ * How long the app must have been up before a fatal is treated as worth
+ * restarting for. Below this we assume the crash is at boot and a reload would
+ * just loop.
+ */
+const MIN_UPTIME_BEFORE_RELOAD_MS = 20_000;
+
+/** Longest we will wait for the crash record to reach disk before reloading. */
+const WRITE_FLUSH_TIMEOUT_MS = 1_500;
+
+const startedAt = Date.now();
 
 /**
  * Storage is loaded on demand rather than imported at the top of this file.
@@ -51,12 +81,24 @@ export interface CrashRecord {
   when: string;
   /** Whether React Native considered it fatal (would have closed the app). */
   fatal: boolean;
+  /** Set when the guard restarted the app rather than letting it die. */
+  restarted?: boolean;
 }
 
 let installed = false;
 
 /** Keep the most recent crash in memory too, so the UI can show it instantly. */
 let lastCrash: CrashRecord | null = null;
+
+/**
+ * Resolves once the most recent record has reached disk. Awaited before a
+ * reload, because reloading throws away anything still in flight — and the
+ * record is the entire point.
+ */
+let pendingWrite: Promise<void> = Promise.resolve();
+
+/** Guards against a second fatal arriving while the reload is being set up. */
+let reloading = false;
 
 function describe(error: unknown): { message: string; stack: string } {
   if (error instanceof Error) {
@@ -69,15 +111,11 @@ function describe(error: unknown): { message: string; stack: string } {
 }
 
 /**
- * Install the handler. Call this as early as possible — before the router,
- * before any provider — so it is already in place when something throws.
- */
-/**
  * Write down a crash. Used by the global handler below, and by the router's
  * error screens, so a render crash on a tablet is still readable on the menu
  * screen after someone restarts the app.
  */
-export function recordCrash(error: unknown, fatal = false): CrashRecord {
+export function recordCrash(error: unknown, fatal = false, restarted = false): CrashRecord {
   const { message, stack } = describe(error);
 
   const record: CrashRecord = {
@@ -85,17 +123,46 @@ export function recordCrash(error: unknown, fatal = false): CrashRecord {
     stack,
     when: new Date().toISOString(),
     fatal,
+    restarted,
   };
   lastCrash = record;
 
   // Best effort — if storage is what broke, there is nothing more to do.
   try {
-    storage()?.setItem(STORAGE_KEY, JSON.stringify(record)).catch(() => {});
+    const write = storage()?.setItem(STORAGE_KEY, JSON.stringify(record));
+    pendingWrite = write ? write.catch(() => {}) : Promise.resolve();
   } catch {
     // Keep the in-memory copy and move on.
+    pendingWrite = Promise.resolve();
   }
 
   return record;
+}
+
+/**
+ * Restart into a fresh JS bundle. Returns false if that isn't possible here —
+ * in which case the caller must let the default handler take over, since the
+ * one thing we must not do is return to a broken context.
+ */
+function tryReload(): boolean {
+  try {
+    const Updates = require('expo-updates');
+    if (typeof Updates?.reloadAsync !== 'function') return false;
+
+    // Give the record a moment to land, but never block on it indefinitely.
+    Promise.race([
+      pendingWrite,
+      new Promise((resolve) => setTimeout(resolve, WRITE_FLUSH_TIMEOUT_MS)),
+    ])
+      .then(() => Updates.reloadAsync())
+      .catch((err: unknown) => {
+        console.error('[CrashGuard] Could not restart the app:', err);
+      });
+
+    return true;
+  } catch {
+    return false;
+  }
 }
 
 export function installCrashGuard(): void {
@@ -109,17 +176,45 @@ export function installCrashGuard(): void {
   const previousHandler = errorUtils.getGlobalHandler?.();
 
   errorUtils.setGlobalHandler((error: unknown, isFatal?: boolean) => {
-    const record = recordCrash(error, !!isFatal);
+    const fatal = !!isFatal;
 
-    console.error('[CrashGuard] Caught an uncaught error:', record.message, record.stack);
-
-    // In development, hand it on so the usual red screen still appears.
-    // In production we deliberately stop here: calling the default handler
-    // is what closes the app, and a kiosk that stays up is worth more than
-    // a clean exit nobody is around to see.
-    if (__DEV__ && previousHandler) {
-      previousHandler(error, isFatal);
+    // In development, hand everything on so the usual red screen still appears.
+    if (__DEV__) {
+      recordCrash(error, fatal);
+      previousHandler?.(error, isFatal);
+      return;
     }
+
+    if (!fatal) {
+      // A background job blew up. The app itself is intact, so keep going —
+      // this is the case worth surviving, and the menu will show the record.
+      const record = recordCrash(error, false);
+      console.error('[CrashGuard] Caught a non-fatal error:', record.message, record.stack);
+      return;
+    }
+
+    if (reloading) return;
+
+    const uptimeMs = Date.now() - startedAt;
+    const canRestart = uptimeMs >= MIN_UPTIME_BEFORE_RELOAD_MS;
+    const record = recordCrash(error, true, canRestart);
+
+    console.error(
+      `[CrashGuard] Fatal after ${Math.round(uptimeMs / 1000)}s:`,
+      record.message,
+      record.stack
+    );
+
+    if (canRestart) {
+      reloading = true;
+      if (tryReload()) return;
+      reloading = false;
+    }
+
+    // Either too early in the run to risk a restart loop, or there is no way to
+    // reload. Let it close properly rather than sitting on a dead screen — the
+    // record is saved and the next launch will show it.
+    previousHandler?.(error, isFatal);
   });
 }
 

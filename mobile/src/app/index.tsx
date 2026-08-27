@@ -448,7 +448,9 @@ function LastCrashNotice() {
     <View className="mt-6 rounded-2xl border border-red-500/40 bg-red-500/10 p-4">
       <Pressable onPress={() => setExpanded((value) => !value)}>
         <Text className="text-red-400 font-bold text-sm">
-          An error was recorded on this tablet
+          {crash.restarted
+            ? 'This tablet hit an error and restarted itself'
+            : 'An error was recorded on this tablet'}
         </Text>
         <Text className="text-red-200/80 text-xs mt-1" numberOfLines={expanded ? undefined : 2}>
           {crash.message}
@@ -461,7 +463,9 @@ function LastCrashNotice() {
             </ScrollView>
           </>
         ) : (
-          <Text className="text-red-300/60 text-xs mt-2">Tap to see the details</Text>
+          <Text className="text-red-300/60 text-xs mt-2">
+            Tap to see the details — read them to your developer
+          </Text>
         )}
       </Pressable>
 
