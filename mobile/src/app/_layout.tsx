@@ -11,6 +11,7 @@ import { KeyboardProvider } from 'react-native-keyboard-controller';
 import { DatabaseProvider } from '@/providers/DatabaseProvider';
 import { SyncProvider } from '@/providers/SyncProvider';
 import { EventWatcherProvider } from '@/providers/EventWatcherProvider';
+import { useStartupUpdate } from '@/lib/updates';
 
 export const unstable_settings = {
   // Start at the main index which handles routing based on device config
@@ -63,6 +64,11 @@ export function ErrorBoundary({ error, retry }: { error: Error; retry: () => Pro
 
 export default function RootLayout() {
   const colorScheme = useColorScheme();
+
+  // Pull a waiting update and restart into it now, rather than on some future
+  // launch. A build that closes itself on the menu screen never gets a future
+  // launch long enough to finish a background download.
+  useStartupUpdate();
 
   // Hide the native splash once the JS bundle has mounted. This is deliberately
   // NOT tied to database/sync readiness — if those fail, the app must still show

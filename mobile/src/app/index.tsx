@@ -22,6 +22,7 @@ import {
 import { useTeamAdminAccess } from '@/lib/team-access';
 import { cn } from '@/lib/cn';
 import { formatEventTime } from '@/lib/events/event-time';
+import { fetchAndApplyUpdate, updateStamp } from '@/lib/updates';
 
 const AATLogo = require('@/assets/aat-logo.png');
 
@@ -259,6 +260,8 @@ export default function HomeScreen() {
             <Text className="text-zinc-500 ml-2 font-medium">Reset Device</Text>
           </Pressable>
         </View>
+
+        <BuildStamp />
       </ScrollView>
 
       {/* Reset Confirmation Modal */}
@@ -320,6 +323,52 @@ export default function HomeScreen() {
         </View>
       </Modal>
     </SafeAreaView>
+  );
+}
+
+/**
+ * The build this tablet is actually running, plus a way to pull a newer one.
+ *
+ * This exists so "is it still crashing, or did it never get the fix?" can be
+ * answered by looking at a tablet instead of guessing. Read the code out over
+ * the phone and it's obvious whether an update landed.
+ *
+ * Tapping it forces an update rather than waiting for the next restart — the
+ * crew shouldn't need a technician to get a fix onto a device.
+ */
+function BuildStamp() {
+  const [status, setStatus] = useState<string | null>(null);
+  const [busy, setBusy] = useState(false);
+
+  const handleCheck = async () => {
+    if (busy) return;
+    setBusy(true);
+    setStatus('Checking for updates…');
+
+    const result = await fetchAndApplyUpdate();
+
+    if (result.status === 'installing') {
+      // The app restarts into the new version; this message is the last thing
+      // on screen before it does.
+      setStatus('Update found — restarting…');
+      return;
+    }
+
+    setBusy(false);
+    setStatus(
+      result.status === 'up-to-date'
+        ? 'Up to date'
+        : result.status === 'disabled'
+          ? 'Updates are off in this build'
+          : 'No connection to the update server'
+    );
+  };
+
+  return (
+    <Pressable onPress={handleCheck} className="items-center pt-2 pb-1 active:opacity-70">
+      <Text className="text-zinc-700 text-xs">{updateStamp()}</Text>
+      {status ? <Text className="text-zinc-600 text-xs mt-1">{status}</Text> : null}
+    </Pressable>
   );
 }
 
