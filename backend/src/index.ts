@@ -12,6 +12,7 @@ import { emailService } from "./lib/email-service";
 import { emailQueueProcessor } from "./lib/email-queue-processor";
 import { eventPurgeScheduler } from "./lib/event-purge";
 import { backfillEventOverlayIds } from "./lib/overlay-backfill";
+import { backfillEventTimeZones } from "./lib/timezone-backfill";
 import { runningCommit } from "./lib/version";
 import { sampleRouter } from "./routes/sample";
 import { teamsRouter } from "./routes/teams";
@@ -169,6 +170,13 @@ eventPurgeScheduler.start();
 // instead of the relation the artwork is resolved through. Idempotent.
 backfillEventOverlayIds().catch((err: unknown) =>
   console.error("[OverlayBackfill] Failed:", err)
+);
+
+// Label events that predate the timeZone column, so the portal and the tablets
+// format their times against the same zone instead of each falling back to its
+// own clock. This is what made a 9pm end time read as 2am in the field.
+backfillEventTimeZones().catch((err: unknown) =>
+  console.error("[TimeZoneBackfill] Failed:", err)
 );
 
 const port = Number(process.env.PORT) || 3000;
