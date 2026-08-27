@@ -34,6 +34,17 @@ export default function QuestionScreen() {
   const [isProcessing, setIsProcessing] = useState(false);
   const advanceTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
+  // Set the instant the last answer is taken, and never cleared.
+  //
+  // Finishing the survey empties the store, which makes currentSurveyType null,
+  // which fires the "no survey running, go back to the menu" effect below — at
+  // the same moment this screen is trying to move on to the age question. Two
+  // navigations then race on one screen and whichever lands second wins, so the
+  // guest either gets bounced to the menu with their answers half-filed or the
+  // router is left mid-transition. This flag is how the completion path says
+  // "the survey ended on purpose; don't rescue me".
+  const completingRef = useRef(false);
+
   // Real questions for the selected survey type (cached locally for offline use)
   const { questions, isLoading, isError, refetch } = useSurveyQuestions(currentSurveyType);
   const totalQuestions = questions.length;
@@ -69,48 +80,71 @@ export default function QuestionScreen() {
       // Store the response under the key the backend aggregates by
       setResponse(questionKey, value);
 
-      // Set up auto-advance
-      advanceTimerRef.current = setTimeout(async () => {
-        if (questionIndex >= totalQuestions) {
-          // Last question - complete survey and navigate
-          const completed = completeSurvey();
+      // Set up auto-advance.
+      //
+      // Everything inside runs from a timer, so nothing above it is left to
+      // catch a throw: in a release build an error escaping a timer callback
+      // closes the app outright. The guest is one tap from the end of the
+      // survey here, so a failure has to fall through to the next screen
+      // rather than take the tablet down.
+      advanceTimerRef.current = setTimeout(() => {
+        const run = async () => {
+          if (questionIndex >= totalQuestions) {
+            // Last question. Claim the completion before touching the store —
+            // completeSurvey() clears currentSurveyType, and the redirect
+            // effect below reacts to that within the same tick.
+            completingRef.current = true;
 
-          if (completed && isReady && db) {
-            try {
-              // Get current event info
-              const currentEvent = await db.getCurrentEvent();
+            const completed = completeSurvey();
 
-              // Queue the survey for sync
-              await db.queueSurvey({
-                localId: completed.localId,
-                teamId: teamId || currentEvent?.teamId || 'unknown',
-                eventId: currentEvent?.eventId || currentEventId || 'unknown',
-                surveyTypeSlug: completed.surveyTypeSlug,
-                responses: JSON.stringify(toAnswerMap(completed.responses)),
-                ageRange: completed.ageRange,
-                deviceId: deviceId,
-                completedAt: completed.completedAt,
-                durationSeconds: completed.durationSeconds,
-              });
+            if (completed && isReady && db) {
+              try {
+                // Get current event info
+                const currentEvent = await db.getCurrentEvent();
 
-              // Update pending count
-              const counts = await db.getSurveyQueueCount();
-              updateCounts({ pendingSurveys: counts.pending + counts.failed });
+                // Queue the survey for sync
+                await db.queueSurvey({
+                  localId: completed.localId,
+                  teamId: teamId || currentEvent?.teamId || 'unknown',
+                  eventId: currentEvent?.eventId || currentEventId || 'unknown',
+                  surveyTypeSlug: completed.surveyTypeSlug,
+                  responses: JSON.stringify(toAnswerMap(completed.responses)),
+                  ageRange: completed.ageRange,
+                  deviceId: deviceId,
+                  completedAt: completed.completedAt,
+                  durationSeconds: completed.durationSeconds,
+                });
 
-              console.log('[QuestionScreen] Survey queued:', completed.localId);
-            } catch (error) {
-              console.error('[QuestionScreen] Error queuing survey:', error);
+                // Update pending count
+                const counts = await db.getSurveyQueueCount();
+                updateCounts({ pendingSurveys: counts.pending + counts.failed });
+
+                console.log('[QuestionScreen] Survey queued:', completed.localId);
+              } catch (error) {
+                console.error('[QuestionScreen] Error queuing survey:', error);
+              }
             }
+
+            // Navigate to demographics
+            router.replace('/kiosk/demographics' as any);
+          } else {
+            // Navigate to next question
+            router.push(`/kiosk/survey/${questionIndex + 1}` as any);
           }
 
-          // Navigate to demographics
-          router.replace('/kiosk/demographics' as any);
-        } else {
-          // Navigate to next question
-          router.push(`/kiosk/survey/${questionIndex + 1}` as any);
-        }
+          setIsProcessing(false);
+        };
 
-        setIsProcessing(false);
+        run().catch((error) => {
+          console.error('[QuestionScreen] Could not finish the question:', error);
+          // Don't strand the guest on a dead screen: send them on regardless.
+          setIsProcessing(false);
+          try {
+            router.replace('/kiosk/demographics' as any);
+          } catch {
+            // The router itself is what failed; the idle timer will reset.
+          }
+        });
       }, AUTO_ADVANCE_DELAY);
     },
     [
@@ -136,9 +170,10 @@ export default function QuestionScreen() {
     router.replace('/kiosk' as any);
   }, [reset, router]);
 
-  // Redirect if no survey is active
+  // Redirect if no survey is active — but not when this screen is the one that
+  // just ended it on purpose. See completingRef above.
   useEffect(() => {
-    if (!currentSurveyType) {
+    if (!currentSurveyType && !completingRef.current) {
       router.replace('/kiosk' as any);
     }
   }, [currentSurveyType, router]);

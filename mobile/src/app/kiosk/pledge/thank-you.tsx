@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { View, Text, Pressable, useWindowDimensions } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useRouter, useLocalSearchParams } from 'expo-router';
@@ -59,27 +59,38 @@ export default function ThankYouScreen() {
     );
   }, [checkScale]);
 
-  // Countdown timer
+  const finishedRef = useRef(false);
+
+  const handleFinish = useCallback(() => {
+    if (finishedRef.current) return;
+    finishedRef.current = true;
+
+    resetPledge();
+    resetSurvey();
+    router.replace('/kiosk' as any);
+  }, [resetPledge, resetSurvey, router]);
+
+  // Countdown timer. It only counts — nothing else.
+  //
+  // This used to clear two stores and navigate from inside the setCountdown
+  // callback. React runs that callback while it is working out the next render,
+  // where changing other components' state and pushing a new route are not
+  // allowed; it also ran from a timer, where a throw closes the app instead of
+  // showing an error. Both of those land exactly here, at the end of a guest's
+  // session, which is what the crews were seeing.
   useEffect(() => {
     const timer = setInterval(() => {
-      setCountdown((prev) => {
-        if (prev <= 1) {
-          clearInterval(timer);
-          handleFinish();
-          return 0;
-        }
-        return prev - 1;
-      });
+      setCountdown((prev) => (prev <= 1 ? 0 : prev - 1));
     }, 1000);
 
     return () => clearInterval(timer);
   }, []);
 
-  const handleFinish = useCallback(() => {
-    resetPledge();
-    resetSurvey();
-    router.replace('/kiosk' as any);
-  }, [resetPledge, resetSurvey, router]);
+  // ...and the finishing happens here, in an effect, once the count reaches 0.
+  useEffect(() => {
+    if (countdown > 0) return;
+    handleFinish();
+  }, [countdown, handleFinish]);
 
   // Persistent opt-in: relaunch the SAME pledge photo process later.
   const handleTakePledge = useCallback(() => {

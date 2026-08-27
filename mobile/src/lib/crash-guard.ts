@@ -53,6 +53,28 @@ function describe(error: unknown): { message: string; stack: string } {
  * Install the handler. Call this as early as possible — before the router,
  * before any provider — so it is already in place when something throws.
  */
+/**
+ * Write down a crash. Used by the global handler below, and by the router's
+ * error screens, so a render crash on a tablet is still readable on the menu
+ * screen after someone restarts the app.
+ */
+export function recordCrash(error: unknown, fatal = false): CrashRecord {
+  const { message, stack } = describe(error);
+
+  const record: CrashRecord = {
+    message,
+    stack,
+    when: new Date().toISOString(),
+    fatal,
+  };
+  lastCrash = record;
+
+  // Best effort — if storage is what broke, there is nothing more to do.
+  AsyncStorage.setItem(STORAGE_KEY, JSON.stringify(record)).catch(() => {});
+
+  return record;
+}
+
 export function installCrashGuard(): void {
   if (installed) return;
   installed = true;
@@ -64,20 +86,9 @@ export function installCrashGuard(): void {
   const previousHandler = errorUtils.getGlobalHandler?.();
 
   errorUtils.setGlobalHandler((error: unknown, isFatal?: boolean) => {
-    const { message, stack } = describe(error);
+    const record = recordCrash(error, !!isFatal);
 
-    const record: CrashRecord = {
-      message,
-      stack,
-      when: new Date().toISOString(),
-      fatal: !!isFatal,
-    };
-    lastCrash = record;
-
-    // Best effort — if storage is what broke, there is nothing more to do.
-    AsyncStorage.setItem(STORAGE_KEY, JSON.stringify(record)).catch(() => {});
-
-    console.error('[CrashGuard] Caught an uncaught error:', message, stack);
+    console.error('[CrashGuard] Caught an uncaught error:', record.message, record.stack);
 
     // In development, hand it on so the usual red screen still appears.
     // In production we deliberately stop here: calling the default handler

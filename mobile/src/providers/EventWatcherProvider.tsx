@@ -113,7 +113,10 @@ export function EventWatcher() {
           timeZone: currentEventTimeZone,
         });
         if (over) {
-          endEvent();
+          // endEvent is async, so its failures land outside this try/catch.
+          endEvent().catch((err) => {
+            console.error('[EventWatcher] Could not end the event cleanly:', err);
+          });
         }
       } catch (err) {
         console.error('[EventWatcher] Could not work out whether the event is over:', err);
