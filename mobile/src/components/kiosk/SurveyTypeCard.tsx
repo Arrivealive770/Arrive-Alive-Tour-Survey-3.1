@@ -33,7 +33,7 @@ export function SurveyTypeCard({ name, slug, Icon, onPress }: SurveyTypeCardProp
   }, [scale]);
 
   const handlePress = useCallback(() => {
-    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
+    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium).catch(() => {});
     onPress(slug);
   }, [slug, onPress]);
 

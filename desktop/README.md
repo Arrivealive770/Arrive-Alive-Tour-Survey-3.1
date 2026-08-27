@@ -697,16 +697,16 @@ cd mobile
 eas update --branch preview --message "what changed"
 ```
 
-Takes about a minute. The tablet installs it while it starts up and then
-restarts itself into it, so **one close-and-reopen is enough**.
+Takes about a minute. Then on each tablet: **open the app, close it fully,
+open it again.** The first open downloads the update, the second one runs it.
 
-(It used to take two: the update downloaded in the background and only
-switched on the following launch. That was harmless until a build crashed on
-startup — the app died before the download finished, every single time, and
-the tablet could never pull the fix that would have saved it. Tablets now
-fetch and apply during startup instead, and APKs built after 27 Aug 2026 also
-wait a few seconds at the splash screen for one. A broken build can always be
-replaced over the air now.)
+(For a few hours on 27 Aug the app restarted itself mid-startup to save that
+second reopen. It worked, but a tablet relaunching itself while it opens is
+indistinguishable from a tablet crashing on open, and it turned every publish
+into a support call. Two reopens is the honest version. APKs built after
+27 Aug 2026 get the same effect safely — they wait a few seconds at the splash
+screen, before any of the app's own code runs, so one reopen is enough on
+those.)
 
 **Checking a tablet actually took it.** At the bottom of the menu screen
 there's a small grey line like `v1.0.0 · 3f9a2c1 · preview`. The middle part
@@ -734,6 +734,48 @@ the field until they get a new APK.
 Some changes still need a fresh APK no matter what: a new device permission, a
 new native module (camera, Bluetooth, printing), or an Expo SDK upgrade.
 Wording, screens, layout and survey flow all go over the air.
+
+---
+
+## When a tablet closes on its own
+
+Two places to look, cheapest first.
+
+**1. The menu screen.** If the app caught the error itself, there's a red box
+near the bottom of the menu saying "An error was recorded on this tablet". Tap
+it for the full detail. That box is the answer whenever it's there — read it
+out and no cable is needed.
+
+**2. The tablet's own log.** If the app vanished without leaving that box, the
+error happened below the app, where it can't catch it. Android still wrote it
+down. To get it out you need the tablet, a USB cable, and Developer options:
+
+- On the tablet: **Settings → About tablet → tap "Build number" seven times**
+- Then **Settings → System → Developer options → USB debugging → on**
+- Plug it into the desktop and tap **Allow** on the prompt that appears
+
+Then:
+
+```powershell
+cd C:\ArriveAlive
+.\desktop\get-crash.ps1
+```
+
+(or double-click `desktop\get-crash.bat`)
+
+It clears the log, waits while you make the app crash, then saves everything
+to `desktop\logs\tablet-crash.txt` and prints the interesting lines on screen.
+Send that file on.
+
+The first run downloads Google's Android tools (~15 MB) into `C:\ArriveAlive\tools`.
+After that it's instant.
+
+If the crash already happened and nobody has rebooted the tablet since, skip
+the waiting:
+
+```powershell
+.\desktop\get-crash.ps1 -NoWait
+```
 
 ---
 

@@ -100,7 +100,7 @@ export default function PhotoSelectionScreen() {
       if (isSelecting || !deviceId) return;
 
       setIsSelecting(true);
-      Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
+      Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium).catch(() => {});
 
       try {
         // 1. Atomically lock the photo (available -> selected).
@@ -150,7 +150,7 @@ export default function PhotoSelectionScreen() {
 
   const handleUsePhoto = useCallback(() => {
     if (selectedPhotoId) {
-      Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
+      Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium).catch(() => {});
       router.push('/kiosk/pledge/email' as any);
     }
   }, [selectedPhotoId, router]);

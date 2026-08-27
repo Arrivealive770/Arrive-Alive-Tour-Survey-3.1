@@ -42,7 +42,7 @@ function AgeBracketButton({ label, value, isSelected, onPress }: AgeBracketButto
   }, [scale]);
 
   const handlePress = useCallback(() => {
-    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
+    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium).catch(() => {});
     onPress(value);
   }, [value, onPress]);
 
@@ -118,7 +118,7 @@ export default function DemographicsScreen() {
   }, [isProcessing, router, db]);
 
   const handleSkip = useCallback(() => {
-    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light).catch(() => {});
     router.replace('/kiosk/pledge-prompt' as any);
   }, [router]);
 

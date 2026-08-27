@@ -42,7 +42,7 @@ function ActionButton({ label, sublabel, variant, onPress }: ActionButtonProps) 
       variant === 'primary'
         ? Haptics.ImpactFeedbackStyle.Heavy
         : Haptics.ImpactFeedbackStyle.Light
-    );
+    ).catch(() => {});
     onPress();
   }, [variant, onPress]);
 

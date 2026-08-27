@@ -33,7 +33,7 @@ export function AnswerButton({
   const isTablet = width > 600;
 
   const triggerHaptic = useCallback(() => {
-    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
+    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium).catch(() => {});
   }, []);
 
   const handlePress = useCallback(() => {
