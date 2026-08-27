@@ -1,0 +1,122 @@
+/**
+ * Catches the crashes nothing else can, and remembers them.
+ *
+ * There were already two safety nets and neither covered the case that keeps
+ * closing the tablets:
+ *
+ *   index.ts        catches a failure while modules are still loading
+ *   ErrorBoundary   catches a throw while a screen is rendering
+ *
+ * Neither sees an error thrown from a timer, an event listener, or a promise
+ * nobody awaited. React Native's default behaviour for one of those in a
+ * release build is to kill the process — no message, no screen, the app just
+ * closes a second after opening. Which is exactly what the crews described,
+ * and exactly why there was nothing to read afterwards.
+ *
+ * So: keep the app alive, and write down what happened. A kiosk mid-event is
+ * better off running with one broken background job than vanishing, and the
+ * saved record is the difference between "it crashes" and knowing the reason.
+ *
+ * The record survives the app closing, so even if something later kills the
+ * process anyway, the next launch can still show what went wrong.
+ */
+
+import AsyncStorage from '@react-native-async-storage/async-storage';
+
+const STORAGE_KEY = 'last-crash';
+
+export interface CrashRecord {
+  message: string;
+  stack: string;
+  /** ISO timestamp of when it happened. */
+  when: string;
+  /** Whether React Native considered it fatal (would have closed the app). */
+  fatal: boolean;
+}
+
+let installed = false;
+
+/** Keep the most recent crash in memory too, so the UI can show it instantly. */
+let lastCrash: CrashRecord | null = null;
+
+function describe(error: unknown): { message: string; stack: string } {
+  if (error instanceof Error) {
+    return {
+      message: `${error.name}: ${error.message}`,
+      stack: error.stack ?? '(no stack)',
+    };
+  }
+  return { message: String(error), stack: '(not an Error object)' };
+}
+
+/**
+ * Install the handler. Call this as early as possible — before the router,
+ * before any provider — so it is already in place when something throws.
+ */
+export function installCrashGuard(): void {
+  if (installed) return;
+  installed = true;
+
+  // ErrorUtils is a React Native global with no type declaration.
+  const errorUtils = (globalThis as { ErrorUtils?: ErrorUtilsShape }).ErrorUtils;
+  if (!errorUtils?.setGlobalHandler) return;
+
+  const previousHandler = errorUtils.getGlobalHandler?.();
+
+  errorUtils.setGlobalHandler((error: unknown, isFatal?: boolean) => {
+    const { message, stack } = describe(error);
+
+    const record: CrashRecord = {
+      message,
+      stack,
+      when: new Date().toISOString(),
+      fatal: !!isFatal,
+    };
+    lastCrash = record;
+
+    // Best effort — if storage is what broke, there is nothing more to do.
+    AsyncStorage.setItem(STORAGE_KEY, JSON.stringify(record)).catch(() => {});
+
+    console.error('[CrashGuard] Caught an uncaught error:', message, stack);
+
+    // In development, hand it on so the usual red screen still appears.
+    // In production we deliberately stop here: calling the default handler
+    // is what closes the app, and a kiosk that stays up is worth more than
+    // a clean exit nobody is around to see.
+    if (__DEV__ && previousHandler) {
+      previousHandler(error, isFatal);
+    }
+  });
+}
+
+interface ErrorUtilsShape {
+  setGlobalHandler?: (handler: (error: unknown, isFatal?: boolean) => void) => void;
+  getGlobalHandler?: () => ((error: unknown, isFatal?: boolean) => void) | undefined;
+}
+
+/** The crash from this run, if there was one. */
+export function getCrashInMemory(): CrashRecord | null {
+  return lastCrash;
+}
+
+/** The last crash recorded on this device, including from a previous run. */
+export async function getLastCrash(): Promise<CrashRecord | null> {
+  if (lastCrash) return lastCrash;
+  try {
+    const raw = await AsyncStorage.getItem(STORAGE_KEY);
+    if (!raw) return null;
+    return JSON.parse(raw) as CrashRecord;
+  } catch {
+    return null;
+  }
+}
+
+/** Clear it once someone has read it, so old news doesn't linger on screen. */
+export async function clearLastCrash(): Promise<void> {
+  lastCrash = null;
+  try {
+    await AsyncStorage.removeItem(STORAGE_KEY);
+  } catch {
+    // Nothing useful to do; the record is gone from memory either way.
+  }
+}

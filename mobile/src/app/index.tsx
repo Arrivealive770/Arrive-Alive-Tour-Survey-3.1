@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { View, Text, Pressable, TextInput, Modal, Image, ActivityIndicator, ScrollView } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { router, Redirect, useLocalSearchParams } from 'expo-router';
@@ -23,6 +23,7 @@ import { useTeamAdminAccess } from '@/lib/team-access';
 import { cn } from '@/lib/cn';
 import { formatEventTime } from '@/lib/events/event-time';
 import { fetchAndApplyUpdate, updateStamp } from '@/lib/updates';
+import { clearLastCrash, getLastCrash, type CrashRecord } from '@/lib/crash-guard';
 
 const AATLogo = require('@/assets/aat-logo.png');
 
@@ -261,6 +262,7 @@ export default function HomeScreen() {
           </Pressable>
         </View>
 
+        <LastCrashNotice />
         <BuildStamp />
       </ScrollView>
 
@@ -323,6 +325,65 @@ export default function HomeScreen() {
         </View>
       </Modal>
     </SafeAreaView>
+  );
+}
+
+/**
+ * Shows the last crash this tablet recorded, if there was one.
+ *
+ * The point is to make a crash readable by whoever is holding the tablet.
+ * Before this, an error thrown in the background closed the app with nothing
+ * left behind, and the only way to find out why was a USB cable and a laptop.
+ *
+ * Tap to see the full detail, tap "Clear" once it has been dealt with.
+ */
+function LastCrashNotice() {
+  const [crash, setCrash] = useState<CrashRecord | null>(null);
+  const [expanded, setExpanded] = useState(false);
+
+  useEffect(() => {
+    let active = true;
+    getLastCrash().then((record) => {
+      if (active) setCrash(record);
+    });
+    return () => {
+      active = false;
+    };
+  }, []);
+
+  if (!crash) return null;
+
+  return (
+    <View className="mt-6 rounded-2xl border border-red-500/40 bg-red-500/10 p-4">
+      <Pressable onPress={() => setExpanded((value) => !value)}>
+        <Text className="text-red-400 font-bold text-sm">
+          An error was recorded on this tablet
+        </Text>
+        <Text className="text-red-200/80 text-xs mt-1" numberOfLines={expanded ? undefined : 2}>
+          {crash.message}
+        </Text>
+        {expanded ? (
+          <>
+            <Text className="text-red-200/60 text-[10px] mt-2">{crash.when}</Text>
+            <ScrollView style={{ maxHeight: 200 }} className="mt-2">
+              <Text className="text-red-200/70 text-[10px]">{crash.stack}</Text>
+            </ScrollView>
+          </>
+        ) : (
+          <Text className="text-red-300/60 text-xs mt-2">Tap to see the details</Text>
+        )}
+      </Pressable>
+
+      <Pressable
+        onPress={() => {
+          clearLastCrash();
+          setCrash(null);
+        }}
+        className="mt-3 self-start rounded-lg bg-red-500/20 px-3 py-2 active:opacity-70"
+      >
+        <Text className="text-red-300 text-xs font-semibold">Clear</Text>
+      </Pressable>
+    </View>
   );
 }
 
