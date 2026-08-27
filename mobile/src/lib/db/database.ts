@@ -182,6 +182,53 @@ export class DatabaseService {
     );
   }
 
+  /**
+   * Put a batch back in the queue after an attempt that never got an answer.
+   *
+   * Rows are marked "syncing" before the request goes out, and `getPendingSurveys`
+   * only ever returns "pending" and "failed". So a request that throws — dropped
+   * wifi, a gateway timeout, the venue's captive portal — used to leave its whole
+   * batch parked in "syncing", which nothing selects. Those surveys were never
+   * retried and never sent, on that shift or any shift after it.
+   *
+   * Failing is fine. Losing the row is not: it goes back to "pending" so the next
+   * pass picks it up.
+   */
+  async markSurveysPending(localIds: string[]): Promise<void> {
+    if (localIds.length === 0) return;
+    const db = this.getDb();
+    const placeholders = localIds.map(() => '?').join(',');
+    await db.runAsync(
+      `UPDATE survey_queue SET syncStatus = ? WHERE localId IN (${placeholders})`,
+      [SYNC_STATUS.PENDING, ...localIds]
+    );
+  }
+
+  /**
+   * Requeue anything left mid-flight, for the same reason as above but for the
+   * cases no catch block can cover: the app being killed, the tablet dying, or
+   * Android stopping the process while a request was open. Run at startup, when
+   * nothing can legitimately be in flight.
+   *
+   * Photos have the identical hole — "uploading" is not in the set
+   * `getPendingPhotos` selects — so they are recovered here too.
+   */
+  async recoverInterruptedSyncs(): Promise<{ surveys: number; photos: number }> {
+    const db = this.getDb();
+
+    const surveys = await db.runAsync(
+      `UPDATE survey_queue SET syncStatus = ? WHERE syncStatus = ?`,
+      [SYNC_STATUS.PENDING, SYNC_STATUS.SYNCING]
+    );
+
+    const photos = await db.runAsync(
+      `UPDATE photo_queue SET uploadStatus = ? WHERE uploadStatus = ?`,
+      [UPLOAD_STATUS.PENDING, UPLOAD_STATUS.UPLOADING]
+    );
+
+    return { surveys: surveys.changes ?? 0, photos: photos.changes ?? 0 };
+  }
+
   async markSurveyFailed(localId: string, error: string): Promise<void> {
     const db = this.getDb();
     await db.runAsync(

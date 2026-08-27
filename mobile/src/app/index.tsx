@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react';
 import { View, Text, Pressable, TextInput, Modal, Image, ActivityIndicator, ScrollView } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
-import { router, Redirect, useLocalSearchParams } from 'expo-router';
+import { router, Redirect } from 'expo-router';
 import {
   Play,
   RefreshCw,
@@ -9,7 +9,7 @@ import {
   Tablet,
   Settings,
   MapPin,
-  CalendarClock,
+  Flag,
   ChevronRight,
   CheckCircle2,
 } from 'lucide-react-native';
@@ -19,9 +19,11 @@ import {
   useDeviceType,
   useTeamId,
 } from '@/lib/state/device-store';
+import { useSurveyStore } from '@/lib/state/survey-store';
+import { usePledgeStore } from '@/lib/state/pledge-store';
+import { useDatabase } from '@/providers/DatabaseProvider';
 import { useTeamAdminAccess } from '@/lib/team-access';
 import { cn } from '@/lib/cn';
-import { formatEventTime } from '@/lib/events/event-time';
 import { fetchAndApplyUpdate, updateStamp } from '@/lib/updates';
 import { clearLastCrash, getLastCrash, type CrashRecord } from '@/lib/crash-guard';
 
@@ -35,23 +37,25 @@ export default function HomeScreen() {
   const reset = useDeviceStore((s) => s.reset);
   const currentEventId = useDeviceStore((s) => s.currentEventId);
   const currentEventVenue = useDeviceStore((s) => s.currentEventVenue);
-  const currentEventEndAt = useDeviceStore((s) => s.currentEventEndAt);
-  const currentEventTimeZone = useDeviceStore((s) => s.currentEventTimeZone);
+  const currentEventStatus = useDeviceStore((s) => s.currentEventStatus);
+  const { db } = useDatabase();
   // Only admin teams get the Admin tile. Field teams shouldn't see a door they
   // can't open (the layout blocks them anyway if they get there another way).
   const { isAdminTeam } = useTeamAdminAccess();
 
-  // Set by the event watcher when it ends an event on its own, so the crew is
-  // told why the tablet dropped out of the kiosk instead of guessing.
-  const { eventEnded } = useLocalSearchParams<{ eventEnded?: string }>();
-  const justEnded = eventEnded === '1';
-
   const [showResetModal, setShowResetModal] = useState(false);
+  const [showEndEventModal, setShowEndEventModal] = useState(false);
+  const [justEnded, setJustEnded] = useState(false);
   const [pinInput, setPinInput] = useState('');
   const [pinError, setPinError] = useState(false);
 
   const isConfigured = teamId !== null && deviceType !== null;
   const hasEvent = currentEventId !== null;
+
+  // Drop the "Event ended" note once the next area is chosen.
+  useEffect(() => {
+    if (currentEventId) setJustEnded(false);
+  }, [currentEventId]);
 
   const handleStartKiosk = () => {
     if (!hasEvent) {
@@ -77,6 +81,28 @@ export default function HomeScreen() {
 
   const handleOpenAdmin = () => {
     router.push('/admin' as any);
+  };
+
+  // Ending an event is now the only way an event ends. Nothing about the clock
+  // or the calendar closes one on its own any more — a crew running two hours
+  // past the scheduled finish keeps working, and the tablet says nothing.
+  //
+  // This is deliberately not the same thing as Reset Device: it clears the
+  // event and the current guest session, and leaves the tablet paired to the
+  // team and ready for the next area. Answers and pledges already collected sit
+  // in the sync queue and are untouched.
+  const handleConfirmEndEvent = () => {
+    setShowEndEventModal(false);
+
+    useSurveyStore.getState().reset();
+    usePledgeStore.getState().reset();
+    useDeviceStore.getState().clearCurrentEvent();
+
+    db?.clearCurrentEvent().catch((err: unknown) => {
+      console.error('[Home] Could not clear the local event row:', err);
+    });
+
+    setJustEnded(true);
   };
 
   const handleResetDevice = () => {
@@ -110,8 +136,10 @@ export default function HomeScreen() {
     return <Redirect href="/setup" />;
   }
 
-  // Shown in the venue's zone, so this matches the end time the office typed.
-  const endsAtLabel = formatEventTime(currentEventEndAt, currentEventTimeZone);
+  // The office can still mark an event complete from the admin portal. That is
+  // shown here rather than acted on: closing the kiosk out from under a crew
+  // mid-shift is exactly the behaviour that was taken out.
+  const officeMarkedComplete = hasEvent && currentEventStatus === 'completed';
 
   return (
     <SafeAreaView className="flex-1 bg-black">
@@ -140,14 +168,30 @@ export default function HomeScreen() {
           </View>
         </View>
 
-        {/* Event just finished on its own */}
+        {/* Confirmation after the crew ends an event themselves */}
         {justEnded ? (
           <View className="flex-row items-start bg-amber-500/10 border border-amber-500/40 rounded-2xl p-4 mb-5">
             <CheckCircle2 size={22} color="#f59e0b" />
             <View className="flex-1 ml-3">
-              <Text className="text-amber-400 font-bold text-base">Event finished</Text>
+              <Text className="text-amber-400 font-bold text-base">Event ended</Text>
               <Text className="text-amber-200/80 text-sm mt-1">
                 Everything collected has been saved. Pick the next event area to keep going.
+              </Text>
+            </View>
+          </View>
+        ) : null}
+
+        {/* The office closed this event off. Said, not done — the crew decides
+            when to stop, and Sync keeps working either way. */}
+        {officeMarkedComplete ? (
+          <View className="flex-row items-start bg-zinc-800/60 border border-zinc-700 rounded-2xl p-4 mb-5">
+            <CheckCircle2 size={22} color="#a1a1aa" />
+            <View className="flex-1 ml-3">
+              <Text className="text-zinc-200 font-bold text-base">
+                The office marked this event complete
+              </Text>
+              <Text className="text-zinc-400 text-sm mt-1">
+                You can keep collecting. Tap End Event below when you are actually done here.
               </Text>
             </View>
           </View>
@@ -177,16 +221,12 @@ export default function HomeScreen() {
               <Text className="text-xl font-bold text-white" numberOfLines={1}>
                 {currentEventVenue ?? (hasEvent ? 'Event in progress' : 'Choose an event area')}
               </Text>
-              {hasEvent && endsAtLabel ? (
-                <View className="flex-row items-center mt-1">
-                  <CalendarClock size={14} color="#71717a" />
-                  <Text className="text-zinc-500 text-sm ml-1.5">Ends at {endsAtLabel}</Text>
-                </View>
-              ) : (
-                <Text className="text-zinc-500 text-sm mt-1">
-                  {hasEvent ? 'Tap to switch areas' : 'Tap to pick where you are working'}
-                </Text>
-              )}
+              {/* The scheduled end time used to be shown here. It no longer
+                  governs anything, and a tablet promising "Ends at 9:00 PM"
+                  while happily collecting at 11 is worse than saying nothing. */}
+              <Text className="text-zinc-500 text-sm mt-1">
+                {hasEvent ? 'Tap to switch areas' : 'Tap to pick where you are working'}
+              </Text>
             </View>
             <ChevronRight size={22} color="#71717a" />
           </View>
@@ -251,8 +291,22 @@ export default function HomeScreen() {
           ) : null}
         </View>
 
+        {/* End Event — only offered while one is running. This is the switch
+            that used to be a clock. */}
+        {hasEvent ? (
+          <View className="pt-8">
+            <Pressable
+              onPress={() => setShowEndEventModal(true)}
+              className="flex-row items-center justify-center h-16 bg-zinc-900 border border-zinc-800 rounded-2xl active:bg-zinc-800"
+            >
+              <Flag size={20} color="#e4e4e7" />
+              <Text className="text-zinc-200 ml-2.5 font-semibold text-lg">End Event</Text>
+            </Pressable>
+          </View>
+        ) : null}
+
         {/* Reset Button - small at bottom */}
-        <View className="pt-10">
+        <View className="pt-6">
           <Pressable
             onPress={handleResetDevice}
             className="flex-row items-center justify-center py-4 active:opacity-70"
@@ -265,6 +319,43 @@ export default function HomeScreen() {
         <LastCrashNotice />
         <BuildStamp />
       </ScrollView>
+
+      {/* End Event Confirmation. No PIN: the crew needs this in the middle of
+          a busy night, and it doesn't throw anything away. */}
+      <Modal
+        visible={showEndEventModal}
+        animationType="fade"
+        transparent
+        onRequestClose={() => setShowEndEventModal(false)}
+      >
+        <View className="flex-1 bg-black/80 items-center justify-center px-8">
+          <View className="w-full bg-zinc-900 rounded-2xl p-6">
+            <Text className="text-2xl font-bold text-white mb-2">End Event</Text>
+            <Text className="text-zinc-400 mb-2">
+              Finish up at {currentEventVenue ?? 'this area'}?
+            </Text>
+            <Text className="text-zinc-500 mb-6">
+              Every survey and pledge collected here is already saved and will keep syncing.
+              This just clears the area from the tablet so you can pick the next one.
+            </Text>
+
+            <View className="flex-row gap-3">
+              <Pressable
+                onPress={() => setShowEndEventModal(false)}
+                className="flex-1 h-14 items-center justify-center bg-zinc-800 rounded-xl active:bg-zinc-700"
+              >
+                <Text className="text-white font-semibold text-lg">Keep Going</Text>
+              </Pressable>
+              <Pressable
+                onPress={handleConfirmEndEvent}
+                className="flex-1 h-14 items-center justify-center bg-white rounded-xl active:bg-zinc-200"
+              >
+                <Text className="text-black font-semibold text-lg">End Event</Text>
+              </Pressable>
+            </View>
+          </View>
+        </View>
+      </Modal>
 
       {/* Reset Confirmation Modal */}
       <Modal

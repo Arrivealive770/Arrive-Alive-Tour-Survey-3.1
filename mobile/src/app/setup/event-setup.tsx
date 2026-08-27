@@ -44,9 +44,10 @@ export default function EventSetupScreen() {
     enabled: !!teamId,
   });
 
-  // Anything already past its end time or day is no longer a place to work,
-  // even if the home office hasn't marked it complete yet. Soonest first, so
-  // the area the crew is heading to next is at the top.
+  // Only events the home office has marked complete are dropped. A scheduled
+  // end time that has already passed does NOT hide an event — crews run late,
+  // and the times listed below are information, not a cut-off. Soonest first,
+  // so the area the crew is heading to next is at the top.
   const selectableEvents = useMemo(() => {
     if (!events) return [];
     return events

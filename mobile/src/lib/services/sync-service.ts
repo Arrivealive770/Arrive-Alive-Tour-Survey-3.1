@@ -28,6 +28,12 @@ const DELETION_POLL_INTERVAL_MS = 20000;
 // the signal was down, surveys, pledges). Without this a photo could sit in the
 // phone's queue until the app was backgrounded and reopened.
 const PENDING_SYNC_INTERVAL_MS = 15000;
+// ...and the slowest it will go when nothing is getting through. A backlog that
+// cannot move — no signal, a server that is down, a row the server keeps
+// refusing — otherwise means a full sync pass every fifteen seconds for the
+// rest of the shift. That is a lot of work, radio and allocation for a tablet
+// that is meant to sit on a table all evening running surveys.
+const MAX_PENDING_SYNC_INTERVAL_MS = 5 * 60 * 1000;
 
 class SyncService {
   private syncInProgress = false;
@@ -35,7 +41,9 @@ class SyncService {
   private netInfoUnsubscribe: (() => void) | null = null;
   private appStateSubscription: { remove: () => void } | null = null;
   private deletionPollTimer: ReturnType<typeof setInterval> | null = null;
-  private pendingSyncTimer: ReturnType<typeof setInterval> | null = null;
+  private pendingSyncTimer: ReturnType<typeof setTimeout> | null = null;
+  private pendingSyncDelayMs = PENDING_SYNC_INTERVAL_MS;
+  private lastPendingCount = 0;
   private isInitialized = false;
   private baseUrl: string;
 
@@ -64,14 +72,34 @@ class SyncService {
       this.handleAppStateChange
     );
 
+    // Anything the last run left mid-flight goes back in the queue before the
+    // first sync pass, or it stays invisible to every query that would send it.
+    const db = getDatabaseSafe();
+    if (db) {
+      db.recoverInterruptedSyncs()
+        .then(({ surveys, photos }) => {
+          if (surveys > 0 || photos > 0) {
+            console.log(
+              `[SyncService] Requeued ${surveys} survey(s) and ${photos} photo(s) left mid-sync`
+            );
+          }
+        })
+        .catch((err) => console.error('[SyncService] Could not requeue interrupted syncs:', err));
+    }
+
     // Check initial connectivity
-    this.checkConnectivity().then((isOnline) => {
-      useSyncStore.getState().setOnlineStatus(isOnline);
-      if (isOnline && isDatabaseInitialized()) {
-        // Trigger initial sync on startup if online and DB ready
-        this.syncAll();
-      }
-    });
+    this.checkConnectivity()
+      .then((isOnline) => {
+        useSyncStore.getState().setOnlineStatus(isOnline);
+        if (isOnline && isDatabaseInitialized()) {
+          // Trigger initial sync on startup if online and DB ready
+          return this.syncAll();
+        }
+        return undefined;
+      })
+      // An unhandled rejection out here has no owner: in a release build it goes
+      // to the global handler, which on Android is the app closing.
+      .catch((err) => console.error('[SyncService] Initial sync failed:', err));
 
     // Update pending counts only if DB is initialized
     if (isDatabaseInitialized()) {
@@ -108,7 +136,10 @@ class SyncService {
     // If we just came online, trigger sync
     if (isOnline && !previousOnline) {
       console.log('[SyncService] Connection restored, triggering sync');
-      this.syncAll();
+      this.resetPendingSyncBackoff();
+      this.syncAll().catch((err) =>
+        console.error('[SyncService] Sync on reconnect failed:', err)
+      );
     }
   };
 
@@ -120,11 +151,10 @@ class SyncService {
 
     if (nextAppState === 'active') {
       // App came to foreground
-      this.checkConnectivity().then((isOnline) => {
-        if (isOnline) {
-          this.syncAll();
-        }
-      });
+      this.resetPendingSyncBackoff();
+      this.checkConnectivity()
+        .then((isOnline) => (isOnline ? this.syncAll() : undefined))
+        .catch((err) => console.error('[SyncService] Sync on foreground failed:', err));
     } else if (nextAppState === 'background' || nextAppState === 'inactive') {
       // App went to background - cancel any pending retries
       this.cancelAllRetries();
@@ -272,16 +302,19 @@ class SyncService {
 
     let totalSynced = 0;
     let totalFailed = 0;
+    // The batch this pass has taken out of the queue. Held out here so the catch
+    // block can hand it back; see markSurveysPending.
+    let claimedIds: string[] = [];
 
     try {
       // Get pending surveys
       const allPending = await db.getPendingSurveys(BATCH_SIZE);
 
       // The server rejects unknown event/team ids with a foreign-key error, so
-      // sending them just retries forever. Fill in the ids this device knows
-      // about; anything still unresolved is failed once, not looped on.
+      // sending them is pointless. Fill in the ids this device knows about.
       const currentEventId = useDeviceStore.getState().currentEventId;
       const pendingSurveys = [];
+      let unattached = 0;
       for (const survey of allPending) {
         const resolvedEventId =
           survey.eventId && survey.eventId !== 'unknown' ? survey.eventId : currentEventId;
@@ -289,18 +322,22 @@ class SyncService {
           survey.teamId && survey.teamId !== 'unknown' ? survey.teamId : teamId;
 
         if (!resolvedEventId || resolvedEventId === 'unknown' || resolvedTeamId === 'unknown') {
-          console.warn(`[SyncService] Survey ${survey.localId} has no valid event - not syncable`);
-          await db.markSurveyFailed(survey.localId, 'No event selected when this survey was taken');
-          useSyncStore.getState().addError({
-            type: 'survey',
-            localId: survey.localId,
-            message: 'No event selected when this survey was taken',
-          });
-          totalFailed++;
+          // Left alone, quietly. This used to write the row to the database and
+          // push an entry into the error list on every pass — every fifteen
+          // seconds, forever, for a survey that was only ever waiting for
+          // somebody to pick an event. Skipping costs nothing, and the moment an
+          // area is selected the row resolves and goes out with the next batch.
+          unattached++;
           continue;
         }
 
         pendingSurveys.push({ ...survey, eventId: resolvedEventId, teamId: resolvedTeamId });
+      }
+
+      if (unattached > 0) {
+        console.log(
+          `[SyncService] ${unattached} survey(s) waiting for an event to be selected`
+        );
       }
 
       if (pendingSurveys.length === 0) {
@@ -311,8 +348,8 @@ class SyncService {
       console.log(`[SyncService] Syncing ${pendingSurveys.length} surveys`);
 
       // Mark as syncing
-      const localIds = pendingSurveys.map((s) => s.localId);
-      await db.markSurveysSyncing(localIds);
+      claimedIds = pendingSurveys.map((s) => s.localId);
+      await db.markSurveysSyncing(claimedIds);
 
       // Send batch to server
       const response = await fetch(`${this.baseUrl}/api/sync/surveys`, {
@@ -373,15 +410,21 @@ class SyncService {
       }
     } catch (error) {
       console.error('[SyncService] Survey sync error:', error);
-      // Mark all as failed
-      const pendingSurveys = await db.getPendingSurveys(BATCH_SIZE);
-      for (const survey of pendingSurveys) {
-        await db.markSurveyFailed(
-          survey.localId,
-          error instanceof Error ? error.message : 'Unknown error'
-        );
-        totalFailed++;
-      }
+
+      // Hand the batch back. This used to re-read getPendingSurveys and mark
+      // whatever came out as failed — but the batch had already been moved to
+      // "syncing" a few lines above, and that query does not return "syncing".
+      // So it marked nothing, and the surveys it was holding stayed parked in a
+      // state no query selects. They were never sent, on that shift or any
+      // shift after it, and the queue count they inflated kept the background
+      // poll firing a full sync every fifteen seconds with nothing it could
+      // ever deliver.
+      //
+      // The request failing says nothing about whether the rows are any good,
+      // so they go back to pending rather than failed: the next pass tries
+      // again, and the backoff below decides when that is.
+      await db.markSurveysPending(claimedIds);
+      totalFailed += claimedIds.length;
 
       // Schedule retry
       this.scheduleRetry('surveys', DEFAULT_RETRY_CONFIG.baseDelayMs);
@@ -795,29 +838,61 @@ class SyncService {
     if (this.pendingSyncTimer) return;
 
     const tick = async () => {
+      let delivered = false;
+
       try {
-        if (this.syncInProgress) return;
+        if (!this.syncInProgress) {
+          const db = getDatabaseSafe();
 
-        const db = getDatabaseSafe();
-        if (!db) return;
+          if (db) {
+            const [surveyCount, pledgeCount, photoCount] = await Promise.all([
+              db.getSurveyQueueCount(),
+              db.getPledgeQueueCount(),
+              db.getPhotoQueueCount(),
+            ]);
 
-        const [surveyCount, pledgeCount, photoCount] = await Promise.all([
-          db.getSurveyQueueCount(),
-          db.getPledgeQueueCount(),
-          db.getPhotoQueueCount(),
-        ]);
+            const pending = surveyCount.pending + surveyCount.failed + pledgeCount + photoCount;
 
-        const pending = surveyCount.pending + surveyCount.failed + pledgeCount + photoCount;
-        if (pending === 0) return;
+            // Something new was collected — go back to checking briskly, however
+            // long the previous backlog had pushed the gap out to.
+            if (pending > this.lastPendingCount) this.resetPendingSyncBackoff();
+            this.lastPendingCount = pending;
 
-        console.log(`[SyncService] ${pending} item(s) still queued, syncing`);
-        await this.syncAll();
+            if (pending > 0) {
+              console.log(`[SyncService] ${pending} item(s) still queued, syncing`);
+              const result = await this.syncAll();
+              delivered =
+                (result.surveys?.synced ?? 0) +
+                  (result.pledges?.synced ?? 0) +
+                  (result.photos?.synced ?? 0) >
+                0;
+            }
+          }
+        }
       } catch (error) {
         console.error('[SyncService] Pending-sync poll failed:', error);
       }
+
+      // A pass that shifted nothing earns a longer wait. Passes that are getting
+      // data through stay at the base interval, so a working tablet is as
+      // responsive as it ever was and only a stuck one goes quiet.
+      this.pendingSyncDelayMs = delivered
+        ? PENDING_SYNC_INTERVAL_MS
+        : Math.min(this.pendingSyncDelayMs * 2, MAX_PENDING_SYNC_INTERVAL_MS);
+
+      this.pendingSyncTimer = setTimeout(tick, this.pendingSyncDelayMs);
     };
 
-    this.pendingSyncTimer = setInterval(tick, PENDING_SYNC_INTERVAL_MS);
+    this.pendingSyncTimer = setTimeout(tick, this.pendingSyncDelayMs);
+  }
+
+  /**
+   * Back to checking briskly. Called when the situation has visibly changed —
+   * the network came back, the app was reopened, someone pressed sync — because
+   * whatever was blocking before may not be blocking now.
+   */
+  private resetPendingSyncBackoff(): void {
+    this.pendingSyncDelayMs = PENDING_SYNC_INTERVAL_MS;
   }
 
   /**
@@ -1077,6 +1152,24 @@ class SyncService {
    */
   async forceSync(): Promise<SyncResult> {
     console.log('[SyncService] Force sync requested');
+    // Someone pressed the button, so stop waiting out any backoff.
+    this.resetPendingSyncBackoff();
+
+    // Anything a previous attempt left mid-flight is invisible to the queries
+    // that would send it, so pressing sync has to be able to rescue it. This is
+    // the manual way out if a tablet ever gets stuck again.
+    const db = getDatabaseSafe();
+    if (db) {
+      try {
+        const { surveys, photos } = await db.recoverInterruptedSyncs();
+        if (surveys > 0 || photos > 0) {
+          console.log(`[SyncService] Requeued ${surveys} survey(s) and ${photos} photo(s)`);
+        }
+      } catch (err) {
+        console.error('[SyncService] Could not requeue interrupted syncs:', err);
+      }
+    }
+
     return this.syncAll();
   }
 
@@ -1097,7 +1190,9 @@ class SyncService {
 
     // Stop pending-work polling
     if (this.pendingSyncTimer) {
-      clearInterval(this.pendingSyncTimer);
+      // A self-rescheduling timeout now, not an interval — see
+      // startPendingSyncPolling.
+      clearTimeout(this.pendingSyncTimer);
       this.pendingSyncTimer = null;
     }
 
