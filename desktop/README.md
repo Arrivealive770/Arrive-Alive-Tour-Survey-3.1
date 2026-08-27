@@ -511,7 +511,42 @@ Then `cd` to the folder that contains `desktop\` and run the installer from
 there. If it is nested, move the inner folder's contents up to `C:\ArriveAlive`
 so every other command in this guide matches.
 
-### Updating the app later
+### Updating everything at once (the short way)
+
+Double-click **`C:\ArriveAlive\desktop\update-all.bat`**.
+
+That is the whole job. It pulls the latest code, restarts the server, and
+publishes the tablet app over the air — the three things that used to be
+three separate sets of commands, in the right order, with a summary at the
+end saying which ones worked.
+
+It refuses to publish anything if the code pull fails, because shipping
+stale code is worse than shipping nothing: it looks like it worked.
+
+When it finishes it prints a short code, like `Tablets should show: 3f9a2c1`.
+That is the same code that appears in small grey text at the bottom of each
+tablet's menu screen — the way to check a tablet actually took the update
+instead of assuming.
+
+If you'd rather run it from PowerShell, or only want part of the job:
+
+```powershell
+cd C:\ArriveAlive
+.\desktop\update-all.ps1                 # everything
+.\desktop\update-all.ps1 -SkipTablets    # server only
+.\desktop\update-all.ps1 -SkipServer     # tablets only
+```
+
+**One-time setup:** the tablet half needs you signed in to Expo on this
+machine. Run `eas login` once, ever. If you're not signed in, the script
+says so and the server half still completes.
+
+The manual steps below still work and are worth reading once — they explain
+what the script is doing and how to recover when something goes wrong.
+
+---
+
+### Updating the app later (the long way, step by step)
 
 **Start here every time.** In PowerShell:
 
@@ -662,9 +697,25 @@ cd mobile
 eas update --branch preview --message "what changed"
 ```
 
-Takes about a minute. Tablets download it in the background the next time the
-app is opened and show it the open after that — so closing and reopening twice
-applies it immediately, and leaving them alone overnight does the same.
+Takes about a minute. The tablet installs it while it starts up and then
+restarts itself into it, so **one close-and-reopen is enough**.
+
+(It used to take two: the update downloaded in the background and only
+switched on the following launch. That was harmless until a build crashed on
+startup — the app died before the download finished, every single time, and
+the tablet could never pull the fix that would have saved it. Tablets now
+fetch and apply during startup instead, and APKs built after 27 Aug 2026 also
+wait a few seconds at the splash screen for one. A broken build can always be
+replaced over the air now.)
+
+**Checking a tablet actually took it.** At the bottom of the menu screen
+there's a small grey line like `v1.0.0 · 3f9a2c1 · preview`. The middle part
+is the update it's running — compare it to the code the publish printed.
+`built-in` means the tablet is still on the bundle that shipped inside the
+APK and has never taken an update.
+
+**Tap that line** to force a check right there. Handy on a tablet that missed
+one, and it means the crew can pull a fix without waiting for a restart.
 
 `preview` is the branch because the tablets are built with the `preview`
 profile. If you ever build with a different profile, publish to the matching
