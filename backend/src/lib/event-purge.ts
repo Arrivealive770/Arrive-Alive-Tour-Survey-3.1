@@ -1,14 +1,20 @@
 import { prisma } from "../prisma";
 import { purgeEventParticipantData, type EventPurgeResult } from "./pledge-privacy";
-import { describeEventReadiness } from "./event-readiness";
+import { describeEventReadiness, RUN_LONG_GRACE_MS } from "./event-readiness";
 
 /**
  * Scheduled end-of-event purge.
  *
- * An event is due once it is over — its designated end time (`Event.eventEndAt`)
- * has passed, or staff marked it completed. Every photo and every participant
- * email address belonging to it is then deleted automatically; nobody has to
- * remember to press a button. Survey answers are never touched.
+ * An event is due once somebody has ended it — the facilitator on a device or
+ * staff in the admin portal marking it completed. Every photo and every
+ * participant email address belonging to it is then deleted automatically;
+ * nobody has to remember to press a button. Survey answers are never touched.
+ *
+ * The event's scheduled end time (`Event.eventEndAt`) does NOT make it due.
+ * Events run late, and purging on the printed end time deleted photos while
+ * the station was still handing them out. The scheduled end is only a backstop:
+ * an event still open {@link RUN_LONG_GRACE_MS} after it was meant to finish
+ * was forgotten, and gets purged so participant photos don't linger.
  *
  * The purge does not fire the instant the clock strikes: it waits until the
  * surveys and pledge photos have finished uploading (see event-readiness.ts),
@@ -63,11 +69,16 @@ class EventPurgeScheduler {
     try {
       const now = new Date();
 
-      // Either kind of "over": the clock ran out, or staff called it a night.
+      // Either kind of "over": somebody ended it, or it was left open long
+      // enough past its scheduled end that it is plainly not still running.
+      const forgottenBefore = new Date(now.getTime() - RUN_LONG_GRACE_MS);
       const dueEvents = await prisma.event.findMany({
         where: {
           photosPurgedAt: null,
-          OR: [{ eventEndAt: { not: null, lte: now } }, { status: "completed" }],
+          OR: [
+            { eventEndAt: { not: null, lte: forgottenBefore } },
+            { status: "completed" },
+          ],
         },
         select: { id: true, venueName: true, eventEndAt: true, status: true },
       });

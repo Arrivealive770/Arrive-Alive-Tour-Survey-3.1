@@ -61,10 +61,9 @@ export interface Event {
   venueState: string;
   eventDate: string;
   /**
-   * Scheduled end of the event. Once this passes the event is over and kiosks
-   * send themselves back to the main menu so the crew can pick the next area.
-   * Null means "no scheduled end" — only an admin marking it completed, or the
-   * calendar day rolling over, ends it.
+   * Scheduled end of the event — a plan, not a shutdown. Events run past it and
+   * the crew keeps collecting; the event is only over when the facilitator ends
+   * it on a device or the home office marks it completed. See event-status.ts.
    */
   eventEndAt?: string | null;
   surveyTypes: SurveyTypeSlug[];

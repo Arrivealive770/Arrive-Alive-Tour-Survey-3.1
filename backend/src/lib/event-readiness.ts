@@ -25,6 +25,22 @@ const SETTLE_MS = 10 * 60 * 1000; // 10 minutes
 /** Hard ceiling: after this the purge runs whatever is still outstanding. */
 export const MAX_WAIT_MS = 24 * 60 * 60 * 1000; // 24 hours
 
+/**
+ * How long past its scheduled end an event nobody closed is finally treated as
+ * finished.
+ *
+ * The end time typed in the office is a plan, not a shutdown. Events run long —
+ * the line is still out the door at closing time — and the crew keeps working.
+ * Deleting an event's photos while a station is still handing them out is the
+ * worst thing this purge could do, so the scheduled end no longer ends
+ * anything on its own. A person ends the event: the facilitator on the device,
+ * or the home office in this portal.
+ *
+ * This window is only the backstop for the night nobody remembered to close
+ * it, so participant photos still don't sit on the server indefinitely.
+ */
+export const RUN_LONG_GRACE_MS = 6 * 60 * 60 * 1000; // 6 hours
+
 export interface EventReadiness {
   eventId: string;
   /** When the event finished, or null if it hasn't. */
@@ -47,27 +63,31 @@ export interface EventReadiness {
 }
 
 /**
- * The moment an event finished: its scheduled end, or when staff marked it
- * completed, whichever came first. Null while it is still running.
+ * The moment an event finished. That is when somebody ended it — not when the
+ * clock ran out on the scheduled end, because events run past that and the
+ * crew is still collecting. Null while it is still running.
+ *
+ * The one exception is {@link RUN_LONG_GRACE_MS} past the scheduled end: an
+ * event left open that long was forgotten, not running.
  */
-function endedAt(event: {
+export function endedAt(event: {
   eventEndAt: Date | null;
   completedAt: Date | null;
   status: string;
   createdAt: Date;
 }, now: Date): Date | null {
-  const candidates: Date[] = [];
-
-  if (event.eventEndAt && event.eventEndAt <= now) candidates.push(event.eventEndAt);
   if (event.status === "completed") {
     // Events completed before this column existed have no stamp; fall back to
     // the event's own record so they are treated as long finished rather than
     // as having just ended.
-    candidates.push(event.completedAt ?? event.createdAt);
+    return event.completedAt ?? event.createdAt;
   }
 
-  if (candidates.length === 0) return null;
-  return candidates.reduce((earliest, date) => (date < earliest ? date : earliest));
+  if (event.eventEndAt && now.getTime() - event.eventEndAt.getTime() >= RUN_LONG_GRACE_MS) {
+    return event.eventEndAt;
+  }
+
+  return null;
 }
 
 /** What is still outstanding for one event, and whether the purge may run. */

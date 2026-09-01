@@ -24,11 +24,15 @@ interface DeviceState {
   currentEventId: string | null;
   /** Venue name of the running event, so the main menu can name it offline. */
   currentEventVenue: string | null;
-  /** Event day, ISO. Used to end the event when the calendar day rolls over. */
+  /** Scheduled start, ISO. Shown on the menu; never gates access to the event. */
   currentEventDate: string | null;
-  /** Scheduled end time, ISO, or null when the event has no scheduled end. */
+  /**
+   * Scheduled end time, ISO, or null when the event has no scheduled end.
+   * Displayed and used for the long-overdue backstop only — passing it does
+   * not end the event.
+   */
   currentEventEndAt: string | null;
-  /** Server status of the running event. 'completed' means it is over. */
+  /** Server status of the running event. 'completed' means somebody ended it. */
   currentEventStatus: 'active' | 'completed' | null;
 
   // Picture pledge settings for current event

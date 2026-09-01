@@ -923,14 +923,15 @@ adminPortalRouter.get("/", (c) => {
               <input type="datetime-local" id="eventDate" required>
             </div>
             <div class="form-group">
-              <label for="eventEndAt">Event End Time (photos auto-deleted)</label>
+              <label for="eventEndAt">Scheduled End Time</label>
               <input type="datetime-local" id="eventEndAt">
               <div style="color: #888; font-size: 12px; margin-top: 4px;">
-                When this time passes the event is over: the tablets go back to the
-                menu, and once their surveys and pledge photos have finished
-                uploading, every photo and participant email address for this event is
-                deleted automatically. Survey answers are kept. Leave blank to purge
-                manually instead.
+                The planned finish, shown on the tablets. It does <strong>not</strong> close
+                the event — events run late, so the facilitator ends it with "End Event"
+                on the device, or you press "Complete" here. Once the event is ended and
+                the tablets have finished uploading, every photo and participant email
+                address for it is deleted automatically; survey answers are kept.
+                An event nobody ends is closed and purged 6 hours after this time.
               </div>
               <div style="color: #888; font-size: 12px; margin-top: 4px;">
                 Times are read in <strong id="eventTimeZoneLabel" style="color: #ccc;"></strong>,
@@ -1884,7 +1885,12 @@ adminPortalRouter.get("/", (c) => {
         }
 
         async function completeEvent(eventId) {
-          if (!confirm('Are you sure you want to mark this event as completed?')) return;
+          if (!confirm(
+            'End this event?\\n\\n' +
+            'Every tablet and phone at the venue will go back to their menu and stop ' +
+            'collecting for it. Only do this if the crew is finished — normally the ' +
+            'facilitator ends the event on the device when they are done.'
+          )) return;
 
           try {
             const res = await fetch(API_BASE + '/events/' + eventId + '/complete', {
@@ -1906,30 +1912,38 @@ adminPortalRouter.get("/", (c) => {
 
         // What the Photo Deletion column shows for one event.
         //
-        // An event that is over but not yet purged is not stuck: the purge holds
-        // off until the tablets have finished uploading their surveys and pledge
-        // photos. The badge is clickable and says exactly what it is waiting on.
+        // Photos are deleted once the event has been ENDED — by the facilitator
+        // on the device or "Complete" here — not when the scheduled end time
+        // passes, because events run late. An event that is over but not yet
+        // purged is not stuck: the purge holds off until the tablets have
+        // finished uploading their surveys and pledge photos. The badge is
+        // clickable and says exactly what it is waiting on.
         function describePurge(event) {
           if (event.photosPurgedAt) {
             return '<span class="badge badge-success">Deleted ' +
               formatEventInstant(event.photosPurgedAt, event.timeZone) + '</span>';
           }
 
-          const endsAt = event.eventEndAt ? new Date(event.eventEndAt) : null;
-          const isOver = (endsAt && endsAt <= new Date()) || event.status === 'completed';
-
-          if (isOver) {
+          if (event.status === 'completed') {
             return '<span class="badge badge-warning" style="cursor: pointer;" ' +
               'onclick="showPurgeReadiness(\\'' + event.id + '\\')" ' +
               'title="Click to see what the purge is waiting for">Waiting for uploads</span>';
           }
 
+          const endsAt = event.eventEndAt ? new Date(event.eventEndAt) : null;
+
           if (!endsAt) {
-            return '<span class="badge badge-warning">Manual only</span>';
+            return '<span class="badge badge-warning">When ended</span>';
           }
 
-          return '<span class="badge badge-info">Auto ' +
-            formatEventInstant(event.eventEndAt, event.timeZone) + '</span>';
+          if (endsAt <= new Date()) {
+            return '<span class="badge badge-info" ' +
+              'title="Past its scheduled end. The crew may still be working — photos are ' +
+              'deleted once the event is ended, or 6 hours after the scheduled end if ' +
+              'nobody ends it.">Running late</span>';
+          }
+
+          return '<span class="badge badge-info">When ended</span>';
         }
 
         // "Why hasn't this deleted the photos yet?" answered on screen.
@@ -1944,6 +1958,14 @@ adminPortalRouter.get("/", (c) => {
             }
 
             const readiness = data.data;
+
+            if (!readiness.isOver) {
+              alert('This event has not been ended yet, so nothing is deleted. The ' +
+                'facilitator ends it on the device when the crew is finished, or you ' +
+                'can press "Complete". An event nobody ends is closed automatically 6 ' +
+                'hours after its scheduled end time.');
+              return;
+            }
 
             if (readiness.ready) {
               alert('Everything is in. The photos and email addresses for this event ' +

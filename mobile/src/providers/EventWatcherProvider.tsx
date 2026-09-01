@@ -19,9 +19,12 @@ const LOCAL_TICK_MS = 20_000;
  * Watches the event this device is running and, the moment it is over, sends
  * the crew back to the main menu to pick the next area.
  *
- * "Over" is decided by {@link isEventOver}. The server poll keeps the local
- * copy honest (an admin can mark an event complete mid-shift), but the local
- * tick is what makes this work at a venue with no signal.
+ * "Over" is decided by {@link isEventOver} — which no longer means "the
+ * scheduled end time passed". An event ends when a person ends it, so what
+ * this mostly catches is the facilitator ending the event on another device,
+ * or the home office closing it in the portal. That is what the server poll is
+ * for; the local tick only handles the far-past-its-end backstop, and keeps
+ * working at a venue with no signal.
  */
 export function EventWatcher() {
   const { db } = useDatabase();

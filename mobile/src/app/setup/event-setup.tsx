@@ -8,7 +8,11 @@ import { useDeviceStore } from '@/lib/state/device-store';
 import { useDatabase } from '@/providers/DatabaseProvider';
 import { api } from '@/lib/api/api';
 import { cacheEventOverlay } from '@/lib/overlays/overlay-cache';
-import { isEventOver } from '@/lib/events/event-status';
+import {
+  isEventOver,
+  isEventRunningLate,
+  isEventNotStartedYet,
+} from '@/lib/events/event-status';
 import { cn } from '@/lib/cn';
 import type { Event, Team } from '@/lib/api/types';
 
@@ -21,6 +25,10 @@ function isToday(dateString: string): boolean {
     eventDate.getMonth() === today.getMonth() &&
     eventDate.getDate() === today.getDate()
   );
+}
+
+function formatTime(value: string): string {
+  return new Date(value).toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit' });
 }
 
 export default function EventSetupScreen() {
@@ -49,9 +57,10 @@ export default function EventSetupScreen() {
     enabled: !!teamId,
   });
 
-  // Anything already past its end time or day is no longer a place to work,
-  // even if the home office hasn't marked it complete yet. Soonest first, so
-  // the area the crew is heading to next is at the top.
+  // Only events somebody has actually ended drop off this list. An event that
+  // hasn't started yet is here on purpose — crews arrive early to set up — and
+  // so is one running past its scheduled end. Soonest first, so the area the
+  // crew is heading to next is at the top.
   const selectableEvents = useMemo(() => {
     if (!events) return [];
     return events
@@ -59,10 +68,13 @@ export default function EventSetupScreen() {
       .sort((a, b) => new Date(a.eventDate).getTime() - new Date(b.eventDate).getTime());
   }, [events]);
 
-  // Auto-select today's event
+  // Auto-select the event on today's date, or one still running from last
+  // night that nobody has closed yet.
   useEffect(() => {
     if (selectableEvents.length > 0 && !autoSelected) {
-      const todayEvent = selectableEvents.find((e) => isToday(e.eventDate));
+      const todayEvent =
+        selectableEvents.find((e) => isToday(e.eventDate)) ??
+        selectableEvents.find((e) => isEventRunningLate(e));
       if (todayEvent) {
         setSelectedEventId(todayEvent.id);
         setAutoSelected(true);
@@ -172,7 +184,8 @@ export default function EventSetupScreen() {
                 <View className="flex-row items-center bg-amber-500/10 p-4 rounded-xl mb-6">
                   <AlertCircle size={24} color="#f59e0b" />
                   <Text className="text-amber-500 ml-3 flex-1">
-                    No event scheduled for today. Select an upcoming event below.
+                    No event scheduled for today. You can still open an upcoming event below and
+                    set up early.
                   </Text>
                 </View>
               ) : null}
@@ -181,6 +194,8 @@ export default function EventSetupScreen() {
                 {selectableEvents.map((event) => {
                   const today = isToday(event.eventDate);
                   const isSelected = selectedEventId === event.id;
+                  const notStartedYet = isEventNotStartedYet(event);
+                  const runningLate = isEventRunningLate(event);
 
                   return (
                     <Pressable
@@ -195,11 +210,25 @@ export default function EventSetupScreen() {
                           : 'bg-zinc-900 border-zinc-700'
                       )}
                     >
-                      {today ? (
-                        <View className="flex-row items-center mb-3">
-                          <View className="bg-green-500 px-3 py-1 rounded-full">
-                            <Text className="text-white text-sm font-bold">TODAY</Text>
-                          </View>
+                      {today || runningLate || notStartedYet ? (
+                        <View className="flex-row items-center flex-wrap gap-2 mb-3">
+                          {today ? (
+                            <View className="bg-green-500 px-3 py-1 rounded-full">
+                              <Text className="text-white text-sm font-bold">TODAY</Text>
+                            </View>
+                          ) : null}
+                          {runningLate ? (
+                            <View className="bg-amber-500 px-3 py-1 rounded-full">
+                              <Text className="text-white text-sm font-bold">RUNNING LATE</Text>
+                            </View>
+                          ) : null}
+                          {notStartedYet ? (
+                            <View className="bg-blue-600 px-3 py-1 rounded-full">
+                              <Text className="text-white text-sm font-bold">
+                                STARTS {formatTime(event.eventDate)}
+                              </Text>
+                            </View>
+                          ) : null}
                         </View>
                       ) : null}
 
@@ -223,19 +252,12 @@ export default function EventSetupScreen() {
                             day: 'numeric',
                           })}
                         </Text>
-                        {event.eventEndAt ? (
-                          <>
-                            <Text className="text-zinc-600 mx-2">•</Text>
-                            <Clock size={14} color="#71717a" />
-                            <Text className="text-zinc-400 ml-1.5">
-                              ends{' '}
-                              {new Date(event.eventEndAt).toLocaleTimeString('en-US', {
-                                hour: 'numeric',
-                                minute: '2-digit',
-                              })}
-                            </Text>
-                          </>
-                        ) : null}
+                        <Text className="text-zinc-600 mx-2">•</Text>
+                        <Clock size={14} color="#71717a" />
+                        <Text className="text-zinc-400 ml-1.5">
+                          {formatTime(event.eventDate)}
+                          {event.eventEndAt ? ` – ${formatTime(event.eventEndAt)}` : ''}
+                        </Text>
                       </View>
 
                       {/* Survey Types */}
@@ -267,7 +289,7 @@ export default function EventSetupScreen() {
               <AlertCircle size={48} color="#71717a" />
               <Text className="text-zinc-400 text-lg mt-4 mb-2">No events available</Text>
               <Text className="text-zinc-500 text-center">
-                Every scheduled event has finished. Contact your home office to create the next one.
+                Every event has been ended. Contact your home office to create the next one.
               </Text>
             </View>
           )}

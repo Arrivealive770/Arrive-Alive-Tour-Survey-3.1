@@ -12,6 +12,8 @@ import {
   CalendarClock,
   ChevronRight,
   CheckCircle2,
+  Square,
+  AlertTriangle,
 } from 'lucide-react-native';
 import {
   useDeviceStore,
@@ -20,6 +22,8 @@ import {
   useTeamId,
 } from '@/lib/state/device-store';
 import { useTeamAdminAccess } from '@/lib/team-access';
+import { useEndEvent } from '@/lib/events/use-end-event';
+import { isEventRunningLate, isEventNotStartedYet } from '@/lib/events/event-status';
 import { cn } from '@/lib/cn';
 
 const AATLogo = require('@/assets/aat-logo.png');
@@ -32,17 +36,25 @@ export default function HomeScreen() {
   const reset = useDeviceStore((s) => s.reset);
   const currentEventId = useDeviceStore((s) => s.currentEventId);
   const currentEventVenue = useDeviceStore((s) => s.currentEventVenue);
+  const currentEventDate = useDeviceStore((s) => s.currentEventDate);
   const currentEventEndAt = useDeviceStore((s) => s.currentEventEndAt);
+  const currentEventStatus = useDeviceStore((s) => s.currentEventStatus);
   // Only admin teams get the Admin tile. Field teams shouldn't see a door they
   // can't open (the layout blocks them anyway if they get there another way).
   const { isAdminTeam } = useTeamAdminAccess();
 
-  // Set by the event watcher when it ends an event on its own, so the crew is
-  // told why the tablet dropped out of the kiosk instead of guessing.
+  // Ends the event for the whole venue — see use-end-event.ts.
+  const { endEvent, isEnding } = useEndEvent();
+
+  // Set when an event finishes, so the crew is told why the tablet dropped out
+  // of the kiosk instead of guessing. 'manual' = the facilitator ended it here,
+  // 'offline' = ended here but the server hasn't been told, '1' = the backstop
+  // closed an event nobody ended.
   const { eventEnded } = useLocalSearchParams<{ eventEnded?: string }>();
-  const justEnded = eventEnded === '1';
+  const justEnded = eventEnded === '1' || eventEnded === 'manual' || eventEnded === 'offline';
 
   const [showResetModal, setShowResetModal] = useState(false);
+  const [showEndEventModal, setShowEndEventModal] = useState(false);
   const [pinInput, setPinInput] = useState('');
   const [pinError, setPinError] = useState(false);
 
@@ -81,6 +93,11 @@ export default function HomeScreen() {
     setPinError(false);
   };
 
+  const handleConfirmEndEvent = async () => {
+    setShowEndEventModal(false);
+    await endEvent();
+  };
+
   const handleConfirmReset = () => {
     if (pinInput === adminPin) {
       reset();
@@ -106,12 +123,22 @@ export default function HomeScreen() {
     return <Redirect href="/setup" />;
   }
 
-  const endsAtLabel = currentEventEndAt
-    ? new Date(currentEventEndAt).toLocaleTimeString('en-US', {
-        hour: 'numeric',
-        minute: '2-digit',
-      })
-    : null;
+  const timing = {
+    status: currentEventStatus,
+    eventDate: currentEventDate,
+    eventEndAt: currentEventEndAt,
+  };
+
+  const formatTime = (value: string) =>
+    new Date(value).toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit' });
+
+  const endsAtLabel = currentEventEndAt ? formatTime(currentEventEndAt) : null;
+  const startsAtLabel = currentEventDate ? formatTime(currentEventDate) : null;
+  // Past the printed end time and still going. The tablet is waiting on the
+  // facilitator now, not on the clock.
+  const runningLate = hasEvent && isEventRunningLate(timing);
+  // Set up and open early — the start time never blocks anything.
+  const notStartedYet = hasEvent && isEventNotStartedYet(timing);
 
   return (
     <SafeAreaView className="flex-1 bg-black">
@@ -140,14 +167,16 @@ export default function HomeScreen() {
           </View>
         </View>
 
-        {/* Event just finished on its own */}
+        {/* The event just ended — by hand, or by the backstop */}
         {justEnded ? (
           <View className="flex-row items-start bg-amber-500/10 border border-amber-500/40 rounded-2xl p-4 mb-5">
             <CheckCircle2 size={22} color="#f59e0b" />
             <View className="flex-1 ml-3">
-              <Text className="text-amber-400 font-bold text-base">Event finished</Text>
+              <Text className="text-amber-400 font-bold text-base">Event ended</Text>
               <Text className="text-amber-200/80 text-sm mt-1">
-                Everything collected has been saved. Pick the next event area to keep going.
+                {eventEnded === 'offline'
+                  ? 'Ended on this device, but there was no connection to tell the office. Ask them to close the event in the portal when you have signal.'
+                  : 'Everything collected has been saved. Pick the next event area to keep going.'}
               </Text>
             </View>
           </View>
@@ -177,10 +206,16 @@ export default function HomeScreen() {
               <Text className="text-xl font-bold text-white" numberOfLines={1}>
                 {currentEventVenue ?? (hasEvent ? 'Event in progress' : 'Choose an event area')}
               </Text>
-              {hasEvent && endsAtLabel ? (
+              {hasEvent && (startsAtLabel || endsAtLabel) ? (
                 <View className="flex-row items-center mt-1">
                   <CalendarClock size={14} color="#71717a" />
-                  <Text className="text-zinc-500 text-sm ml-1.5">Ends at {endsAtLabel}</Text>
+                  <Text className="text-zinc-500 text-sm ml-1.5">
+                    {notStartedYet && startsAtLabel
+                      ? `Starts at ${startsAtLabel}${endsAtLabel ? ` · scheduled to ${endsAtLabel}` : ''}`
+                      : endsAtLabel
+                        ? `Scheduled to ${endsAtLabel}`
+                        : `Started ${startsAtLabel}`}
+                  </Text>
                 </View>
               ) : (
                 <Text className="text-zinc-500 text-sm mt-1">
@@ -191,6 +226,27 @@ export default function HomeScreen() {
             <ChevronRight size={22} color="#71717a" />
           </View>
         </Pressable>
+
+        {/* Early setup and running long are both normal. Say so, so nobody
+            waits for a start time or expects the tablet to shut itself off. */}
+        {hasEvent && notStartedYet ? (
+          <View className="flex-row items-start bg-blue-500/10 border border-blue-500/30 rounded-2xl p-4 mb-5">
+            <CalendarClock size={20} color="#60a5fa" />
+            <Text className="text-blue-200/90 text-sm ml-3 flex-1">
+              This event hasn&apos;t started yet — you can set up and start collecting now.
+            </Text>
+          </View>
+        ) : null}
+
+        {hasEvent && runningLate ? (
+          <View className="flex-row items-start bg-amber-500/10 border border-amber-500/30 rounded-2xl p-4 mb-5">
+            <AlertTriangle size={20} color="#f59e0b" />
+            <Text className="text-amber-200/90 text-sm ml-3 flex-1">
+              Past the scheduled end time. The event stays open until you end it — keep going for
+              as long as you need.
+            </Text>
+          </View>
+        ) : null}
 
         {/* Survey + Photo options. Both are always offered so a crew can run
             either station from whichever device is free, with this device's
@@ -251,6 +307,35 @@ export default function HomeScreen() {
           ) : null}
         </View>
 
+        {/* End Event — the facilitator's call, the only thing that finishes an
+            event on time. Nothing on the clock does it for them. */}
+        {hasEvent ? (
+          <View className="pt-8">
+            <Pressable
+              onPress={() => setShowEndEventModal(true)}
+              disabled={isEnding}
+              className={cn(
+                'flex-row items-center justify-center w-full h-16 rounded-2xl border-2',
+                isEnding
+                  ? 'bg-zinc-900 border-zinc-800'
+                  : 'bg-red-600/10 border-red-600/60 active:bg-red-600/20'
+              )}
+            >
+              {isEnding ? (
+                <ActivityIndicator color="#ef4444" />
+              ) : (
+                <>
+                  <Square size={20} color="#ef4444" fill="#ef4444" />
+                  <Text className="text-red-500 text-lg font-bold ml-3">End Event</Text>
+                </>
+              )}
+            </Pressable>
+            <Text className="text-zinc-600 text-center text-sm mt-3">
+              Ends the event for every tablet and phone at this venue
+            </Text>
+          </View>
+        ) : null}
+
         {/* Reset Button - small at bottom */}
         <View className="pt-10">
           <Pressable
@@ -262,6 +347,44 @@ export default function HomeScreen() {
           </Pressable>
         </View>
       </ScrollView>
+
+      {/* End Event Confirmation */}
+      <Modal
+        visible={showEndEventModal}
+        animationType="fade"
+        transparent
+        onRequestClose={() => setShowEndEventModal(false)}
+      >
+        <View className="flex-1 bg-black/80 items-center justify-center px-8">
+          <View className="w-full bg-zinc-900 rounded-2xl p-6">
+            <Text className="text-2xl font-bold text-white mb-2">End this event?</Text>
+            <Text className="text-zinc-400 mb-2">
+              {currentEventVenue
+                ? `"${currentEventVenue}" will be closed for every device at this venue.`
+                : 'This event will be closed for every device at this venue.'}
+            </Text>
+            <Text className="text-zinc-500 mb-6">
+              Everything collected is saved and keeps uploading. Only end the event once the crew
+              is finished — nobody can collect for it afterwards.
+            </Text>
+
+            <View className="flex-row gap-3">
+              <Pressable
+                onPress={() => setShowEndEventModal(false)}
+                className="flex-1 h-14 items-center justify-center bg-zinc-800 rounded-xl active:bg-zinc-700"
+              >
+                <Text className="text-white font-semibold text-lg">Keep Going</Text>
+              </Pressable>
+              <Pressable
+                onPress={handleConfirmEndEvent}
+                className="flex-1 h-14 items-center justify-center bg-red-600 rounded-xl active:bg-red-700"
+              >
+                <Text className="text-white font-semibold text-lg">End Event</Text>
+              </Pressable>
+            </View>
+          </View>
+        </View>
+      </Modal>
 
       {/* Reset Confirmation Modal */}
       <Modal
