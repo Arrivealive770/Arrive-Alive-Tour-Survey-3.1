@@ -687,13 +687,19 @@ before that has no update system inside it and will never receive a push — tho
 tablets need one final APK install first. There is no way around that, and no
 warning if you skip it: the publish will report success and reach nobody.
 
-**Publishing an update:**
+**Publishing an update:** run `.\desktop\update-all.ps1`. It does this and the
+server restart together, and it sets the server address for you — which the
+by-hand version below does not do on its own.
 
 ```powershell
 cd C:\ArriveAlive
 git fetch origin
 git checkout -B main origin/main
 cd mobile
+# Required. `eas update` does NOT read the env block in eas.json - that is
+# only for `eas build`. Leave this line out and the published app has no
+# server address in it, so every tablet that takes the update stops working.
+$env:EXPO_PUBLIC_BACKEND_URL = "https://arrivealive.tail04a318.ts.net"
 eas update --branch preview --message "what changed"
 ```
 

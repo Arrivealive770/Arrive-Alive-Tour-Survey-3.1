@@ -15,6 +15,7 @@ import * as FileSystem from 'expo-file-system/legacy';
 import { Platform } from 'react-native';
 import { useDeviceStore } from '@/lib/state/device-store';
 import { getDatabaseSafe } from '@/lib/db/database';
+import { BACKEND_URL } from '@/lib/api/backend-url';
 
 // Directory where queued photos for transfer are tracked
 const LOCAL_SEND_QUEUE_DIR = 'local_send_queue/';
@@ -81,7 +82,7 @@ class LocalPhotoSenderService {
   private autoRetryEnabled = true;
 
   private get baseUrl(): string {
-    return process.env.EXPO_PUBLIC_BACKEND_URL || '';
+    return BACKEND_URL;
   }
 
   /**

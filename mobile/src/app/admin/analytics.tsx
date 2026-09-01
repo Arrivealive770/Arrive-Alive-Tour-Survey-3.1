@@ -16,6 +16,7 @@ import { ClipboardList, TrendingUp } from 'lucide-react-native';
 import { SURVEY_TYPES } from '@/lib/api/types';
 import { api } from '@/lib/api/api';
 import { useDeviceStore } from '@/lib/state/device-store';
+import { BACKEND_URL } from '@/lib/api/backend-url';
 
 interface AnalyticsData {
   totalSurveys: number;
@@ -145,7 +146,7 @@ export default function AnalyticsScreen() {
 
   // Pull the real CSV the server generates rather than re-deriving it here.
   const handleExport = async (): Promise<string> => {
-    const baseUrl = process.env.EXPO_PUBLIC_BACKEND_URL ?? '';
+    const baseUrl = BACKEND_URL;
     const response = await fetch(
       `${baseUrl}/api/admin/export/csv?teamId=${teamId}&startDate=${startParam}&endDate=${endParam}`
     );

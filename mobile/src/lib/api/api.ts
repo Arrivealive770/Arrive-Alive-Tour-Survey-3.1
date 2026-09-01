@@ -1,4 +1,5 @@
 import { fetch } from "expo/fetch";
+import { BACKEND_URL } from "./backend-url";
 
 // Response envelope type - all app routes return { data: T }
 interface ApiResponse<T> {
@@ -10,7 +11,7 @@ interface ApiErrorBody {
   error?: { message?: string; code?: string };
 }
 
-const baseUrl = process.env.EXPO_PUBLIC_BACKEND_URL!;
+const baseUrl = BACKEND_URL;
 
 /**
  * Error thrown for non-2xx responses. Exposes the backend `code`

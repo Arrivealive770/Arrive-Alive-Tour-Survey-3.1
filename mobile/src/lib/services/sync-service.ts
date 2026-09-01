@@ -18,6 +18,7 @@ import type {
   RetryConfig,
 } from './sync-types';
 import { DEFAULT_RETRY_CONFIG } from './sync-types';
+import { BACKEND_URL } from '@/lib/api/backend-url';
 
 const BATCH_SIZE = 50;
 const PHOTO_BATCH_SIZE = 10;
@@ -40,7 +41,7 @@ class SyncService {
   private baseUrl: string;
 
   constructor() {
-    this.baseUrl = process.env.EXPO_PUBLIC_BACKEND_URL || '';
+    this.baseUrl = BACKEND_URL;
   }
 
   /**

@@ -38,6 +38,7 @@ import {
   type PurgePhotosResponse,
 } from '@/lib/api/types';
 import { cn } from '@/lib/cn';
+import { BACKEND_URL } from '@/lib/api/backend-url';
 
 interface EventWithCounts extends Event {
   _count?: {
@@ -168,7 +169,7 @@ export default function EventsScreen() {
       }
       formData.append('name', name);
 
-      const response = await fetch(`${process.env.EXPO_PUBLIC_BACKEND_URL}/api/overlays`, {
+      const response = await fetch(`${BACKEND_URL}/api/overlays`, {
         method: 'POST',
         body: formData,
       });
@@ -516,7 +517,7 @@ export default function EventsScreen() {
                     <View className="items-center mb-3">
                       <Image
                         source={{
-                          uri: `${process.env.EXPO_PUBLIC_BACKEND_URL}/api/overlays/${selectedEvent.overlayId}/preview`,
+                          uri: `${BACKEND_URL}/api/overlays/${selectedEvent.overlayId}/preview`,
                         }}
                         style={{
                           width: 150,

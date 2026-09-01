@@ -220,6 +220,30 @@ else {
       $easExe = "npx"; $easArgs = @("--yes", "eas-cli@latest")
     }
 
+    # The server address has to be handed over explicitly.
+    #
+    # It looks like eas.json already covers this - the preview profile sets
+    # EXPO_PUBLIC_BACKEND_URL - but that block is read by `eas build` only.
+    # `eas update` ignores it and looks for a mobile\.env file, which this
+    # machine doesn't have. The address then gets compiled into the bundle as
+    # nothing at all, the publish reports success, and every tablet that takes
+    # the update can no longer find the desktop. Read the same value the APKs
+    # were built with and put it in the environment for the publish.
+    $backendUrl = $null
+    try {
+      $easJson = Get-Content (Join-Path $Root "mobile\eas.json") -Raw | ConvertFrom-Json
+      $buildProfile = $easJson.build.$Branch
+      if ($buildProfile -and $buildProfile.env) { $backendUrl = $buildProfile.env.EXPO_PUBLIC_BACKEND_URL }
+    }
+    catch { throw "Could not read mobile\eas.json: $($_.Exception.Message)" }
+
+    if (-not $backendUrl) {
+      throw "mobile\eas.json has no EXPO_PUBLIC_BACKEND_URL for the '$Branch' profile. Refusing to publish - the tablets would get an app that can't reach this desktop."
+    }
+
+    $env:EXPO_PUBLIC_BACKEND_URL = $backendUrl
+    Write-Note "Tablets will be told the server is at: $backendUrl"
+
     Push-Location (Join-Path $Root "mobile")
     try {
       $publishArgs = $easArgs + @(
