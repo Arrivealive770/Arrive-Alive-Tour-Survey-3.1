@@ -21,6 +21,10 @@ import { DEFAULT_RETRY_CONFIG } from './sync-types';
 import { BACKEND_URL } from '@/lib/api/backend-url';
 
 const BATCH_SIZE = 50;
+// Upper bound on how many surveys one sync run will work through. Well above a
+// busy event's total so nothing is left behind, but bounded so a huge backlog
+// can't tie the device up indefinitely.
+const MAX_SURVEYS_PER_RUN = 500;
 const PHOTO_BATCH_SIZE = 10;
 // How often to poll the backend for photos that were deleted elsewhere so we
 // can remove the matching local files from this phone / tablet.
@@ -32,6 +36,7 @@ const PENDING_SYNC_INTERVAL_MS = 15000;
 
 class SyncService {
   private syncInProgress = false;
+  private surveySyncInProgress = false;
   private retryTimeouts: Map<string, ReturnType<typeof setTimeout>> = new Map();
   private netInfoUnsubscribe: (() => void) | null = null;
   private appStateSubscription: { remove: () => void } | null = null;
@@ -233,7 +238,11 @@ class SyncService {
   }
 
   /**
-   * Sync pending surveys to the server
+   * Sync pending surveys to the server.
+   *
+   * Runs one survey at a time across the whole queue, not just the first
+   * batch: a tablet that collects more surveys than a single batch (or that
+   * accumulates un-syncable rows) must still get every later survey up.
    */
   async syncSurveys(): Promise<{ synced: number; failed: number }> {
     const db = getDatabaseSafe();
@@ -241,6 +250,15 @@ class SyncService {
       console.log('[SyncService] Database not ready, skipping survey sync');
       return { synced: 0, failed: 0 };
     }
+
+    // Single-flight. The retry timer and the pending-work poll can both land
+    // here, and two overlapping runs would fight over the "syncing" marker.
+    if (this.surveySyncInProgress) {
+      console.log('[SyncService] Survey sync already running, skipping');
+      return { synced: 0, failed: 0 };
+    }
+    this.surveySyncInProgress = true;
+
     const deviceId = useDeviceStore.getState().deviceId || 'unknown';
     const teamId = useDeviceStore.getState().teamId || 'unknown';
 
@@ -248,8 +266,18 @@ class SyncService {
     let totalFailed = 0;
 
     try {
-      // Get pending surveys
-      const allPending = await db.getPendingSurveys(BATCH_SIZE);
+      // Nothing else is uploading right now, so any row still flagged
+      // "syncing" is left over from an upload that never came back. Put it
+      // back in the queue instead of letting it sit there invisibly forever.
+      const recovered = await db.recoverStuckSurveys();
+      if (recovered > 0) {
+        console.log(`[SyncService] Requeued ${recovered} survey(s) stuck mid-upload`);
+      }
+
+      // Read the whole backlog, not one batch. Un-syncable rows stay in the
+      // queue permanently, so a batch-sized window would eventually fill up
+      // with them and silently block every newer survey behind them.
+      const allPending = await db.getPendingSurveys(MAX_SURVEYS_PER_RUN);
 
       // The server rejects unknown event/team ids with a foreign-key error, so
       // sending them just retries forever. Fill in the ids this device knows
@@ -263,13 +291,17 @@ class SyncService {
           survey.teamId && survey.teamId !== 'unknown' ? survey.teamId : teamId;
 
         if (!resolvedEventId || resolvedEventId === 'unknown' || resolvedTeamId === 'unknown') {
-          console.warn(`[SyncService] Survey ${survey.localId} has no valid event - not syncable`);
-          await db.markSurveyFailed(survey.localId, 'No event selected when this survey was taken');
-          useSyncStore.getState().addError({
-            type: 'survey',
-            localId: survey.localId,
-            message: 'No event selected when this survey was taken',
-          });
+          const message = 'No event selected when this survey was taken';
+          // Only report it the first time; this row is rescanned every pass.
+          if (survey.lastSyncError !== message) {
+            console.warn(`[SyncService] Survey ${survey.localId} has no valid event - not syncable`);
+            await db.markSurveyFailed(survey.localId, message);
+            useSyncStore.getState().addError({
+              type: 'survey',
+              localId: survey.localId,
+              message,
+            });
+          }
           totalFailed++;
           continue;
         }
@@ -284,81 +316,103 @@ class SyncService {
 
       console.log(`[SyncService] Syncing ${pendingSurveys.length} surveys`);
 
-      // Mark as syncing
-      const localIds = pendingSurveys.map((s) => s.localId);
-      await db.markSurveysSyncing(localIds);
+      // Upload in batches so one huge request can't time out and take the
+      // whole backlog with it.
+      for (let i = 0; i < pendingSurveys.length; i += BATCH_SIZE) {
+        const batch = pendingSurveys.slice(i, i + BATCH_SIZE);
+        const localIds = batch.map((s) => s.localId);
 
-      // Send batch to server
-      const response = await fetch(`${this.baseUrl}/api/sync/surveys`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          surveys: pendingSurveys.map((s) => ({
-            localId: s.localId,
-            teamId: s.teamId,
-            eventId: s.eventId,
-            surveyTypeSlug: s.surveyTypeSlug,
-            responses: s.responses,
-            ageRange: s.ageRange,
-            deviceId: s.deviceId,
-            completedAt: s.completedAt,
-            durationSeconds: s.durationSeconds,
-          })),
-          deviceId,
-          teamId,
-        }),
-      });
+        // Mark as syncing
+        await db.markSurveysSyncing(localIds);
 
-      if (!response.ok) {
-        throw new Error(`Server error: ${response.status}`);
-      }
+        try {
+          // Send batch to server
+          const response = await fetch(`${this.baseUrl}/api/sync/surveys`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              surveys: batch.map((s) => ({
+                localId: s.localId,
+                teamId: s.teamId,
+                eventId: s.eventId,
+                surveyTypeSlug: s.surveyTypeSlug,
+                responses: s.responses,
+                ageRange: s.ageRange,
+                deviceId: s.deviceId,
+                completedAt: s.completedAt,
+                durationSeconds: s.durationSeconds,
+              })),
+              deviceId,
+              teamId,
+            }),
+          });
 
-      const result = (await response.json()) as { data: SyncBatchResponse };
-      const data = result.data;
+          if (!response.ok) {
+            throw new Error(`Server error: ${response.status}`);
+          }
 
-      // Mark synced items
-      if (data.synced.length > 0) {
-        await db.markSurveysSynced(data.synced);
-        totalSynced = data.synced.length;
-      }
+          const result = (await response.json()) as { data: SyncBatchResponse };
+          const data = result.data;
 
-      // Handle failures
-      for (const failure of data.errors) {
-        await db.markSurveyFailed(failure.localId, failure.error);
-        totalFailed++;
+          // "skipped" means the server already has that survey (an earlier
+          // upload landed but the reply was lost). Those are done — without
+          // clearing them they stay queued and get re-sent forever.
+          const done = [...data.synced, ...(data.skipped ?? [])];
+          if (done.length > 0) {
+            await db.markSurveysSynced(done);
+            totalSynced += done.length;
+          }
 
-        // Add to sync errors
-        useSyncStore.getState().addError({
-          type: 'survey',
-          localId: failure.localId,
-          message: failure.error,
-        });
-      }
+          // Handle failures
+          for (const failure of data.errors) {
+            await db.markSurveyFailed(failure.localId, failure.error);
+            totalFailed++;
 
-      // Schedule retry for failed items if under max attempts
-      if (totalFailed > 0) {
-        const failedSurvey = pendingSurveys.find(
-          (s) => data.errors.some((f) => f.localId === s.localId)
-        );
-        if (failedSurvey && failedSurvey.syncAttempts < DEFAULT_RETRY_CONFIG.maxAttempts) {
-          const delay = this.calculateRetryDelay(failedSurvey.syncAttempts);
-          this.scheduleRetry('surveys', delay);
+            // Add to sync errors
+            useSyncStore.getState().addError({
+              type: 'survey',
+              localId: failure.localId,
+              message: failure.error,
+            });
+          }
+
+          // Schedule retry for failed items if under max attempts
+          if (data.errors.length > 0) {
+            const failedSurvey = batch.find(
+              (s) => data.errors.some((f) => f.localId === s.localId)
+            );
+            if (failedSurvey && failedSurvey.syncAttempts < DEFAULT_RETRY_CONFIG.maxAttempts) {
+              const delay = this.calculateRetryDelay(failedSurvey.syncAttempts);
+              this.scheduleRetry('surveys', delay);
+            }
+          }
+        } catch (batchError) {
+          console.error('[SyncService] Survey batch failed:', batchError);
+
+          // Put THIS batch back in the queue. It must be done by id: the rows
+          // were just marked "syncing", so re-reading the pending queue here
+          // would not find them and they would never be retried.
+          await db.markSurveysFailed(
+            localIds,
+            batchError instanceof Error ? batchError.message : 'Unknown error'
+          );
+          totalFailed += localIds.length;
+
+          // Connection is clearly unhappy - stop hammering it, retry later.
+          this.scheduleRetry('surveys', DEFAULT_RETRY_CONFIG.baseDelayMs);
+          break;
         }
       }
     } catch (error) {
       console.error('[SyncService] Survey sync error:', error);
-      // Mark all as failed
-      const pendingSurveys = await db.getPendingSurveys(BATCH_SIZE);
-      for (const survey of pendingSurveys) {
-        await db.markSurveyFailed(
-          survey.localId,
-          error instanceof Error ? error.message : 'Unknown error'
-        );
-        totalFailed++;
-      }
+
+      // Anything left mid-flight goes back in the queue for the next attempt.
+      await db.recoverStuckSurveys().catch(() => undefined);
 
       // Schedule retry
       this.scheduleRetry('surveys', DEFAULT_RETRY_CONFIG.baseDelayMs);
+    } finally {
+      this.surveySyncInProgress = false;
     }
 
     return { synced: totalSynced, failed: totalFailed };

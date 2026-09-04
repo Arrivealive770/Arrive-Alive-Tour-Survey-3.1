@@ -37,6 +37,16 @@ export class DatabaseService {
       // Lightweight migrations for existing databases (safe to run repeatedly).
       await this.runMigrations();
 
+      // Rescue anything left mid-upload by a crash / force-quit / dead wifi.
+      const recovered = await this.recoverStuckSurveys();
+      if (recovered > 0) {
+        console.log(`[DatabaseService] Recovered ${recovered} stranded survey(s) for re-sync`);
+      }
+      const recoveredPhotos = await this.recoverStuckPhotos();
+      if (recoveredPhotos > 0) {
+        console.log(`[DatabaseService] Recovered ${recoveredPhotos} stranded photo(s) for re-upload`);
+      }
+
       console.log('[DatabaseService] Database initialized successfully');
     } catch (error) {
       console.error('[DatabaseService] Failed to initialize database:', error);
@@ -179,6 +189,51 @@ export class DatabaseService {
     await db.runAsync(
       `UPDATE survey_queue SET syncStatus = ? WHERE localId IN (${placeholders})`,
       [SYNC_STATUS.SYNCED, ...localIds]
+    );
+  }
+
+  /**
+   * Put any survey stuck in "syncing" back into the queue.
+   *
+   * "syncing" is set on the whole batch immediately before the upload request.
+   * If that request never comes back (wifi drops mid-event, the server blips,
+   * the app is force-quit), those rows used to sit in "syncing" forever:
+   * getPendingSurveys only looks at pending/failed, so they were never retried
+   * and never uploaded — the surveys were still on the tablet but invisible to
+   * every sync. Resetting them to "pending" is safe because the server
+   * de-duplicates by localId, so a survey that did land is not double-counted.
+   */
+  async recoverStuckSurveys(): Promise<number> {
+    const db = this.getDb();
+    const result = await db.runAsync(
+      `UPDATE survey_queue SET syncStatus = ? WHERE syncStatus = ?`,
+      [SYNC_STATUS.PENDING, SYNC_STATUS.SYNCING]
+    );
+    return result.changes;
+  }
+
+  /**
+   * Same rescue for photos: getPendingPhotos only looks at pending/failed, so a
+   * photo left in "uploading" by a force-quit would never be retried.
+   */
+  async recoverStuckPhotos(): Promise<number> {
+    const db = this.getDb();
+    const result = await db.runAsync(
+      `UPDATE photo_queue SET uploadStatus = ? WHERE uploadStatus = ?`,
+      [UPLOAD_STATUS.PENDING, UPLOAD_STATUS.UPLOADING]
+    );
+    return result.changes;
+  }
+
+  async markSurveysFailed(localIds: string[], error: string): Promise<void> {
+    if (localIds.length === 0) return;
+    const db = this.getDb();
+    const placeholders = localIds.map(() => '?').join(',');
+    await db.runAsync(
+      `UPDATE survey_queue
+       SET syncStatus = ?, lastSyncError = ?
+       WHERE localId IN (${placeholders})`,
+      [SYNC_STATUS.FAILED, error, ...localIds]
     );
   }
 

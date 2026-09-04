@@ -77,6 +77,17 @@ export class DatabaseService {
   async initialize(): Promise<void> {
     this.data = loadData();
     this.initialized = true;
+
+    // Rescue anything left mid-upload by a crash / reload / dead wifi.
+    const recovered = await this.recoverStuckSurveys();
+    if (recovered > 0) {
+      console.log(`[WebDB] Recovered ${recovered} stranded survey(s) for re-sync`);
+    }
+    const recoveredPhotos = await this.recoverStuckPhotos();
+    if (recoveredPhotos > 0) {
+      console.log(`[WebDB] Recovered ${recoveredPhotos} stranded photo(s) for re-upload`);
+    }
+
     console.log('[WebDB] Database initialized (localStorage)');
   }
 
@@ -165,6 +176,53 @@ export class DatabaseService {
     for (const id of localIds) {
       if (this.data.survey_queue[id]) {
         this.data.survey_queue[id].syncStatus = SYNC_STATUS.SYNCED as 'synced';
+      }
+    }
+    saveData(this.data);
+  }
+
+  /**
+   * Put any survey stuck in "syncing" back into the queue. See the note on the
+   * native implementation: without this, a batch whose upload request never
+   * came back was never retried and never uploaded.
+   */
+  async recoverStuckSurveys(): Promise<number> {
+    this.ensureInitialized();
+    let changed = 0;
+    for (const survey of Object.values(this.data.survey_queue)) {
+      if (survey.syncStatus === SYNC_STATUS.SYNCING) {
+        survey.syncStatus = SYNC_STATUS.PENDING as 'pending';
+        changed++;
+      }
+    }
+    if (changed > 0) saveData(this.data);
+    return changed;
+  }
+
+  /**
+   * Same rescue for photos: getPendingPhotos only looks at pending/failed, so a
+   * photo left in "uploading" by a reload would never be retried.
+   */
+  async recoverStuckPhotos(): Promise<number> {
+    this.ensureInitialized();
+    let changed = 0;
+    for (const photo of Object.values(this.data.photo_queue)) {
+      if (photo.uploadStatus === UPLOAD_STATUS.UPLOADING) {
+        photo.uploadStatus = UPLOAD_STATUS.PENDING as 'pending';
+        changed++;
+      }
+    }
+    if (changed > 0) saveData(this.data);
+    return changed;
+  }
+
+  async markSurveysFailed(localIds: string[], error: string): Promise<void> {
+    this.ensureInitialized();
+    for (const id of localIds) {
+      const survey = this.data.survey_queue[id];
+      if (survey) {
+        survey.syncStatus = SYNC_STATUS.FAILED as 'failed';
+        survey.lastSyncError = error;
       }
     }
     saveData(this.data);
