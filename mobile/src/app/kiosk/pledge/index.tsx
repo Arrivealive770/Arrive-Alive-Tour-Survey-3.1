@@ -18,9 +18,7 @@ import Animated, {
 } from 'react-native-reanimated';
 import * as Haptics from 'expo-haptics';
 import { ImageIcon, ArrowRight, RefreshCw, Camera } from 'lucide-react-native';
-import { IdleResetTimer } from '@/components/kiosk';
 import { usePledgeStore } from '@/lib/state/pledge-store';
-import { useSurveyStore } from '@/lib/state/survey-store';
 import { useDeviceStore } from '@/lib/state/device-store';
 import { api, ApiError } from '@/lib/api/api';
 import type {
@@ -31,7 +29,6 @@ import type {
 
 const AnimatedPressable = Animated.createAnimatedComponent(Pressable);
 
-const IDLE_TIMEOUT = 60000; // 60 seconds
 // How often the grid re-checks for photos just taken on the phone.
 const PHOTO_POLL_INTERVAL_MS = 5000;
 
@@ -40,8 +37,6 @@ export default function PhotoSelectionScreen() {
   const { width } = useWindowDimensions();
   const isTablet = width > 600;
 
-  const resetPledge = usePledgeStore((s) => s.reset);
-  const resetSurvey = useSurveyStore((s) => s.reset);
   const setBackendPhoto = usePledgeStore((s) => s.setBackendPhoto);
   const setFinishedPhotoUrl = usePledgeStore((s) => s.setFinishedPhotoUrl);
   const selectedPhotoId = usePledgeStore((s) => s.selectedPhotoId);
@@ -169,23 +164,11 @@ export default function PhotoSelectionScreen() {
     await loadPhotos();
   }, [selectedPhotoId, loadPhotos]);
 
-  const handleIdleReset = useCallback(() => {
-    // Release any selected photo on idle so it isn't stranded.
-    const currentId = usePledgeStore.getState().selectedPhotoId;
-    if (currentId) {
-      api.put<Photo>(`/api/photos/${currentId}/release`, {}).catch(() => {});
-    }
-    resetPledge();
-    resetSurvey();
-    router.replace('/kiosk');
-  }, [resetPledge, resetSurvey, router]);
-
   const hasSelection = !!selectedPhotoId;
   const previewUri = finishedPhotoUrl ?? selectedPhotoOriginalUrl;
 
   return (
-    <IdleResetTimer timeoutMs={IDLE_TIMEOUT} onReset={handleIdleReset} enabled={true}>
-      <SafeAreaView style={{ flex: 1, backgroundColor: '#000000' }} edges={['top', 'bottom']}>
+    <SafeAreaView style={{ flex: 1, backgroundColor: '#000000' }} edges={['top', 'bottom']}>
         <View style={{ flex: 1 }}>
           {/* Header */}
           <Animated.View
@@ -411,8 +394,7 @@ export default function PhotoSelectionScreen() {
             </Animated.View>
           ) : null}
         </View>
-      </SafeAreaView>
-    </IdleResetTimer>
+    </SafeAreaView>
   );
 }
 

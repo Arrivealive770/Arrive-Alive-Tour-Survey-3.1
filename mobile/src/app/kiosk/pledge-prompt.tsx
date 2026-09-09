@@ -10,14 +10,10 @@ import Animated, {
 } from 'react-native-reanimated';
 import * as Haptics from 'expo-haptics';
 import { CheckCircle, Shield, Camera, Mail } from 'lucide-react-native';
-import { IdleResetTimer } from '@/components/kiosk';
-import { useSurveyStore } from '@/lib/state/survey-store';
 import { usePledgeStore } from '@/lib/state/pledge-store';
 import { useDeviceStore } from '@/lib/state/device-store';
 
 const AnimatedPressable = Animated.createAnimatedComponent(Pressable);
-
-const IDLE_TIMEOUT = 60000; // 60 seconds
 
 interface ActionButtonProps {
   label: string;
@@ -98,7 +94,6 @@ function ActionButton({ label, sublabel, variant, onPress }: ActionButtonProps) 
 export default function PledgePromptScreen() {
   const router = useRouter();
   const { width } = useWindowDimensions();
-  const reset = useSurveyStore((s) => s.reset);
   const startPledge = usePledgeStore((s) => s.startPledge);
   const picturePledgeEnabled = useDeviceStore((s) => s.picturePledgeEnabled);
 
@@ -129,19 +124,8 @@ export default function PledgePromptScreen() {
     router.replace('/kiosk/pledge/thank-you?declined=1' as any);
   }, [router]);
 
-  // Handle idle reset
-  const handleIdleReset = useCallback(() => {
-    reset();
-    router.replace('/kiosk' as any);
-  }, [reset, router]);
-
   return (
-    <IdleResetTimer
-      timeoutMs={IDLE_TIMEOUT}
-      onReset={handleIdleReset}
-      enabled={true}
-    >
-      <SafeAreaView className="flex-1 bg-black" edges={['top', 'bottom']}>
+    <SafeAreaView className="flex-1 bg-black" edges={['top', 'bottom']}>
         <View className="flex-1 px-8 justify-center">
           {/* Thank You Message */}
           <Animated.View
@@ -208,8 +192,7 @@ export default function PledgePromptScreen() {
               onPress={handleDecline}
             />
           </Animated.View>
-        </View>
-      </SafeAreaView>
-    </IdleResetTimer>
+      </View>
+    </SafeAreaView>
   );
 }

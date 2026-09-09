@@ -8,7 +8,6 @@ import Animated, {
   withSpring,
 } from 'react-native-reanimated';
 import * as Haptics from 'expo-haptics';
-import { IdleResetTimer } from '@/components/kiosk';
 import { useSurveyStore } from '@/lib/state/survey-store';
 import { useDatabase } from '@/providers/DatabaseProvider';
 
@@ -20,8 +19,6 @@ const AGE_BRACKETS = [
   { value: '25-34', label: '25-34' },
   { value: '35+', label: '35+' },
 ];
-
-const IDLE_TIMEOUT = 60000; // 60 seconds
 
 interface AgeBracketButtonProps {
   label: string;
@@ -80,7 +77,6 @@ function AgeBracketButton({ label, value, isSelected, onPress }: AgeBracketButto
 
 export default function DemographicsScreen() {
   const router = useRouter();
-  const reset = useSurveyStore((s) => s.reset);
   const { db } = useDatabase();
 
   const [selectedAge, setSelectedAge] = useState<string | null>(null);
@@ -122,19 +118,8 @@ export default function DemographicsScreen() {
     router.replace('/kiosk/pledge-prompt' as any);
   }, [router]);
 
-  // Handle idle reset
-  const handleIdleReset = useCallback(() => {
-    reset();
-    router.replace('/kiosk' as any);
-  }, [reset, router]);
-
   return (
-    <IdleResetTimer
-      timeoutMs={IDLE_TIMEOUT}
-      onReset={handleIdleReset}
-      enabled={!isProcessing}
-    >
-      <SafeAreaView className="flex-1 bg-black" edges={['top', 'bottom']}>
+    <SafeAreaView className="flex-1 bg-black" edges={['top', 'bottom']}>
         <View className="flex-1 px-6 justify-center">
           {/* Header */}
           <View className="mb-12">
@@ -180,8 +165,7 @@ export default function DemographicsScreen() {
               Skip
             </Text>
           </Pressable>
-        </View>
-      </SafeAreaView>
-    </IdleResetTimer>
+      </View>
+    </SafeAreaView>
   );
 }

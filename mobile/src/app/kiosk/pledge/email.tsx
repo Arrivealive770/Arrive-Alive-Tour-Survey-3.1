@@ -10,9 +10,7 @@ import Animated, {
 } from 'react-native-reanimated';
 import * as Haptics from 'expo-haptics';
 import { Mail, Send, SkipForward } from 'lucide-react-native';
-import { IdleResetTimer } from '@/components/kiosk';
 import { usePledgeStore } from '@/lib/state/pledge-store';
-import { useSurveyStore } from '@/lib/state/survey-store';
 import { useSyncStore } from '@/lib/state/sync-store';
 import { useDeviceStore } from '@/lib/state/device-store';
 import { useDatabase } from '@/providers/DatabaseProvider';
@@ -20,8 +18,6 @@ import { api } from '@/lib/api/api';
 import type { CompositePhotoResponse, Photo } from '@/lib/api/types';
 
 const AnimatedPressable = Animated.createAnimatedComponent(Pressable);
-
-const IDLE_TIMEOUT = 120000; // 2 minutes for email entry
 
 // Simple email validation
 function isValidEmail(email: string): boolean {
@@ -42,12 +38,10 @@ export default function EmailScreen() {
 
   const setPledgeEmail = usePledgeStore((s) => s.setEmail);
   const completePledge = usePledgeStore((s) => s.completePledge);
-  const resetPledge = usePledgeStore((s) => s.reset);
   const selectedPhotoId = usePledgeStore((s) => s.selectedPhotoId);
   const selectedPhotoLocalId = usePledgeStore((s) => s.selectedPhotoLocalId);
   const selectedPhotoOriginalUrl = usePledgeStore((s) => s.selectedPhotoOriginalUrl);
   const finishedPhotoUrl = usePledgeStore((s) => s.finishedPhotoUrl);
-  const resetSurvey = useSurveyStore((s) => s.reset);
 
   const updateCounts = useSyncStore((s) => s.updateCounts);
   const pendingPledges = useSyncStore((s) => s.pendingPledges);
@@ -205,19 +199,8 @@ export default function EmailScreen() {
     }
   }, [isSubmitting, selectedPhotoId, queuePledgeLocally, router]);
 
-  const handleIdleReset = useCallback(() => {
-    const currentPhotoId = usePledgeStore.getState().selectedPhotoId;
-    if (currentPhotoId) {
-      api.put<Photo>(`/api/photos/${currentPhotoId}/release`, {}).catch(() => {});
-    }
-    resetPledge();
-    resetSurvey();
-    router.replace('/kiosk');
-  }, [resetPledge, resetSurvey, router]);
-
   return (
-    <IdleResetTimer timeoutMs={IDLE_TIMEOUT} onReset={handleIdleReset} enabled={true}>
-      <SafeAreaView style={{ flex: 1, backgroundColor: '#000000' }} edges={['top', 'bottom']}>
+    <SafeAreaView style={{ flex: 1, backgroundColor: '#000000' }} edges={['top', 'bottom']}>
         <Pressable style={{ flex: 1 }} onPress={Keyboard.dismiss}>
           <View style={{ flex: 1, justifyContent: 'center', paddingHorizontal: 24 }}>
             {/* Header */}
@@ -334,8 +317,7 @@ export default function EmailScreen() {
             </Animated.View>
           </View>
         </Pressable>
-      </SafeAreaView>
-    </IdleResetTimer>
+    </SafeAreaView>
   );
 }
 

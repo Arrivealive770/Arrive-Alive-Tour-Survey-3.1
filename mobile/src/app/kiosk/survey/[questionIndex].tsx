@@ -3,7 +3,7 @@ import { View, Text, ScrollView, Pressable, ActivityIndicator } from 'react-nati
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useRouter, useLocalSearchParams } from 'expo-router';
 import { AlertTriangle } from 'lucide-react-native';
-import { ProgressBar, QuestionCard, AnswerButton, IdleResetTimer } from '@/components/kiosk';
+import { ProgressBar, QuestionCard, AnswerButton } from '@/components/kiosk';
 import { useSurveyQuestions, responseKeyFor } from '@/lib/survey-questions';
 import { useSurveyStore, toAnswerMap } from '@/lib/state/survey-store';
 import { useSyncStore } from '@/lib/state/sync-store';
@@ -11,7 +11,6 @@ import { useDatabase } from '@/providers/DatabaseProvider';
 import { useDeviceStore } from '@/lib/state/device-store';
 
 const AUTO_ADVANCE_DELAY = 300;
-const IDLE_TIMEOUT = 60000; // 60 seconds
 
 export default function QuestionScreen() {
   const router = useRouter();
@@ -132,8 +131,9 @@ export default function QuestionScreen() {
     ]
   );
 
-  // Handle idle reset - go back to survey type selection
-  const handleIdleReset = useCallback(() => {
+  // Bail out to survey selection. Only reachable from the error screen below —
+  // nothing resets a survey on a timer, so a guest can take as long as they like.
+  const handleBackToStart = useCallback(() => {
     reset();
     router.replace('/kiosk' as any);
   }, [reset, router]);
@@ -187,7 +187,7 @@ export default function QuestionScreen() {
             <Text className="text-black font-semibold text-lg">Try Again</Text>
           </Pressable>
           <Pressable
-            onPress={handleIdleReset}
+            onPress={handleBackToStart}
             className="px-6 h-14 items-center justify-center bg-zinc-800 rounded-xl active:bg-zinc-700"
           >
             <Text className="text-white font-semibold text-lg">Back</Text>
@@ -198,40 +198,34 @@ export default function QuestionScreen() {
   }
 
   return (
-    <IdleResetTimer
-      timeoutMs={IDLE_TIMEOUT}
-      onReset={handleIdleReset}
-      enabled={!isProcessing}
-    >
-      <SafeAreaView className="flex-1 bg-black" edges={['top', 'bottom']}>
-        {/* Progress Bar */}
-        <ProgressBar current={questionIndex} total={totalQuestions} />
+    <SafeAreaView className="flex-1 bg-black" edges={['top', 'bottom']}>
+      {/* Progress Bar */}
+      <ProgressBar current={questionIndex} total={totalQuestions} />
 
-        {/* Question */}
-        <QuestionCard
-          questionText={currentQuestion.questionText}
-          questionNumber={questionIndex}
-        />
+      {/* Question */}
+      <QuestionCard
+        questionText={currentQuestion.questionText}
+        questionNumber={questionIndex}
+      />
 
-        {/* Answer Options */}
-        <View className="px-6 pb-8">
-          <ScrollView
-            showsVerticalScrollIndicator={false}
-            contentContainerStyle={{ gap: 12 }}
-          >
-            {currentQuestion.options.map((option) => (
-              <AnswerButton
-                key={option}
-                text={option}
-                value={option}
-                isSelected={selectedAnswer === option}
-                onPress={handleAnswerSelect}
-                disabled={isProcessing}
-              />
-            ))}
-          </ScrollView>
-        </View>
-      </SafeAreaView>
-    </IdleResetTimer>
+      {/* Answer Options */}
+      <View className="px-6 pb-8">
+        <ScrollView
+          showsVerticalScrollIndicator={false}
+          contentContainerStyle={{ gap: 12 }}
+        >
+          {currentQuestion.options.map((option) => (
+            <AnswerButton
+              key={option}
+              text={option}
+              value={option}
+              isSelected={selectedAnswer === option}
+              onPress={handleAnswerSelect}
+              disabled={isProcessing}
+            />
+          ))}
+        </ScrollView>
+      </View>
+    </SafeAreaView>
   );
 }
