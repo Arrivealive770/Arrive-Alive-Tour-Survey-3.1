@@ -106,8 +106,10 @@ export default function QuestionScreen() {
           // Navigate to demographics
           router.replace('/kiosk/demographics' as any);
         } else {
-          // Navigate to next question
-          router.push(`/kiosk/survey/${questionIndex + 1}` as any);
+          // Replace rather than push: back navigation is blocked in kiosk mode,
+          // so stacking a screen per question just leaves every earlier
+          // question mounted behind this one for the rest of the session.
+          router.replace(`/kiosk/survey/${questionIndex + 1}` as any);
         }
 
         setIsProcessing(false);
