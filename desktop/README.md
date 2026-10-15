@@ -813,7 +813,7 @@ $key = Read-Host "Resend API key for test emails (Enter to skip)"
 $secret = -join ((1..32) | ForEach-Object { '{0:x2}' -f (Get-Random -Maximum 256) })
 @"
 DATABASE_URL="file:./test.db"
-PORT="3001"
+PORT=3001
 BETTER_AUTH_SECRET="$secret"
 BACKEND_URL="https://arrivealive.tail04a318.ts.net:8443"
 NODE_ENV="production"

@@ -106,13 +106,25 @@ REM
 REM Done here rather than in the restart instructions because this is
 REM what runs at boot, unattended, with nobody available to notice.
 REM ===================================================================
-set "PORT=3000"
+set "PORT="
 for /f "usebackq tokens=2 delims==" %%p in (`findstr /b /c:"PORT=" .env 2^>nul`) do set "PORT=%%p"
 
-REM A PORT= line saved on Windows carries a trailing carriage return, and may
-REM be quoted or blank. Anything that is not plain digits is not a port, so
-REM fall back rather than search netstat for something that cannot match.
-echo !PORT!| findstr /r /c:"^[0-9][0-9]*$" >nul || set "PORT=3000"
+REM No PORT line at all is the live server, which has always been 3000.
+if not defined PORT set "PORT=3000"
+
+REM Settings files often quote the value (PORT="3001"), and bun reads it that
+REM way happily. Strip the quotes and spaces so this script agrees with it.
+set PORT=!PORT:"=!
+set "PORT=!PORT: =!"
+
+REM Anything that still isn't plain digits must stop the start, not fall back
+REM to 3000. Falling back once made the test copy try to kill the LIVE server
+REM below and then start on its port - Windows refusing the kill was the only
+REM thing that kept the crews' tablets connected.
+echo !PORT!| findstr /r /c:"^[0-9][0-9]*$" >nul || (
+  echo ERROR: PORT in backend\.env is not a plain number. Not starting. >> "%LOG%"
+  exit /b 1
+)
 
 for /f "tokens=5" %%p in ('netstat -ano -p tcp ^| findstr /c:"LISTENING" ^| findstr /c:":!PORT! "') do (
   echo Port !PORT! is still held by PID %%p from a previous run - stopping it. >> "%LOG%"
