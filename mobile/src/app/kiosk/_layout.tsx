@@ -1,6 +1,6 @@
-import { useEffect, useState, useCallback } from 'react';
+import { useEffect, useState, useCallback, useRef } from 'react';
 import { View, Text, Pressable, BackHandler, StatusBar, Platform } from 'react-native';
-import { Stack, useRouter } from 'expo-router';
+import { Stack, usePathname, useRouter } from 'expo-router';
 import * as KeepAwake from 'expo-keep-awake';
 import * as Haptics from 'expo-haptics';
 import { useDeviceStore } from '@/lib/state/device-store';
@@ -8,18 +8,32 @@ import { useSurveyStore } from '@/lib/state/survey-store';
 import { usePledgeStore } from '@/lib/state/pledge-store';
 import { api } from '@/lib/api/api';
 import type { Photo } from '@/lib/api/types';
+import { StaffMenuContext } from '@/components/kiosk';
 
-// A guest has to be able to lean on the screen, hand the tablet to a friend and
-// take as long as they like, so nothing here is on a timer and there is no
-// visible way out of the survey. Staff get out by holding the top-right corner
-// for this long — long enough that no student does it by accident.
+// There is no visible way out of the survey. Staff open the Staff Menu by
+// holding the top-right corner for this long — long enough that no student
+// does it by accident — or by triple-tapping a heading (StaffTripleTap).
 const STAFF_HOLD_MS = 3000;
+
+// A guest who walks away mid-survey would leave their answers on screen for
+// the next person, so a minute untouched on one screen starts over. Every new
+// screen gets its own full minute.
+const GUEST_IDLE_MS = 60_000;
+
+// Only the question screens. Question 1 is left out because it is the start
+// screen when an event has one survey, so there is nothing to reset. The
+// pledge photo and email screens are left out because a guest can sit on them
+// waiting for a photo or typing, and typing doesn't count as touching the screen.
+const IDLE_RESET_SCREENS = /^\/kiosk\/(survey\/\d+|demographics|pledge-prompt)$/;
 
 export default function KioskLayout() {
   const router = useRouter();
   const exitKioskMode = useDeviceStore((s) => s.exitKioskMode);
 
+  const pathname = usePathname();
+
   const [staffPanelOpen, setStaffPanelOpen] = useState(false);
+  const idleTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   // Keep screen awake in kiosk mode (native only - not supported on web)
   useEffect(() => {
@@ -42,9 +56,10 @@ export default function KioskLayout() {
     return () => backHandler.remove();
   }, []);
 
-  // Holding the hidden corner opens the staff panel. It used to be a triple tap
-  // that exited immediately, which students were hitting by accident.
-  const handleCornerHold = useCallback(() => {
+  // Holding the hidden corner or triple-tapping a heading opens the staff
+  // panel. A triple tap used to exit immediately, which students were hitting
+  // by accident, so both only open the menu.
+  const openStaffMenu = useCallback(() => {
     Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success).catch(() => {});
     setStaffPanelOpen(true);
   }, []);
@@ -78,13 +93,37 @@ export default function KioskLayout() {
     router.replace('/');
   }, [clearGuestSession, exitKioskMode, router]);
 
+  // Paused while the Staff Menu is open: staff are at the tablet.
+  const idleResetOn =
+    !staffPanelOpen && IDLE_RESET_SCREENS.test(pathname) && pathname !== '/kiosk/survey/1';
+
+  const restartIdleTimer = useCallback(() => {
+    if (idleTimerRef.current) clearTimeout(idleTimerRef.current);
+    idleTimerRef.current = idleResetOn ? setTimeout(handleStartOver, GUEST_IDLE_MS) : null;
+  }, [idleResetOn, handleStartOver]);
+
+  useEffect(() => {
+    restartIdleTimer();
+    return () => {
+      if (idleTimerRef.current) clearTimeout(idleTimerRef.current);
+    };
+  }, [restartIdleTimer, pathname]);
+
   return (
-    <View className="flex-1 bg-black">
+    <View
+      className="flex-1 bg-black"
+      // Sees every touch anywhere on screen before the button under it does,
+      // and returns false so the touch carries on as normal.
+      onStartShouldSetResponderCapture={() => {
+        restartIdleTimer();
+        return false;
+      }}
+    >
       <StatusBar barStyle="light-content" backgroundColor="#000000" />
 
       {/* Hidden press-and-hold trigger in top-right corner (staff only) */}
       <Pressable
-        onLongPress={handleCornerHold}
+        onLongPress={openStaffMenu}
         delayLongPress={STAFF_HOLD_MS}
         style={{
           position: 'absolute',
@@ -96,20 +135,22 @@ export default function KioskLayout() {
         }}
       />
 
-      <Stack
-        screenOptions={{
-          headerShown: false,
-          contentStyle: { backgroundColor: '#000000' },
-          animation: 'fade',
-          gestureEnabled: false,
-        }}
-      >
-        <Stack.Screen name="index" />
-        <Stack.Screen name="survey/[questionIndex]" />
-        <Stack.Screen name="demographics" />
-        <Stack.Screen name="pledge-prompt" />
-        <Stack.Screen name="pledge" />
-      </Stack>
+      <StaffMenuContext.Provider value={openStaffMenu}>
+        <Stack
+          screenOptions={{
+            headerShown: false,
+            contentStyle: { backgroundColor: '#000000' },
+            animation: 'fade',
+            gestureEnabled: false,
+          }}
+        >
+          <Stack.Screen name="index" />
+          <Stack.Screen name="survey/[questionIndex]" />
+          <Stack.Screen name="demographics" />
+          <Stack.Screen name="pledge-prompt" />
+          <Stack.Screen name="pledge" />
+        </Stack>
+      </StaffMenuContext.Provider>
 
       {staffPanelOpen ? (
         <View

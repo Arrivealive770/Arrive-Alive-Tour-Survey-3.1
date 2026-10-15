@@ -10,7 +10,7 @@ import {
   Layers,
   ClipboardList,
 } from 'lucide-react-native';
-import { SurveyTypeCard } from '@/components/kiosk';
+import { SurveyTypeCard, StaffTripleTap } from '@/components/kiosk';
 import { useSurveyStore } from '@/lib/state/survey-store';
 import { useDeviceStore } from '@/lib/state/device-store';
 import { useDatabase } from '@/providers/DatabaseProvider';
@@ -176,9 +176,11 @@ export default function KioskHome() {
               resizeMode="contain"
             />
           </View>
-          <Text className="text-4xl font-bold text-white text-center mb-2">
-            Select Survey
-          </Text>
+          <StaffTripleTap testID="staff-tap-select-survey">
+            <Text className="text-4xl font-bold text-white text-center mb-2">
+              Select Survey
+            </Text>
+          </StaffTripleTap>
           {venueName ? (
             <Text className="text-lg text-zinc-400 text-center">
               {venueName}

@@ -131,8 +131,8 @@ export default function QuestionScreen() {
     ]
   );
 
-  // Bail out to survey selection. Only reachable from the error screen below —
-  // nothing resets a survey on a timer, so a guest can take as long as they like.
+  // Bail out to survey selection from the error screen below. A guest who walks
+  // away is handled separately by the minute-idle reset in app/kiosk/_layout.tsx.
   const handleBackToStart = useCallback(() => {
     reset();
     router.replace('/kiosk' as any);

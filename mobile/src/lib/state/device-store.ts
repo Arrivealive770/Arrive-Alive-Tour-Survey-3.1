@@ -55,7 +55,7 @@ interface DeviceActions {
    */
   clearCurrentEvent: () => void;
   enterKioskMode: () => void;
-  /** Leaving kiosk mode is a staff gesture (triple tap), not a PIN check. */
+  /** Leaving kiosk mode is a staff gesture (corner hold or heading triple tap, then the Staff Menu), not a PIN check. */
   exitKioskMode: () => void;
   reset: () => void;
 }

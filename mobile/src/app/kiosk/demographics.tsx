@@ -10,6 +10,7 @@ import Animated, {
 import * as Haptics from 'expo-haptics';
 import { useSurveyStore } from '@/lib/state/survey-store';
 import { useDatabase } from '@/providers/DatabaseProvider';
+import { StaffTripleTap } from '@/components/kiosk';
 
 const AnimatedPressable = Animated.createAnimatedComponent(Pressable);
 
@@ -123,9 +124,11 @@ export default function DemographicsScreen() {
         <View className="flex-1 px-6 justify-center">
           {/* Header */}
           <View className="mb-12">
-            <Text className="text-4xl font-bold text-white text-center mb-3">
-              One Quick Question
-            </Text>
+            <StaffTripleTap testID="staff-tap-demographics">
+              <Text className="text-4xl font-bold text-white text-center mb-3">
+                One Quick Question
+              </Text>
+            </StaffTripleTap>
             <Text className="text-xl text-zinc-400 text-center">
               What is your age bracket? (Optional)
             </Text>
