@@ -706,13 +706,10 @@ eas update --branch preview --message "what changed"
 Takes about a minute. Then on each tablet: **open the app, close it fully,
 open it again.** The first open downloads the update, the second one runs it.
 
-(For a few hours on 27 Aug the app restarted itself mid-startup to save that
-second reopen. It worked, but a tablet relaunching itself while it opens is
-indistinguishable from a tablet crashing on open, and it turned every publish
-into a support call. Two reopens is the honest version. APKs built after
-27 Aug 2026 get the same effect safely — they wait a few seconds at the splash
-screen, before any of the app's own code runs, so one reopen is enough on
-those.)
+(For a while in August the app tried to save that second reopen, first by
+restarting itself mid-startup and then by waiting at the splash screen. Both
+went out with the rollback to the last working version, so two reopens is
+how it works on every tablet.)
 
 **Checking a tablet actually took it.** At the bottom of the menu screen
 there's a small grey line like `v1.0.0 · 3f9a2c1 · preview`. The middle part
@@ -720,8 +717,8 @@ is the update it's running — compare it to the code the publish printed.
 `built-in` means the tablet is still on the bundle that shipped inside the
 APK and has never taken an update.
 
-**Tap that line** to force a check right there. Handy on a tablet that missed
-one, and it means the crew can pull a fix without waiting for a restart.
+The line only reports; tapping it does nothing. A tablet that missed an
+update picks it up with the same open, close, open.
 
 `preview` is the branch because the tablets are built with the `preview`
 profile. If you ever build with a different profile, publish to the matching
@@ -740,6 +737,113 @@ the field until they get a new APK.
 Some changes still need a fresh APK no matter what: a new device permission, a
 new native module (camera, Bluetooth, printing), or an Expo SDK upgrade.
 Wording, screens, layout and survey flow all go over the air.
+
+---
+
+## Testing before the field
+
+A second, separate copy of the whole system on the same desktop: its own
+server, its own database, its own app on one spare tablet. Anything you try
+there cannot reach a crew tablet or the real survey numbers.
+
+| | Live (the crews) | Test (you) |
+|---|---|---|
+| Folder | `C:\ArriveAlive` | `C:\ArriveAliveTest` |
+| Server | port 3000, `prod.db` | port 3001, `test.db` |
+| Address | `https://arrivealive.tail04a318.ts.net` | `https://arrivealive.tail04a318.ts.net:8443` |
+| App on the tablet | **Arrive Alive Survey** | **Arrive Alive TEST**, orange "TEST APP" bar on the menu |
+| Update | `desktop\update-all.bat` | `desktop\update-testing.bat` |
+
+The test app installs **next to** the real one rather than replacing it, so
+the test tablet can be a spare crew tablet. It still needs Tailscale signed
+in, like any other tablet.
+
+### One-time setup
+
+**T1. Make the test copy.** In PowerShell:
+
+```powershell
+cd C:\
+git clone https://github.com/Arrivealive770/Arrive-Alive-Tour-Survey-3.1.git ArriveAliveTest
+```
+
+**T2. Its settings file.** Different port, different database, different
+address. Paste this into PowerShell (press Enter at the Resend question to
+leave test emails switched off):
+
+```powershell
+$key = Read-Host "Resend API key for test emails (Enter to skip)"
+$secret = -join ((1..32) | ForEach-Object { '{0:x2}' -f (Get-Random -Maximum 256) })
+@"
+DATABASE_URL="file:./test.db"
+PORT="3001"
+BETTER_AUTH_SECRET="$secret"
+BACKEND_URL="https://arrivealive.tail04a318.ts.net:8443"
+NODE_ENV="production"
+RESEND_API_KEY="$key"
+"@ | Set-Content -Path C:\ArriveAliveTest\backend\.env -Encoding ascii
+Get-Content C:\ArriveAliveTest\backend\.env
+```
+
+**T3. Start the test server.** Double-click
+`C:\ArriveAliveTest\desktop\update-testing.bat`. The first run installs
+everything, so give it a few minutes. It should end with the server up on
+port 3001. (It also publishes to the test app, which nothing has installed
+yet. That does no harm.)
+
+**T4. Make it reachable from the tablet.** In PowerShell:
+
+```powershell
+tailscale serve --bg --https=8443 3001
+```
+
+Check it from your phone on cellular, with Tailscale on:
+`https://arrivealive.tail04a318.ts.net:8443/health`. The live address
+without `:8443` keeps working exactly as before.
+
+**T5. Build the test app.** Once only. Updates after this go over the air:
+
+```powershell
+cd C:\ArriveAliveTest\mobile
+eas build --profile testing --platform android
+```
+
+Install the APK it gives you on the test tablet. Open it and check you see
+the orange **TEST APP** bar and `· testing` at the end of the grey line at
+the bottom of the menu.
+
+**T6. Give the test server something to work with.** It starts empty. Open
+`https://arrivealive.tail04a318.ts.net:8443/admin`, then create a test team,
+an event and surveys, the same way as on the live one. Pair the test tablet
+with that team's code.
+
+### Every change, from then on
+
+1. **Test it.** Double-click `C:\ArriveAliveTest\desktop\update-testing.bat`.
+   On the test tablet: open, close fully, open again. Check the grey line
+   shows the code the script printed, then run through what changed.
+2. **Ship it.** Only when it's right, double-click
+   `C:\ArriveAlive\desktop\update-all.bat`. That's the same code going to
+   the crews, as before.
+
+Both pull the same code from GitHub. So what you tested is exactly what
+ships, as long as nothing new lands on GitHub between the two steps.
+
+Changes that need a new APK work the same way: build with
+`--profile testing` from `C:\ArriveAliveTest\mobile` first, try it on the
+test tablet, then build `--profile preview` from `C:\ArriveAlive\mobile`
+for the crews.
+
+**Things to know:**
+
+- `update-testing.bat` refuses to run from `C:\ArriveAlive`. It checks the
+  settings file, so you can't publish the real thing by accident.
+- The test server does **not** start by itself when the desktop reboots. That
+  is on purpose. Run `update-testing.bat` again when you need it.
+- Running the live `update-all.bat` also stops the test server, because it
+  stops every server on the machine to free the live port. Run
+  `update-testing.bat` again afterwards if you were still testing.
+- The "never change `version`" rule applies here too. Both apps are 1.0.0.
 
 ---
 

@@ -25,6 +25,7 @@ import { useTeamAdminAccess } from '@/lib/team-access';
 import { useEndEvent } from '@/lib/events/use-end-event';
 import { isEventRunningLate, isEventNotStartedYet } from '@/lib/events/event-status';
 import { cn } from '@/lib/cn';
+import { updateStamp, isTestingBuild } from '@/lib/updates';
 
 const AATLogo = require('@/assets/aat-logo.png');
 
@@ -147,6 +148,16 @@ export default function HomeScreen() {
         contentContainerStyle={{ paddingHorizontal: 32, paddingTop: 24, paddingBottom: 24 }}
         showsVerticalScrollIndicator={false}
       >
+        {/* The test app is the same app pointed at the test server. Say so
+            loudly, so a test tablet is never handed to a crew by mistake. */}
+        {isTestingBuild() ? (
+          <View className="bg-amber-500 rounded-2xl py-3 mb-5">
+            <Text className="text-black font-bold text-center text-base">
+              TEST APP — not for the field
+            </Text>
+          </View>
+        ) : null}
+
         {/* Logo */}
         <View className="items-center mb-5">
           <Image source={AATLogo} style={{ width: 180, height: 90 }} resizeMode="contain" />
@@ -346,6 +357,9 @@ export default function HomeScreen() {
             <Text className="text-zinc-500 ml-2 font-medium">Reset Device</Text>
           </Pressable>
         </View>
+
+        {/* What this tablet is running — compare with the code the publish printed */}
+        <Text className="text-zinc-700 text-xs text-center mt-2">{updateStamp()}</Text>
       </ScrollView>
 
       {/* End Event Confirmation */}

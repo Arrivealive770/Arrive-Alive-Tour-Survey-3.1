@@ -15,10 +15,26 @@
 // `version` in app.json (currently 1.0.0). Bumping that version cuts every
 // installed tablet off from future updates until they get a new APK.
 
+//
+// Test app: builds with APP_VARIANT=testing (the `testing` profile in
+// eas.json) get their own name and Android package, so they install next to
+// the real app on a test tablet instead of replacing it. They also read
+// updates from the `testing` channel and talk to the test server, so nothing
+// tried out there reaches a field tablet or the real survey data.
+
 const PROJECT_ID = '88345668-4646-4476-a710-363f23c94eed';
+const IS_TESTING = process.env.APP_VARIANT === 'testing';
 
 module.exports = ({ config }) => ({
   ...config,
+  ...(IS_TESTING && {
+    name: 'Arrive Alive TEST',
+    scheme: 'arrivealive-test',
+    android: {
+      ...config.android,
+      package: 'com.arrivealive.survey.test',
+    },
+  }),
   extra: {
     ...config.extra,
     eas: {

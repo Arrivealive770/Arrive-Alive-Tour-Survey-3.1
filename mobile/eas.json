@@ -19,6 +19,17 @@
         "EXPO_PUBLIC_BACKEND_URL": "https://arrivealive.tail04a318.ts.net"
       }
     },
+    "testing": {
+      "distribution": "internal",
+      "channel": "testing",
+      "android": {
+        "buildType": "apk"
+      },
+      "env": {
+        "APP_VARIANT": "testing",
+        "EXPO_PUBLIC_BACKEND_URL": "https://arrivealive.tail04a318.ts.net:8443"
+      }
+    },
     "preview-public": {
       "distribution": "internal",
       "channel": "preview-public",

@@ -25,6 +25,10 @@
 #   -Message "..."   note attached to the tablet update (default: the commit)
 #   -Branch preview  publish target; matches the profile the APKs were built
 #                    with. Don't change this unless the APKs changed too.
+#   -Testing         the test copy in C:\ArriveAliveTest: publishes to the
+#                    test app only and restarts the test server only. The
+#                    live server and the field tablets are not touched.
+#                    (desktop\update-testing.bat runs exactly this.)
 #
 # Nothing here touches backend\.env, the survey database, or the backups.
 # ===================================================================
@@ -34,7 +38,8 @@ param(
   [switch]$SkipServer,
   [switch]$SkipTablets,
   [string]$Message = "",
-  [string]$Branch = "preview"
+  [string]$Branch = "preview",
+  [switch]$Testing
 )
 
 $ErrorActionPreference = "Stop"
@@ -43,6 +48,28 @@ $ErrorActionPreference = "Stop"
 # works whether you run it from C:\ArriveAlive or from inside desktop\.
 $Root = Split-Path -Parent $PSScriptRoot
 $TaskName = "ArriveAliveServer"
+$Port = "3000"
+
+# The test copy is a second checkout with its own settings file, database and
+# port. Refuse to run in test mode from a folder whose settings say it's the
+# live server - "test" would otherwise restart and publish the real thing.
+if ($Testing) {
+  $Branch = "testing"
+  $envFile = Join-Path $Root "backend\.env"
+  $portLine = $null
+  if (Test-Path $envFile) {
+    $portLine = Get-Content $envFile | Where-Object { $_ -match '^\s*PORT\s*=' } | Select-Object -First 1
+  }
+  if ($portLine) { $Port = ($portLine -replace '^\s*PORT\s*=\s*', '').Trim().Trim('"') }
+
+  if (-not $portLine -or $Port -eq "3000") {
+    Write-Host ""
+    Write-Host "   This folder looks like the LIVE server (no test PORT in backend\.env)." -ForegroundColor Red
+    Write-Host "   Test mode only runs from the test copy - see 'Testing before the field' in desktop\README.md." -ForegroundColor Red
+    Write-Host "   Nothing was changed." -ForegroundColor Red
+    exit 1
+  }
+}
 
 # Each step records its own outcome instead of throwing, so one failure
 # doesn't hide the results of the others. The summary at the end is the
@@ -143,16 +170,28 @@ else {
   Write-Step "2/3  Restarting the server"
 
   try {
-    Stop-ScheduledTask -TaskName $TaskName -ErrorAction SilentlyContinue
+    if ($Testing) {
+      # The test server has no scheduled task, and must not take the live
+      # one down with it - so stop only whatever holds the test port, never
+      # every bun.exe on the machine.
+      Get-NetTCPConnection -LocalPort ([int]$Port) -State Listen -ErrorAction SilentlyContinue |
+        ForEach-Object { Stop-Process -Id $_.OwningProcess -Force -ErrorAction SilentlyContinue }
+      Start-Sleep -Seconds 3
 
-    # Stop-ScheduledTask only kills the cmd.exe wrapper; the bun.exe under it
-    # survives and keeps holding port 3000. The replacement server then can't
-    # bind, gives up, and the machine carries on serving the OLD code while
-    # every restart reports success.
-    Get-Process bun -ErrorAction SilentlyContinue | Stop-Process -Force -ErrorAction SilentlyContinue
-    Start-Sleep -Seconds 3
+      Start-Process -FilePath (Join-Path $PSScriptRoot "start-server.bat") -WindowStyle Minimized
+    }
+    else {
+      Stop-ScheduledTask -TaskName $TaskName -ErrorAction SilentlyContinue
 
-    Start-ScheduledTask -TaskName $TaskName
+      # Stop-ScheduledTask only kills the cmd.exe wrapper; the bun.exe under it
+      # survives and keeps holding port 3000. The replacement server then can't
+      # bind, gives up, and the machine carries on serving the OLD code while
+      # every restart reports success.
+      Get-Process bun -ErrorAction SilentlyContinue | Stop-Process -Force -ErrorAction SilentlyContinue
+      Start-Sleep -Seconds 3
+
+      Start-ScheduledTask -TaskName $TaskName
+    }
     Write-Note "Started. Waiting for it to answer (up to 2 minutes)..."
 
     # First boot after a schema change runs prisma, which is slow. Poll rather
@@ -162,7 +201,7 @@ else {
     while ((Get-Date) -lt $deadline) {
       Start-Sleep -Seconds 5
       try {
-        $health = Invoke-RestMethod http://localhost:3000/health -TimeoutSec 5
+        $health = Invoke-RestMethod "http://localhost:$Port/health" -TimeoutSec 5
         break
       }
       catch { $health = $null }
@@ -229,6 +268,9 @@ else {
     # nothing at all, the publish reports success, and every tablet that takes
     # the update can no longer find the desktop. Read the same value the APKs
     # were built with and put it in the environment for the publish.
+    #
+    # The rest of the profile's env block goes over too, for the same reason:
+    # the test profile's APP_VARIANT is what makes it the test app.
     $backendUrl = $null
     try {
       $easJson = Get-Content (Join-Path $Root "mobile\eas.json") -Raw | ConvertFrom-Json
@@ -241,7 +283,9 @@ else {
       throw "mobile\eas.json has no EXPO_PUBLIC_BACKEND_URL for the '$Branch' profile. Refusing to publish - the tablets would get an app that can't reach this desktop."
     }
 
-    $env:EXPO_PUBLIC_BACKEND_URL = $backendUrl
+    foreach ($setting in $buildProfile.env.PSObject.Properties) {
+      Set-Item -Path "env:$($setting.Name)" -Value "$($setting.Value)"
+    }
     Write-Note "Tablets will be told the server is at: $backendUrl"
 
     Push-Location (Join-Path $Root "mobile")
@@ -331,8 +375,14 @@ foreach ($key in $results.Keys) {
 }
 
 Write-Host ""
-Write-Host "On each tablet: close the app fully and open it again." -ForegroundColor White
-Write-Host "It now installs the update while starting, so one reopen is enough." -ForegroundColor DarkGray
+if ($Testing) {
+  Write-Host "On the TEST tablet: open the app, close it fully, open it again." -ForegroundColor White
+  Write-Host "The field tablets were not touched." -ForegroundColor DarkGray
+}
+else {
+  Write-Host "On each tablet: open the app, close it fully, open it again." -ForegroundColor White
+  Write-Host "The first open downloads the update, the second one runs it." -ForegroundColor DarkGray
+}
 Write-Host ""
 
 $failed = @($results.Values | Where-Object { $_ -like "FAILED*" -or $_ -like "WRONG*" })
