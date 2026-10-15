@@ -3,11 +3,13 @@ import { View, Text, Pressable, ActivityIndicator, ScrollView, RefreshControl } 
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { router } from 'expo-router';
 import { useQuery } from '@tanstack/react-query';
+import AsyncStorage from '@react-native-async-storage/async-storage';
 import { MapPin, Calendar, Check, AlertCircle, ChevronLeft, Clock } from 'lucide-react-native';
 import { useDeviceStore } from '@/lib/state/device-store';
 import { useDatabase } from '@/providers/DatabaseProvider';
 import { api } from '@/lib/api/api';
 import { cacheEventOverlay } from '@/lib/overlays/overlay-cache';
+import { getPendingEventCompletionIds } from '@/lib/events/pending-completions';
 import {
   isEventOver,
   isEventRunningLate,
@@ -25,6 +27,34 @@ function isToday(dateString: string): boolean {
     eventDate.getMonth() === today.getMonth() &&
     eventDate.getDate() === today.getDate()
   );
+}
+
+/**
+ * The team's open events, from the server when it answers and otherwise from
+ * the last list this device downloaded. Without the stored list a crew that
+ * ends an event while the desktop is off can't start the next one, and every
+ * survey after that has nowhere to go.
+ */
+const EVENTS_CACHE_PREFIX = 'active-events-cache-v1:';
+
+async function fetchActiveEvents(teamId: string): Promise<{ events: Event[]; fromCache: boolean }> {
+  try {
+    const events = await api.get<Event[]>(`/api/events?teamId=${teamId}&status=active`);
+    AsyncStorage.setItem(EVENTS_CACHE_PREFIX + teamId, JSON.stringify(events)).catch(
+      (err: unknown) => console.warn('[EventSetup] Could not store the event list:', err)
+    );
+    return { events, fromCache: false };
+  } catch (error) {
+    const raw = await AsyncStorage.getItem(EVENTS_CACHE_PREFIX + teamId).catch(() => null);
+    if (!raw) throw error;
+
+    // The stored list predates any event this device ended offline, so it
+    // would still offer the area the crew just finished.
+    const endedHere = new Set(await getPendingEventCompletionIds());
+    const events = (JSON.parse(raw) as Event[]).filter((event) => !endedHere.has(event.id));
+    console.log('[EventSetup] Server unreachable - showing the stored event list');
+    return { events, fromCache: true };
+  }
 }
 
 function formatTime(value: string): string {
@@ -51,11 +81,14 @@ export default function EventSetupScreen() {
   });
 
   // Fetch active events for this team
-  const { data: events, isLoading, refetch, isRefetching } = useQuery({
+  const { data: eventList, isLoading, isError, refetch, isRefetching } = useQuery({
     queryKey: ['events', teamId],
-    queryFn: () => api.get<Event[]>(`/api/events?teamId=${teamId}&status=active`),
+    queryFn: () => fetchActiveEvents(teamId as string),
     enabled: !!teamId,
+    retry: 1,
   });
+  const events = eventList?.events;
+  const showingStoredList = eventList?.fromCache ?? false;
 
   // Only events somebody has actually ended drop off this list. An event that
   // hasn't started yet is here on purpose — crews arrive early to set up — and
@@ -180,6 +213,16 @@ export default function EventSetupScreen() {
             </View>
           ) : selectableEvents.length > 0 ? (
             <View className="mb-6">
+              {showingStoredList ? (
+                <View className="flex-row items-center bg-zinc-800 p-4 rounded-xl mb-4">
+                  <AlertCircle size={24} color="#a1a1aa" />
+                  <Text className="text-zinc-300 ml-3 flex-1">
+                    Can&apos;t reach the server, so this is the list from the last time it
+                    answered. Everything collected is saved and sends when it&apos;s back.
+                  </Text>
+                </View>
+              ) : null}
+
               {todayCount === 0 ? (
                 <View className="flex-row items-center bg-amber-500/10 p-4 rounded-xl mb-6">
                   <AlertCircle size={24} color="#f59e0b" />
@@ -283,6 +326,15 @@ export default function EventSetupScreen() {
                   );
                 })}
               </View>
+            </View>
+          ) : isError ? (
+            <View className="items-center py-12">
+              <AlertCircle size={48} color="#71717a" />
+              <Text className="text-zinc-400 text-lg mt-4 mb-2">Can&apos;t reach the server</Text>
+              <Text className="text-zinc-500 text-center">
+                This device hasn&apos;t downloaded the event list yet. Connect once, then pull
+                down to refresh.
+              </Text>
             </View>
           ) : (
             <View className="items-center py-12">

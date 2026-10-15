@@ -14,6 +14,14 @@ interface ApiErrorBody {
 const baseUrl = BACKEND_URL;
 
 /**
+ * How long any one request may take before it is treated as "server not
+ * reachable". Without a limit, a request to a desktop that is switched off
+ * never fails: Tailscale drops the packets silently and the tablet sits on a
+ * spinner for a minute or more instead of carrying on with its local copy.
+ */
+const REQUEST_TIMEOUT_MS = 10000;
+
+/**
  * Error thrown for non-2xx responses. Exposes the backend `code`
  * (e.g. "PHOTO_NOT_AVAILABLE") and HTTP `status` so callers can branch.
  */
@@ -33,10 +41,19 @@ const request = async <T>(
   url: string,
   options: { method?: string; body?: string } = {}
 ): Promise<T> => {
-  const response = await fetch(`${baseUrl}${url}`, {
-    ...options,
-    headers: options.body ? { "Content-Type": "application/json" } : undefined,
-  });
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), REQUEST_TIMEOUT_MS);
+
+  let response: Awaited<ReturnType<typeof fetch>>;
+  try {
+    response = await fetch(`${baseUrl}${url}`, {
+      ...options,
+      headers: options.body ? { "Content-Type": "application/json" } : undefined,
+      signal: controller.signal,
+    });
+  } finally {
+    clearTimeout(timeout);
+  }
 
   // 1. Handle 204 No Content
   if (response.status === 204) {

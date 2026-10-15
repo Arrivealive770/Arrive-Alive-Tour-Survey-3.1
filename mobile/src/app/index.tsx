@@ -26,6 +26,7 @@ import { useEndEvent } from '@/lib/events/use-end-event';
 import { isEventRunningLate, isEventNotStartedYet } from '@/lib/events/event-status';
 import { cn } from '@/lib/cn';
 import { updateStamp, isTestingBuild } from '@/lib/updates';
+import { useSyncStore } from '@/lib/state/sync-store';
 
 const AATLogo = require('@/assets/aat-logo.png');
 
@@ -43,6 +44,18 @@ export default function HomeScreen() {
   // Only admin teams get the Admin tile. Field teams shouldn't see a door they
   // can't open (the layout blocks them anyway if they get there another way).
   const { isAdminTeam } = useTeamAdminAccess();
+
+  // Saved on this device and not on the server yet. Shown so a crew working
+  // with the server off can see their surveys are safe, and can see the
+  // number fall to nothing once it's back.
+  const pendingSurveys = useSyncStore((s) => s.pendingSurveys);
+  const pendingPledges = useSyncStore((s) => s.pendingPledges);
+  const pendingPhotos = useSyncStore((s) => s.pendingPhotos);
+  const waitingParts = [
+    pendingSurveys > 0 ? `${pendingSurveys} survey${pendingSurveys === 1 ? '' : 's'}` : null,
+    pendingPledges > 0 ? `${pendingPledges} pledge${pendingPledges === 1 ? '' : 's'}` : null,
+    pendingPhotos > 0 ? `${pendingPhotos} photo${pendingPhotos === 1 ? '' : 's'}` : null,
+  ].filter((part): part is string => part !== null);
 
   // Ends the event for the whole venue — see use-end-event.ts.
   const { endEvent, isEnding } = useEndEvent();
@@ -186,7 +199,7 @@ export default function HomeScreen() {
               <Text className="text-amber-400 font-bold text-base">Event ended</Text>
               <Text className="text-amber-200/80 text-sm mt-1">
                 {eventEnded === 'offline'
-                  ? 'Ended on this device, but there was no connection to tell the office. Ask them to close the event in the portal when you have signal.'
+                  ? 'Ended on this device. The server couldn\'t be reached, so it will be told automatically once this tablet connects again.'
                   : 'Everything collected has been saved. Pick the next event area to keep going.'}
               </Text>
             </View>
@@ -357,6 +370,12 @@ export default function HomeScreen() {
             <Text className="text-zinc-500 ml-2 font-medium">Reset Device</Text>
           </Pressable>
         </View>
+
+        {waitingParts.length > 0 ? (
+          <Text className="text-zinc-500 text-sm text-center mt-2">
+            Saved on this device, waiting to send: {waitingParts.join(' · ')}
+          </Text>
+        ) : null}
 
         {/* What this tablet is running — compare with the code the publish printed */}
         <Text className="text-zinc-700 text-xs text-center mt-2">{updateStamp()}</Text>

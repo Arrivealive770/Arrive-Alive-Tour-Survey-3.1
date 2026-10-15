@@ -19,6 +19,10 @@ import type {
 } from './sync-types';
 import { DEFAULT_RETRY_CONFIG } from './sync-types';
 import { BACKEND_URL } from '@/lib/api/backend-url';
+import {
+  getPendingEventCompletionCount,
+  sendPendingEventCompletions,
+} from '@/lib/events/pending-completions';
 
 const BATCH_SIZE = 50;
 // Upper bound on how many surveys one sync run will work through. Well above a
@@ -33,6 +37,30 @@ const DELETION_POLL_INTERVAL_MS = 20000;
 // the signal was down, surveys, pledges). Without this a photo could sit in the
 // phone's queue until the app was backgrounded and reopened.
 const PENDING_SYNC_INTERVAL_MS = 15000;
+
+// Time limits for talking to the server. A request to a desktop that is
+// switched off doesn't fail on its own — Tailscale drops it silently — and one
+// hung request holds up every sync behind it until the server returns and
+// beyond. Uploads get longer because a batch or a photo over venue signal is
+// genuinely slow; everything resent after a timeout is de-duplicated by
+// localId on the server, so a request that did land is never counted twice.
+const REQUEST_TIMEOUT_MS = 15000;
+const BATCH_TIMEOUT_MS = 30000;
+const PHOTO_UPLOAD_TIMEOUT_MS = 60000;
+
+async function fetchWithTimeout(
+  url: string,
+  init: RequestInit = {},
+  timeoutMs: number = REQUEST_TIMEOUT_MS
+): Promise<Response> {
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), timeoutMs);
+  try {
+    return await fetch(url, { ...init, signal: controller.signal });
+  } finally {
+    clearTimeout(timeout);
+  }
+}
 
 class SyncService {
   private syncInProgress = false;
@@ -181,12 +209,17 @@ class SyncService {
     console.log('[SyncService] Starting sync...');
 
     try {
-      // Sync surveys, pledges, and photos; also propagate remote deletions.
+      // Sync surveys, pledges, and photos; also propagate remote deletions and
+      // any event a crew ended while the server was unreachable.
       const [surveyResult, pledgeResult, photoResult] = await Promise.all([
         this.syncSurveys(),
         this.syncPledges(),
         this.syncPhotos(),
         this.syncDeletions(),
+        sendPendingEventCompletions().catch((error: unknown) => {
+          console.error('[SyncService] Event completion sync error:', error);
+          return 0;
+        }),
       ]);
 
       // Phone-side cleanup runs after uploads so freshly-uploaded originals can
@@ -327,7 +360,7 @@ class SyncService {
 
         try {
           // Send batch to server
-          const response = await fetch(`${this.baseUrl}/api/sync/surveys`, {
+          const response = await fetchWithTimeout(`${this.baseUrl}/api/sync/surveys`, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({
@@ -345,7 +378,7 @@ class SyncService {
               deviceId,
               teamId,
             }),
-          });
+          }, BATCH_TIMEOUT_MS);
 
           if (!response.ok) {
             throw new Error(`Server error: ${response.status}`);
@@ -445,7 +478,7 @@ class SyncService {
       console.log(`[SyncService] Syncing ${pendingPledges.length} pledges`);
 
       // Send batch to server
-      const response = await fetch(`${this.baseUrl}/api/sync/pledges`, {
+      const response = await fetchWithTimeout(`${this.baseUrl}/api/sync/pledges`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
@@ -463,7 +496,7 @@ class SyncService {
           deviceId,
           teamId,
         }),
-      });
+      }, BATCH_TIMEOUT_MS);
 
       if (!response.ok) {
         throw new Error(`Server error: ${response.status}`);
@@ -472,10 +505,13 @@ class SyncService {
       const result = (await response.json()) as { data: SyncBatchResponse };
       const data = result.data;
 
-      // Mark synced items
-      if (data.synced.length > 0) {
-        await db.markPledgesSynced(data.synced);
-        totalSynced = data.synced.length;
+      // "skipped" means the server already has that pledge (an earlier upload
+      // landed but the reply was lost). Those are done too — left queued they
+      // were re-sent every 15 seconds forever and never left the count.
+      const done = [...data.synced, ...(data.skipped ?? [])];
+      if (done.length > 0) {
+        await db.markPledgesSynced(done);
+        totalSynced = done.length;
       }
 
       // Handle failures
@@ -594,10 +630,11 @@ class SyncService {
           }
 
           // Upload to server
-          const response = await fetch(`${this.baseUrl}/api/photos/upload`, {
-            method: 'POST',
-            body: formData,
-          });
+          const response = await fetchWithTimeout(
+            `${this.baseUrl}/api/photos/upload`,
+            { method: 'POST', body: formData },
+            PHOTO_UPLOAD_TIMEOUT_MS
+          );
 
           if (!response.ok) {
             throw new Error(`Upload failed: ${response.status}`);
@@ -660,7 +697,7 @@ class SyncService {
       console.log(`[SyncService] Fetching photos for team ${teamId}, event ${eventId}`);
 
       // Get list of photos from server
-      const response = await fetch(
+      const response = await fetchWithTimeout(
         `${this.baseUrl}/api/sync/photos/${teamId}/${eventId}`
       );
 
@@ -756,7 +793,7 @@ class SyncService {
             // Idempotent server-side; photo stays "available" for tablets.
             if (remotePhoto.id && tabletDeviceId) {
               try {
-                await fetch(`${this.baseUrl}/api/photos/${remotePhoto.id}/received`, {
+                await fetchWithTimeout(`${this.baseUrl}/api/photos/${remotePhoto.id}/received`, {
                   method: 'PUT',
                   headers: { 'Content-Type': 'application/json' },
                   body: JSON.stringify({ deviceId: tabletDeviceId }),
@@ -829,13 +866,15 @@ class SyncService {
         const db = getDatabaseSafe();
         if (!db) return;
 
-        const [surveyCount, pledgeCount, photoCount] = await Promise.all([
+        const [surveyCount, pledgeCount, photoCount, completionCount] = await Promise.all([
           db.getSurveyQueueCount(),
           db.getPledgeQueueCount(),
           db.getPhotoQueueCount(),
+          getPendingEventCompletionCount(),
         ]);
 
-        const pending = surveyCount.pending + surveyCount.failed + pledgeCount + photoCount;
+        const pending =
+          surveyCount.pending + surveyCount.failed + pledgeCount + photoCount + completionCount;
         if (pending === 0) return;
 
         console.log(`[SyncService] ${pending} item(s) still queued, syncing`);
@@ -875,7 +914,7 @@ class SyncService {
     let removed = 0;
 
     try {
-      const response = await fetch(
+      const response = await fetchWithTimeout(
         `${this.baseUrl}/api/photos/phone-cleanup/${teamId}/${eventId}?deviceId=${encodeURIComponent(
           deviceId
         )}`
@@ -904,7 +943,7 @@ class SyncService {
           }
 
           // Confirm so the backend stops returning it (phoneOriginalDeleted=true).
-          await fetch(`${this.baseUrl}/api/photos/${entry.id}/phone-deleted`, {
+          await fetchWithTimeout(`${this.baseUrl}/api/photos/${entry.id}/phone-deleted`, {
             method: 'PUT',
           });
 
@@ -946,7 +985,7 @@ class SyncService {
     let removed = 0;
 
     try {
-      const response = await fetch(
+      const response = await fetchWithTimeout(
         `${this.baseUrl}/api/photos/deleted/${teamId}/${eventId}`
       );
       if (!response.ok) {

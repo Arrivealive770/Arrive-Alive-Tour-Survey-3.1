@@ -6,6 +6,7 @@ import { useDeviceStore } from '@/lib/state/device-store';
 import { useSurveyStore } from '@/lib/state/survey-store';
 import { usePledgeStore } from '@/lib/state/pledge-store';
 import { useDatabase } from '@/providers/DatabaseProvider';
+import { queueEventCompletion } from '@/lib/events/pending-completions';
 import type { Event } from '@/lib/api/types';
 
 /**
@@ -16,9 +17,10 @@ import type { Event } from '@/lib/api/types';
  * for every other tablet and phone at the venue, and starts the clock on
  * deleting the participant photos and email addresses.
  *
- * With no signal the event is still ended on this device and the crew is told
- * the office has to close it in the portal. Nothing collected is lost either
- * way — surveys and photos already queued keep syncing after the event ends.
+ * With no signal the event is still ended on this device, and the server is
+ * told later by the sync service, once it answers again. Nothing collected is
+ * lost either way — surveys and photos already queued keep syncing after the
+ * event ends.
  */
 export function useEndEvent() {
   const { db } = useDatabase();
@@ -37,6 +39,9 @@ export function useEndEvent() {
     } catch (err) {
       reachedServer = false;
       console.error('[EndEvent] Could not tell the server the event ended:', err);
+      await queueEventCompletion(eventId).catch((queueErr: unknown) => {
+        console.error('[EndEvent] Could not queue the event ending:', queueErr);
+      });
     }
 
     // Drop any half-finished guest session so the next event never inherits

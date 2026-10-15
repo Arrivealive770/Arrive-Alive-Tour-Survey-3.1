@@ -740,6 +740,32 @@ Wording, screens, layout and survey flow all go over the air.
 
 ---
 
+## When the server is off
+
+The tablets and phones keep working with the desktop switched off, asleep, or
+unreachable. Everything they collect is saved on the device and sent by
+itself once the server answers again. Nobody has to press anything.
+
+**Works with the server off:** surveys, email-only pledges, taking photos on
+the phone, ending an event, and picking the next event area. The event list
+comes from the last time the server answered.
+
+**Needs the server:** the photo part of a picture pledge, because photos go
+from the phone to the tablets through the server. Guests are offered
+**Continue Without a Photo** instead, and still get a confirmation email. Also
+first-time setup (typing a team code), and anything in Admin.
+
+**Seeing what's waiting:** the tablet menu shows "Saved on this device,
+waiting to send: 12 surveys · 3 pledges". The phone shows "Offline – N
+waiting". Both count down to nothing once the server is back. They retry
+every 15 seconds and never give up.
+
+**Don't Reset Device or uninstall the app while things are waiting.** A reset
+needs the server to set the device up again, and an uninstall deletes
+anything not yet sent.
+
+---
+
 ## Testing before the field
 
 A second, separate copy of the whole system on the same desktop: its own

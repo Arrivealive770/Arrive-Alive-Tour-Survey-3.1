@@ -1,4 +1,4 @@
-import { useCallback, useState, useEffect } from 'react';
+import { useCallback, useState, useEffect, useRef } from 'react';
 import {
   View,
   Text,
@@ -17,7 +17,7 @@ import Animated, {
   FadeIn,
 } from 'react-native-reanimated';
 import * as Haptics from 'expo-haptics';
-import { ImageIcon, ArrowRight, RefreshCw, Camera } from 'lucide-react-native';
+import { ImageIcon, ArrowRight, RefreshCw, Camera, Mail } from 'lucide-react-native';
 import { usePledgeStore } from '@/lib/state/pledge-store';
 import { useDeviceStore } from '@/lib/state/device-store';
 import { api, ApiError } from '@/lib/api/api';
@@ -51,6 +51,13 @@ export default function PhotoSelectionScreen() {
   const [isLoading, setIsLoading] = useState(true);
   const [isSelecting, setIsSelecting] = useState(false);
   const [toast, setToast] = useState<string | null>(null);
+  // Photos travel phone -> server -> tablet, so with the server unreachable
+  // there is nothing to pick. The guest is offered an email-only pledge
+  // instead of being stuck on an empty grid.
+  const [serverUnreachable, setServerUnreachable] = useState(false);
+  // A request to a switched-off server takes longer than the poll interval to
+  // give up, so don't stack another one on top of it.
+  const loadInFlight = useRef(false);
 
   // Fetch ONLY available photos for this team + event (shared across both tablets).
   const loadPhotos = useCallback(async () => {
@@ -59,15 +66,20 @@ export default function PhotoSelectionScreen() {
       setIsLoading(false);
       return;
     }
+    if (loadInFlight.current) return;
+    loadInFlight.current = true;
     try {
       const result = await api.get<AvailablePhoto[]>(
         `/api/sync/photos/${teamId}/${eventId}`
       );
       setPhotos(result ?? []);
+      setServerUnreachable(false);
     } catch (error) {
       console.error('[PhotoSelection] Failed to load photos:', error);
       setPhotos([]);
+      setServerUnreachable(true);
     } finally {
+      loadInFlight.current = false;
       setIsLoading(false);
     }
   }, [teamId, eventId]);
@@ -163,6 +175,11 @@ export default function PhotoSelectionScreen() {
     }
     await loadPhotos();
   }, [selectedPhotoId, loadPhotos]);
+
+  const handleContinueWithoutPhoto = useCallback(() => {
+    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
+    router.push('/kiosk/pledge/email' as any);
+  }, [router]);
 
   const hasSelection = !!selectedPhotoId;
   const previewUri = finishedPhotoUrl ?? selectedPhotoOriginalUrl;
@@ -342,7 +359,7 @@ export default function PhotoSelectionScreen() {
                     marginBottom: 8,
                   }}
                 >
-                  No Photos Available
+                  {serverUnreachable ? 'Photos Unavailable Right Now' : 'No Photos Available'}
                 </Text>
                 <Text
                   style={{
@@ -353,8 +370,29 @@ export default function PhotoSelectionScreen() {
                     marginBottom: 20,
                   }}
                 >
-                  Please see a team member to have your photo taken.
+                  {serverUnreachable
+                    ? "You can still take the pledge — we'll email your confirmation."
+                    : 'Please see a team member to have your photo taken.'}
                 </Text>
+                {serverUnreachable ? (
+                  <Pressable
+                    onPress={handleContinueWithoutPhoto}
+                    style={{
+                      flexDirection: 'row',
+                      alignItems: 'center',
+                      backgroundColor: '#22c55e',
+                      paddingHorizontal: 24,
+                      paddingVertical: 16,
+                      borderRadius: 14,
+                      marginBottom: 12,
+                    }}
+                  >
+                    <Mail size={20} color="#000000" style={{ marginRight: 10 }} />
+                    <Text style={{ color: '#000000', fontSize: 17, fontWeight: '700' }}>
+                      Continue Without a Photo
+                    </Text>
+                  </Pressable>
+                ) : null}
                 <Pressable
                   onPress={loadPhotos}
                   style={{

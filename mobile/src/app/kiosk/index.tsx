@@ -70,34 +70,40 @@ export default function KioskHome() {
           }
         }
 
-        // Refresh event settings from server to get latest picturePledgeEnabled
+        // Refresh event settings from server to get latest picturePledgeEnabled.
+        // Not awaited: the surveys above come from this device, and a guest
+        // must not wait on a server that may be switched off.
         if (currentEventId) {
-          try {
-            const event = await api.get<Event>(`/api/events/${currentEventId}`);
-            console.log('[KioskHome] Refreshed event from server:', {
-              picturePledgeEnabled: event.picturePledgeEnabled,
-              overlayId: event.overlayId,
-            });
-            setDeviceConfig({
-              picturePledgeEnabled: event.picturePledgeEnabled ?? false,
-              // overlayId is the field the event's real artwork hangs off;
-              // overlayType is a legacy slug that never named it.
-              currentEventOverlayId: event.overlayId || null,
-              // Refresh the end-of-event details too, so the watcher notices an
-              // event the home office closed while this tablet was asleep.
-              currentEventVenue: event.venueName,
-              currentEventDate: event.eventDate,
-              currentEventEndAt: event.eventEndAt ?? null,
-              currentEventStatus: event.status,
-            });
-          } catch (err) {
-            console.error('[KioskHome] Failed to refresh event from server:', err);
-          }
+          refreshEventFromServer(currentEventId);
         }
       } catch (error) {
         console.error('[KioskHome] Error loading event data:', error);
       } finally {
         setLoading(false);
+      }
+    }
+
+    async function refreshEventFromServer(eventId: string) {
+      try {
+        const event = await api.get<Event>(`/api/events/${eventId}`);
+        console.log('[KioskHome] Refreshed event from server:', {
+          picturePledgeEnabled: event.picturePledgeEnabled,
+          overlayId: event.overlayId,
+        });
+        setDeviceConfig({
+          picturePledgeEnabled: event.picturePledgeEnabled ?? false,
+          // overlayId is the field the event's real artwork hangs off;
+          // overlayType is a legacy slug that never named it.
+          currentEventOverlayId: event.overlayId || null,
+          // Refresh the end-of-event details too, so the watcher notices an
+          // event the home office closed while this tablet was asleep.
+          currentEventVenue: event.venueName,
+          currentEventDate: event.eventDate,
+          currentEventEndAt: event.eventEndAt ?? null,
+          currentEventStatus: event.status,
+        });
+      } catch (err) {
+        console.error('[KioskHome] Failed to refresh event from server:', err);
       }
     }
 
