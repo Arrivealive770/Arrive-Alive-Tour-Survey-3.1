@@ -16,9 +16,9 @@ import { StaffMenuContext } from '@/components/kiosk';
 const STAFF_HOLD_MS = 3000;
 
 // A guest who walks away mid-survey would leave their answers on screen for
-// the next person, so a minute untouched on one screen starts over. Every new
-// screen gets its own full minute.
-const GUEST_IDLE_MS = 60_000;
+// the next person, so two minutes untouched on one screen starts over. Every new
+// screen gets its own full two minutes.
+const GUEST_IDLE_MS = 120_000;
 
 // Only the question screens. Question 1 is left out because it is the start
 // screen when an event has one survey, so there is nothing to reset. The

@@ -2,6 +2,22 @@ import "./global.css";
 import { AppRegistry, LogBox } from "react-native";
 
 /**
+ * Logged errors must not close the app.
+ *
+ * patches/react-native@0.81.5.patch (Vibecode's, so its dev tools can show
+ * errors) sends every console.error to Android as a FATAL exception. In an
+ * installed app that means any failure the code merely logs kills the
+ * process — and with no connection every server request fails and logs. The
+ * kiosk home screen does one on every load, so a tablet in airplane mode
+ * crashed after a survey or two and again on every relaunch until it was
+ * back online. Real uncaught exceptions are still fatal; this only stops
+ * console.error being promoted to one. Dev builds keep the Vibecode behaviour.
+ */
+if (!__DEV__) {
+  (console as Console & { reportErrorsAsExceptions?: boolean }).reportErrorsAsExceptions = false;
+}
+
+/**
  * Boot guard.
  *
  * The router's ErrorBoundary can only catch a crash that happens while a screen

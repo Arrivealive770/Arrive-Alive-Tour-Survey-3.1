@@ -132,7 +132,7 @@ export default function QuestionScreen() {
   );
 
   // Bail out to survey selection from the error screen below. A guest who walks
-  // away is handled separately by the minute-idle reset in app/kiosk/_layout.tsx.
+  // away is handled separately by the idle reset in app/kiosk/_layout.tsx.
   const handleBackToStart = useCallback(() => {
     reset();
     router.replace('/kiosk' as any);
