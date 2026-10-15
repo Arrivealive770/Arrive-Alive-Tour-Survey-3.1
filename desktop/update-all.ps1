@@ -290,6 +290,26 @@ else {
 
     Push-Location (Join-Path $Root "mobile")
     try {
+      # eas update builds the app bundle on this machine, so the app's
+      # packages have to be installed here first. A fresh checkout - the test
+      # copy - has none, and the publish fails without them. A failed install
+      # is only fatal when there is nothing installed to fall back on.
+      $bunExe = $null
+      if (Get-Command bun -ErrorAction SilentlyContinue) { $bunExe = "bun" }
+      elseif (Test-Path "$env:USERPROFILE\.bun\bin\bun.exe") { $bunExe = "$env:USERPROFILE\.bun\bin\bun.exe" }
+      if (-not $bunExe) { throw "Bun is not installed on this computer. See desktop\README.md, step 2." }
+
+      Write-Note "Installing the app's packages..."
+      $install = Invoke-Native $bunExe @("install")
+      if ($install.ExitCode -ne 0) {
+        if (Test-Path "node_modules\expo\package.json") {
+          Write-Note "bun install failed - carrying on with the packages already installed."
+        }
+        else {
+          throw "Could not install the app's packages:`n$($install.Output)"
+        }
+      }
+
       $publishArgs = $easArgs + @(
         "update",
         "--branch", $Branch,

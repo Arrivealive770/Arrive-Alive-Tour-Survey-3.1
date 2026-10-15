@@ -793,6 +793,17 @@ cd C:\
 git clone https://github.com/Arrivealive770/Arrive-Alive-Tour-Survey-3.1.git ArriveAliveTest
 ```
 
+Then check the Expo tools are on the desktop. You need them to publish and
+build the app. Run `eas --version`. If PowerShell says `eas` is not
+recognized, install them once:
+
+```powershell
+winget install OpenJS.NodeJS.LTS
+# close and reopen PowerShell, then:
+npm install -g eas-cli
+eas login
+```
+
 **T2. Its settings file.** Different port, different database, different
 address. Paste this into PowerShell (press Enter at the Resend question to
 leave test emails switched off):
@@ -827,14 +838,24 @@ Check it from your phone on cellular, with Tailscale on:
 `https://arrivealive.tail04a318.ts.net:8443/health`. The live address
 without `:8443` keeps working exactly as before.
 
-**T5. Build the test app.** Once only. Updates after this go over the air:
+**T5. Build the test app.** Once only. Updates after this go over the air.
 
 ```powershell
 cd C:\ArriveAliveTest\mobile
+bun install
 eas build --profile testing --platform android
 ```
 
-Install the APK it gives you on the test tablet. Open it and check you see
+The first time, it asks whether to generate a new Android keystore. Answer
+**Yes**. The test app is a separate app, so it gets its own, and the real
+app's keystore isn't touched. The build runs on Expo's servers and takes about
+10–20 minutes. It ends with a download link.
+
+**Save the APK file itself** on the desktop (e.g. `C:\ArriveAliveAPKs\`).
+Expo deletes old builds after a while, and the link stops working. A saved
+file means you can always install on another tablet without rebuilding.
+
+Install the APK on the test tablet. Open it and check you see
 the orange **TEST APP** bar and `· testing` at the end of the grey line at
 the bottom of the menu.
 
