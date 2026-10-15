@@ -15,7 +15,7 @@ const sharedFolder = path.resolve(__dirname, "../shared");
 const sharedFolderExists = fs.existsSync(sharedFolder);
 
 // DEBUG: Log metro.config.js version and shared folder status at startup
-console.log("[Metro Config] Version: 2026-07-06-v4-zustand-cjs-on-web (source: workspace-mobile)");
+console.log("[Metro Config] Version: 2026-10-12-v5-real-async-require (source: workspace-mobile)");
 console.log(`[Metro Config] Shared folder: ${sharedFolder}`);
 console.log(`[Metro Config] Shared folder exists: ${sharedFolderExists}`);
 
@@ -101,7 +101,7 @@ config.resolver = {
 
     // Fix @better-auth/expo incorrectly importing metro-config (dev-time only)
     // This import shouldn't exist in client code - mock it
-    if (moduleName.includes("@expo/metro-config") || moduleName.includes("async-require")) {
+    if (moduleName.includes("@expo/metro-config")) {
       return { type: "empty" };
     }
 
