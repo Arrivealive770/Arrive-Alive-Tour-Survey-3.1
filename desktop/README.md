@@ -523,6 +523,12 @@ end saying which ones worked.
 It refuses to publish anything if the code pull fails, because shipping
 stale code is worse than shipping nothing: it looks like it worked.
 
+Partway through, Windows asks **"Do you want to allow this app to make
+changes?"** — click **Yes**. The server runs with administrator rights, and
+without them the script cannot stop the old one: Windows refuses silently,
+the old code keeps running, and the summary says `WRONG VERSION`. Clicking
+No still usually works, it just takes a couple of minutes longer.
+
 When it finishes it prints a short code, like `Tablets should show: 3f9a2c1`.
 That is the same code that appears in small grey text at the bottom of each
 tablet's menu screen — the way to check a tablet actually took the update

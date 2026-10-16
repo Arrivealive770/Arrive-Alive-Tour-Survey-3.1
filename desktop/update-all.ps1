@@ -181,40 +181,83 @@ else {
       Start-Process -FilePath (Join-Path $PSScriptRoot "start-server.bat") -WindowStyle Minimized
     }
     else {
-      Stop-ScheduledTask -TaskName $TaskName -ErrorAction SilentlyContinue
-
       # Stop-ScheduledTask only kills the cmd.exe wrapper; the bun.exe under it
       # survives and keeps holding port 3000. The replacement server then can't
       # bind, gives up, and the machine carries on serving the OLD code while
-      # every restart reports success.
-      Get-Process bun -ErrorAction SilentlyContinue | Stop-Process -Force -ErrorAction SilentlyContinue
+      # every restart reports success. So kill bun, and whatever else holds
+      # the port, too.
+      $stopScript = @"
+Stop-ScheduledTask -TaskName '$TaskName' -ErrorAction SilentlyContinue
+Get-Process bun -ErrorAction SilentlyContinue | Stop-Process -Force -ErrorAction SilentlyContinue
+Get-NetTCPConnection -LocalPort $Port -State Listen -ErrorAction SilentlyContinue |
+  ForEach-Object { Stop-Process -Id `$_.OwningProcess -Force -ErrorAction SilentlyContinue }
+"@
+
+      # The task runs elevated (install-autostart registers it RunLevel
+      # Highest), and a normal window is not allowed to stop an elevated
+      # process. Stop-Process says "access denied", SilentlyContinue swallows
+      # it, and the old server lives on. Double-clicking the .bat gives a
+      # normal window, so do the stop in an elevated one: Windows asks once.
+      $isAdmin = ([Security.Principal.WindowsPrincipal] [Security.Principal.WindowsIdentity]::GetCurrent()
+        ).IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator)
+
+      if ($isAdmin) {
+        Invoke-Expression $stopScript
+      }
+      else {
+        Write-Note "Windows will ask 'allow this app to make changes?' - click Yes so the old server can be stopped."
+        # EncodedCommand, because Start-Process mangles quotes in -Command.
+        $encoded = [Convert]::ToBase64String([Text.Encoding]::Unicode.GetBytes($stopScript))
+        try {
+          Start-Process powershell -Verb RunAs -Wait -WindowStyle Hidden `
+            -ArgumentList @("-NoProfile", "-EncodedCommand", $encoded)
+        }
+        catch {
+          # Clicked No. start-server.bat clears the port itself once its
+          # install and database steps finish, so this can still work - it
+          # just takes longer, which the wait below allows for.
+          Write-Note "Not allowed - carrying on; the new server will try to stop the old one itself."
+          Stop-ScheduledTask -TaskName $TaskName -ErrorAction SilentlyContinue
+        }
+      }
       Start-Sleep -Seconds 3
 
       Start-ScheduledTask -TaskName $TaskName
     }
-    Write-Note "Started. Waiting for it to answer (up to 2 minutes)..."
+    Write-Note "Started. Waiting for it to answer on the new code (up to 4 minutes)..."
 
-    # First boot after a schema change runs prisma, which is slow. Poll rather
-    # than sleeping a fixed time and hoping.
+    # /health reports the commit it is actually running. It is the only
+    # honest answer to "did my update land?" - a restart that silently
+    # failed to take will happily report the previous commit here.
+    #
+    # Keep polling until the NEW commit answers, not just until something
+    # answers. If the old server survived, it answers on the very first poll,
+    # while start-server.bat is still installing and running prisma - and only
+    # after that does it clear the port and start the new code. Stopping at
+    # the first answer reported "wrong version" for an update that was about
+    # to land.
     $health = $null
-    $deadline = (Get-Date).AddMinutes(2)
+    $serverCommit = ""
+    $sawOldServer = $false
+    $deadline = (Get-Date).AddMinutes(4)
     while ((Get-Date) -lt $deadline) {
       Start-Sleep -Seconds 5
       try {
         $health = Invoke-RestMethod "http://localhost:$Port/health" -TimeoutSec 5
-        break
+        $serverCommit = "$($health.commit)"
+        if ($serverCommit -and ($serverCommit -eq "unknown" -or $serverCommit -like "$commit*" -or $commit -like "$serverCommit*")) { break }
+        if (-not $sawOldServer) {
+          Write-Note "The old server is still answering - waiting for the new one to take over..."
+          $sawOldServer = $true
+        }
       }
-      catch { $health = $null }
+      catch { }
     }
 
     if (-not $health) {
       throw "The server never answered. Check desktop\logs\server.log for the reason."
     }
 
-    # /health reports the commit it is actually running. It is the only
-    # honest answer to "did my update land?" - a restart that silently
-    # failed to take will happily report the previous commit here.
-    $serverCommit = "$($health.commit)"
     if (-not $serverCommit) {
       # No commit field at all means the running server predates /health
       # reporting it — so the restart did not take, however healthy it looks.
@@ -224,7 +267,8 @@ else {
     }
     elseif ($serverCommit -ne "unknown" -and $serverCommit -notlike "$commit*" -and $commit -notlike "$serverCommit*") {
       Write-Bad "The server is answering, but on commit $serverCommit instead of $commit."
-      Write-Bad "The old server is probably still holding the port. Run this script again."
+      Write-Bad "The old server is still holding the port. Restart this computer - the server"
+      Write-Bad "starts by itself on the new code - then run update-all.bat again to confirm."
       $results["Server"] = "WRONG VERSION - running $serverCommit, expected $commit"
     }
     else {
