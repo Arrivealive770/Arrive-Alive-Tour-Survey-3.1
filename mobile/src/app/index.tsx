@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import { View, Text, Pressable, TextInput, Modal, Image, ActivityIndicator, ScrollView } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { router, Redirect, useLocalSearchParams } from 'expo-router';
@@ -27,8 +27,16 @@ import { isEventRunningLate, isEventNotStartedYet } from '@/lib/events/event-sta
 import { cn } from '@/lib/cn';
 import { updateStamp, isTestingBuild } from '@/lib/updates';
 import { useSyncStore } from '@/lib/state/sync-store';
+import { useServerConnection } from '@/lib/connection/server-connection';
+import { ConnectionStatusCard } from '@/components/common/ConnectionStatusCard';
 
 const AATLogo = require('@/assets/aat-logo.png');
+
+const STATION_ROUTES = { kiosk: '/kiosk', 'photo-hub': '/photo-hub' } as const;
+type Station = keyof typeof STATION_ROUTES;
+
+// Long enough that nobody skips the warning without meaning to.
+const OFFLINE_OVERRIDE_HOLD_MS = 3000;
 
 export default function HomeScreen() {
   const hasHydrated = useDeviceHydrated();
@@ -75,21 +83,45 @@ export default function HomeScreen() {
   const isConfigured = teamId !== null && deviceType !== null;
   const hasEvent = currentEventId !== null;
 
-  const handleStartKiosk = () => {
+  // Tailscale has to be on for anything to reach the office live. A crew that
+  // forgets finds out at the end of the day, so starting a station without it
+  // stops at a warning. Surveys still save on the device either way, so the
+  // warning can be held past for a venue with no signal at all.
+  const connection = useServerConnection();
+  const [blockedStation, setBlockedStation] = useState<Station | null>(null);
+  const [holdingOverride, setHoldingOverride] = useState<boolean>(false);
+
+  const openStation = (station: Station) => {
     if (!hasEvent) {
       handleChangeEvent();
       return;
     }
-    router.push('/kiosk' as any);
+    if (connection !== 'connected') {
+      setBlockedStation(station);
+      return;
+    }
+    router.push(STATION_ROUTES[station] as any);
   };
 
-  const handleOpenPhotoHub = () => {
-    if (!hasEvent) {
-      handleChangeEvent();
-      return;
+  // Carry on by itself once the crew switches Tailscale on and comes back.
+  useEffect(() => {
+    if (blockedStation && connection === 'connected') {
+      setBlockedStation(null);
+      router.push(STATION_ROUTES[blockedStation] as any);
     }
-    router.push('/photo-hub' as any);
+  }, [blockedStation, connection]);
+
+  const handleStartWithoutConnection = () => {
+    if (!blockedStation) return;
+    const station = blockedStation;
+    setBlockedStation(null);
+    setHoldingOverride(false);
+    router.push(STATION_ROUTES[station] as any);
   };
+
+  const handleStartKiosk = () => openStation('kiosk');
+
+  const handleOpenPhotoHub = () => openStation('photo-hub');
 
   // Picking the next area never asks for the team code again — the device stays
   // paired, only the event changes.
@@ -190,6 +222,8 @@ export default function HomeScreen() {
             </Text>
           </View>
         </View>
+
+        <ConnectionStatusCard status={connection} className="mb-5" />
 
         {/* The event just ended — by hand, or by the backstop */}
         {justEnded ? (
@@ -380,6 +414,52 @@ export default function HomeScreen() {
         {/* What this tablet is running — compare with the code the publish printed */}
         <Text className="text-zinc-700 text-xs text-center mt-2">{updateStamp()}</Text>
       </ScrollView>
+
+      {/* Not connected — shown instead of opening a station */}
+      <Modal
+        visible={blockedStation !== null}
+        animationType="fade"
+        transparent
+        onRequestClose={() => setBlockedStation(null)}
+      >
+        <View className="flex-1 bg-black/80 items-center justify-center px-8">
+          <View className="w-full bg-zinc-900 rounded-2xl p-6">
+            <Text className="text-2xl font-bold text-white mb-2">Turn on Tailscale first</Text>
+            <Text className="text-zinc-400 mb-5">
+              This device can&apos;t reach the office. Fix the connection and it will carry on by
+              itself.
+            </Text>
+
+            <ConnectionStatusCard status={connection} className="mb-5" />
+
+            <Pressable
+              testID="connection-cancel"
+              onPress={() => setBlockedStation(null)}
+              className="h-14 items-center justify-center bg-zinc-800 rounded-xl active:bg-zinc-700 mb-3"
+            >
+              <Text className="text-white font-semibold text-lg">Back to Menu</Text>
+            </Pressable>
+            <Pressable
+              testID="connection-override"
+              onPressIn={() => setHoldingOverride(true)}
+              onPressOut={() => setHoldingOverride(false)}
+              onLongPress={handleStartWithoutConnection}
+              delayLongPress={OFFLINE_OVERRIDE_HOLD_MS}
+              className={cn(
+                'items-center justify-center py-3 rounded-xl border',
+                holdingOverride ? 'border-amber-500 bg-amber-500/10' : 'border-zinc-800'
+              )}
+            >
+              <Text className={cn('font-semibold', holdingOverride ? 'text-amber-400' : 'text-zinc-500')}>
+                {holdingOverride ? 'Keep holding…' : 'Hold 3 seconds to start without it'}
+              </Text>
+              <Text className="text-zinc-600 text-xs mt-1">
+                Surveys save on this device and send once it&apos;s connected
+              </Text>
+            </Pressable>
+          </View>
+        </View>
+      </Modal>
 
       {/* End Event Confirmation */}
       <Modal

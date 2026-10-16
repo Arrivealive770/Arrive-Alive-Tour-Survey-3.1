@@ -1,6 +1,7 @@
 import { useEffect, useState, useCallback, useRef } from 'react';
 import { View, Text, Pressable, BackHandler, StatusBar, Platform } from 'react-native';
 import { Stack, usePathname, useRouter } from 'expo-router';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import * as KeepAwake from 'expo-keep-awake';
 import * as Haptics from 'expo-haptics';
 import { useDeviceStore } from '@/lib/state/device-store';
@@ -9,6 +10,7 @@ import { usePledgeStore } from '@/lib/state/pledge-store';
 import { api } from '@/lib/api/api';
 import type { Photo } from '@/lib/api/types';
 import { StaffMenuContext } from '@/components/kiosk';
+import { useServerConnection } from '@/lib/connection/server-connection';
 
 // There is no visible way out of the survey. Staff open the Staff Menu by
 // holding the top-right corner for this long — long enough that no student
@@ -31,6 +33,12 @@ export default function KioskLayout() {
   const exitKioskMode = useDeviceStore((s) => s.exitKioskMode);
 
   const pathname = usePathname();
+  const insets = useSafeAreaInsets();
+
+  // Small enough that guests ignore it, there so staff walking past notice
+  // Tailscale dropping mid-event instead of at the end of the day.
+  const connection = useServerConnection();
+  const showOffline = connection === 'no-server' || connection === 'no-internet';
 
   const [staffPanelOpen, setStaffPanelOpen] = useState(false);
   const idleTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -134,6 +142,32 @@ export default function KioskLayout() {
           zIndex: 100,
         }}
       />
+
+      {showOffline ? (
+        <View
+          testID="kiosk-offline-tag"
+          pointerEvents="none"
+          style={{
+            position: 'absolute',
+            left: 10,
+            bottom: insets.bottom + 6,
+            zIndex: 100,
+            flexDirection: 'row',
+            alignItems: 'center',
+            backgroundColor: 'rgba(127, 29, 29, 0.85)',
+            borderRadius: 999,
+            paddingHorizontal: 10,
+            paddingVertical: 4,
+          }}
+        >
+          <View
+            style={{ width: 8, height: 8, borderRadius: 4, backgroundColor: '#ef4444', marginRight: 6 }}
+          />
+          <Text style={{ color: '#fecaca', fontSize: 12, fontWeight: '600' }}>
+            Not connected to Tailscale
+          </Text>
+        </View>
+      ) : null}
 
       <StaffMenuContext.Provider value={openStaffMenu}>
         <Stack
