@@ -4,7 +4,15 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import { router } from 'expo-router';
 import { useQuery } from '@tanstack/react-query';
 import AsyncStorage from '@react-native-async-storage/async-storage';
-import { MapPin, Calendar, Check, AlertCircle, ChevronLeft, Clock } from 'lucide-react-native';
+import {
+  MapPin,
+  Calendar,
+  Check,
+  AlertCircle,
+  ChevronLeft,
+  Clock,
+  ClipboardList,
+} from 'lucide-react-native';
 import { useDeviceStore } from '@/lib/state/device-store';
 import { useDatabase } from '@/providers/DatabaseProvider';
 import { api } from '@/lib/api/api';
@@ -15,6 +23,8 @@ import {
   isEventRunningLate,
   isEventNotStartedYet,
 } from '@/lib/events/event-status';
+import { startWithoutEvent } from '@/lib/events/no-event';
+import { useConnectionGate } from '@/components/common/ConnectionGate';
 import { cn } from '@/lib/cn';
 import type { Event, Team } from '@/lib/api/types';
 
@@ -73,6 +83,10 @@ export default function EventSetupScreen() {
 
   const { db } = useDatabase();
 
+  // Both ways out of this screen open a station, so both get the same
+  // Tailscale warning the main menu gives.
+  const { guard, gate } = useConnectionGate();
+
   // Fetch team name
   const { data: team } = useQuery({
     queryKey: ['team', teamCode],
@@ -114,6 +128,13 @@ export default function EventSetupScreen() {
       }
     }
   }, [selectableEvents, autoSelected]);
+
+  // For a tablet that doesn't have the event it's at — the list here is old,
+  // or it never downloaded one. Surveys only; see lib/events/no-event.ts.
+  const handleStartWithoutEvent = async () => {
+    await startWithoutEvent(db);
+    router.replace('/kiosk' as any);
+  };
 
   const handleSelectEvent = async () => {
     if (!selectedEventId) return;
@@ -333,7 +354,7 @@ export default function EventSetupScreen() {
               <Text className="text-zinc-400 text-lg mt-4 mb-2">Can&apos;t reach the server</Text>
               <Text className="text-zinc-500 text-center">
                 This device hasn&apos;t downloaded the event list yet. Connect once, then pull
-                down to refresh.
+                down to refresh — or collect surveys without an event below.
               </Text>
             </View>
           ) : (
@@ -350,7 +371,7 @@ export default function EventSetupScreen() {
         {/* Join Event Button */}
         <View className="pb-8 pt-4">
           <Pressable
-            onPress={handleSelectEvent}
+            onPress={() => guard(handleSelectEvent)}
             disabled={!selectedEventId}
             className={cn(
               'w-full h-16 rounded-xl items-center justify-center',
@@ -378,8 +399,24 @@ export default function EventSetupScreen() {
               Pull down to refresh
             </Text>
           )}
+
+          <Pressable
+            testID="start-without-event"
+            onPress={() => guard(handleStartWithoutEvent)}
+            className="flex-row w-full h-14 mt-5 rounded-xl items-center justify-center border border-zinc-700 active:bg-zinc-900"
+          >
+            <ClipboardList size={20} color="#a1a1aa" />
+            <Text className="text-zinc-300 text-lg font-semibold ml-2">
+              Collect Without an Event
+            </Text>
+          </Pressable>
+          <Text className="text-zinc-600 text-center text-sm mt-2">
+            Event not listed? Surveys still save and go under &quot;No Event&quot;.
+          </Text>
         </View>
       </View>
+
+      {gate}
     </SafeAreaView>
   );
 }

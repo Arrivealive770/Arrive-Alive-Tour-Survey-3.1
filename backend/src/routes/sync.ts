@@ -4,6 +4,7 @@ import { z } from "zod";
 import { prisma } from "../prisma";
 import { queuePledgeEmail } from "../lib/email-queue-processor";
 import { getDeletablePhoneOriginals } from "../lib/photo-cleanup";
+import { NO_EVENT_ID, ensureHoldingEvent } from "../lib/no-event";
 
 const syncRouter = new Hono();
 
@@ -59,6 +60,17 @@ syncRouter.post(
       errors: [] as { localId: string; error: string }[],
     };
 
+    // Surveys taken with no event picked go to the team's holding event.
+    const holdingEvents = new Map<string, string>();
+    const eventIdFor = async (survey: { teamId: string; eventId: string }) => {
+      if (survey.eventId !== NO_EVENT_ID) return survey.eventId;
+      const known = holdingEvents.get(survey.teamId);
+      if (known) return known;
+      const id = await ensureHoldingEvent(survey.teamId);
+      holdingEvents.set(survey.teamId, id);
+      return id;
+    };
+
     for (const survey of surveys) {
       try {
         // Check for existing
@@ -75,7 +87,7 @@ syncRouter.post(
           data: {
             localId: survey.localId,
             teamId: survey.teamId,
-            eventId: survey.eventId,
+            eventId: await eventIdFor(survey),
             surveyTypeSlug: survey.surveyTypeSlug,
             // Handle responses as either string or object
             responses: typeof survey.responses === 'string'

@@ -7,6 +7,7 @@ import { AppState, AppStateStatus, Platform } from 'react-native';
 import { getDatabase, isDatabaseInitialized, getDatabaseSafe } from '@/lib/db/database';
 import { useSyncStore } from '@/lib/state/sync-store';
 import { useDeviceStore } from '@/lib/state/device-store';
+import { isNoEvent } from '@/lib/events/no-event';
 import { usePhotoCacheStore, type CachedPhoto } from '@/lib/state/photo-cache-store';
 import type {
   SyncResult,
@@ -907,7 +908,8 @@ class SyncService {
     const teamId = useDeviceStore.getState().teamId;
     const eventId = useDeviceStore.getState().currentEventId;
     const deviceId = useDeviceStore.getState().deviceId;
-    if (!teamId || !eventId || !deviceId) return 0;
+    // No photos are taken with no event picked, so there are none to tidy.
+    if (!teamId || !eventId || !deviceId || isNoEvent(eventId)) return 0;
 
     if (!useSyncStore.getState().isOnline) return 0;
 
@@ -977,7 +979,7 @@ class SyncService {
 
     const teamId = useDeviceStore.getState().teamId;
     const eventId = useDeviceStore.getState().currentEventId;
-    if (!teamId || !eventId) return 0;
+    if (!teamId || !eventId || isNoEvent(eventId)) return 0;
 
     const isOnline = useSyncStore.getState().isOnline;
     if (!isOnline) return 0;

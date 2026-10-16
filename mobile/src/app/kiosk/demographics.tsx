@@ -10,6 +10,8 @@ import Animated, {
 import * as Haptics from 'expo-haptics';
 import { useSurveyStore } from '@/lib/state/survey-store';
 import { useDatabase } from '@/providers/DatabaseProvider';
+import { useDeviceStore } from '@/lib/state/device-store';
+import { isNoEvent } from '@/lib/events/no-event';
 import { StaffTripleTap } from '@/components/kiosk';
 
 const AnimatedPressable = Animated.createAnimatedComponent(Pressable);
@@ -93,6 +95,11 @@ export default function DemographicsScreen() {
     };
   }, []);
 
+  // No pledge with no event picked (see lib/events/no-event.ts) — straight to
+  // the thank-you screen instead.
+  const noEvent = useDeviceStore((s) => isNoEvent(s.currentEventId));
+  const nextScreen = noEvent ? '/kiosk/pledge/thank-you?declined=1' : '/kiosk/pledge-prompt';
+
   const handleAgeSelect = useCallback((value: string) => {
     if (isProcessing) return;
 
@@ -110,14 +117,14 @@ export default function DemographicsScreen() {
 
     // Auto-advance after selection
     advanceTimerRef.current = setTimeout(() => {
-      router.replace('/kiosk/pledge-prompt' as any);
+      router.replace(nextScreen as any);
     }, 300);
-  }, [isProcessing, router, db]);
+  }, [isProcessing, router, db, nextScreen]);
 
   const handleSkip = useCallback(() => {
     Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
-    router.replace('/kiosk/pledge-prompt' as any);
-  }, [router]);
+    router.replace(nextScreen as any);
+  }, [router, nextScreen]);
 
   return (
     <SafeAreaView className="flex-1 bg-black" edges={['top', 'bottom']}>

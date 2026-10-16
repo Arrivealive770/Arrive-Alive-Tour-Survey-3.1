@@ -7,6 +7,7 @@ import { useSurveyStore } from '@/lib/state/survey-store';
 import { usePledgeStore } from '@/lib/state/pledge-store';
 import { useDatabase } from '@/providers/DatabaseProvider';
 import { isEventOver } from '@/lib/events/event-status';
+import { isNoEvent } from '@/lib/events/no-event';
 import { api } from '@/lib/api/api';
 import type { Event } from '@/lib/api/types';
 
@@ -76,7 +77,8 @@ export function EventWatcher() {
   const { data: serverEvent } = useQuery({
     queryKey: ['event-watch', currentEventId],
     queryFn: () => api.get<Event>(`/api/events/${currentEventId}`),
-    enabled: !!currentEventId,
+    // With no event picked there is nothing on the server to watch.
+    enabled: !!currentEventId && !isNoEvent(currentEventId),
     refetchInterval: POLL_MS,
     refetchOnWindowFocus: true,
     retry: false,

@@ -16,6 +16,7 @@ import { Check, Facebook, Twitter, Camera } from 'lucide-react-native';
 import { usePledgeStore } from '@/lib/state/pledge-store';
 import { useSurveyStore } from '@/lib/state/survey-store';
 import { useDeviceStore } from '@/lib/state/device-store';
+import { isNoEvent } from '@/lib/events/no-event';
 
 const COUNTDOWN_SECONDS = 10;
 // Give participants longer to opt into the pledge after declining.
@@ -33,6 +34,9 @@ export default function ThankYouScreen() {
 
   const params = useLocalSearchParams<{ declined?: string }>();
   const declined = params.declined === '1';
+  // No pledge to offer with no event picked (see lib/events/no-event.ts).
+  const noEvent = useDeviceStore((s) => isNoEvent(s.currentEventId));
+  const offerPledge = declined && !noEvent;
 
   const [countdown, setCountdown] = useState(
     declined ? DECLINED_COUNTDOWN_SECONDS : COUNTDOWN_SECONDS
@@ -160,12 +164,14 @@ export default function ThankYouScreen() {
           }}
         >
           {declined
-            ? 'Your responses have been recorded. Would you still like to take the pledge?'
+            ? offerPledge
+              ? 'Your responses have been recorded. Would you still like to take the pledge?'
+              : 'Your responses have been recorded.'
             : PLEDGE_TEXT}
         </Animated.Text>
 
         {/* Persistent "Take the Pledge" opt-in (shown when declined) */}
-        {declined ? (
+        {offerPledge ? (
           <Animated.View
             entering={FadeInUp.duration(500).delay(700)}
             style={{ width: '100%', maxWidth: 500, marginBottom: 8 }}

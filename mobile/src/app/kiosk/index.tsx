@@ -16,6 +16,7 @@ import { useDeviceStore } from '@/lib/state/device-store';
 import { useDatabase } from '@/providers/DatabaseProvider';
 import { api } from '@/lib/api/api';
 import { useSurveyTypes } from '@/lib/survey-questions';
+import { isNoEvent } from '@/lib/events/no-event';
 import type { LucideIcon } from 'lucide-react-native';
 import type { SurveyTypeSlug, Event } from '@/lib/api/types';
 
@@ -41,17 +42,30 @@ export default function KioskHome() {
   // Downloads and caches the questions while the kiosk is idle, so the survey
   // itself still works if the venue's connection drops later. Also gives us the
   // display name for surveys the admin built themselves.
-  const { data: builtSurveys } = useSurveyTypes();
+  const { data: builtSurveys, isLoading: builtSurveysLoading } = useSurveyTypes();
+
+  // With no event picked there is no event list of surveys, so every active
+  // survey this tablet has stored is offered instead.
+  const noEvent = isNoEvent(currentEventId);
 
   const [surveyTypes, setSurveyTypes] = useState<SurveyTypeSlug[]>([]);
   const [venueName, setVenueName] = useState<string>('');
   const [loading, setLoading] = useState(true);
   const [autoStarted, setAutoStarted] = useState(false);
 
+  useEffect(() => {
+    if (!noEvent || builtSurveysLoading) return;
+    setVenueName('');
+    setSurveyTypes(
+      (builtSurveys ?? []).filter((survey) => survey.isActive).map((survey) => survey.slug)
+    );
+    setLoading(false);
+  }, [noEvent, builtSurveys, builtSurveysLoading]);
+
   // Load survey types from the current event AND refresh picture pledge settings from server
   useEffect(() => {
     async function loadEventData() {
-      if (!isReady || !db) return;
+      if (!isReady || !db || noEvent) return;
 
       try {
         const currentEvent = await db.getCurrentEvent();
@@ -108,7 +122,7 @@ export default function KioskHome() {
     }
 
     loadEventData();
-  }, [isReady, db, currentEventId, setDeviceConfig]);
+  }, [isReady, db, noEvent, currentEventId, setDeviceConfig]);
 
   // Auto-start if only one survey type
   useEffect(() => {
@@ -156,7 +170,9 @@ export default function KioskHome() {
             No Surveys Configured
           </Text>
           <Text className="text-zinc-400 text-lg mt-2 text-center">
-            This event has no survey types set up. Contact your administrator.
+            {noEvent
+              ? "This tablet hasn't downloaded any surveys yet. Connect it once so it can."
+              : 'This event has no survey types set up. Contact your administrator.'}
           </Text>
         </View>
       </SafeAreaView>

@@ -146,8 +146,8 @@ export default function KioskLayout() {
       {showOffline ? (
         <View
           testID="kiosk-offline-tag"
-          pointerEvents="none"
           style={{
+            pointerEvents: 'none',
             position: 'absolute',
             left: 10,
             bottom: insets.bottom + 6,
