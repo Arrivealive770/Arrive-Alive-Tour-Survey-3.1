@@ -1,5 +1,5 @@
 import { fetch } from "expo/fetch";
-import { BACKEND_URL } from "./backend-url";
+import { getBackendUrl } from "./backend-url";
 
 // Response envelope type - all app routes return { data: T }
 interface ApiResponse<T> {
@@ -10,8 +10,6 @@ interface ApiResponse<T> {
 interface ApiErrorBody {
   error?: { message?: string; code?: string };
 }
-
-const baseUrl = BACKEND_URL;
 
 /**
  * How long any one request may take before it is treated as "server not
@@ -46,7 +44,9 @@ const request = async <T>(
 
   let response: Awaited<ReturnType<typeof fetch>>;
   try {
-    response = await fetch(`${baseUrl}${url}`, {
+    // Read per request: the app moves to the backup computer when the
+    // desktop is down (lib/connection/server-connection.ts).
+    response = await fetch(`${getBackendUrl()}${url}`, {
       ...options,
       headers: options.body ? { "Content-Type": "application/json" } : undefined,
       signal: controller.signal,

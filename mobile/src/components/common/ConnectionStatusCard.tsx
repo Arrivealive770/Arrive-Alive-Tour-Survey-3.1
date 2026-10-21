@@ -3,6 +3,7 @@ import { View, Text, Pressable, ActivityIndicator } from 'react-native';
 import { ShieldCheck, ShieldOff, WifiOff } from 'lucide-react-native';
 import {
   checkServerConnection,
+  useServerConnectionStore,
   type ServerConnectionStatus,
 } from '@/lib/connection/server-connection';
 import { cn } from '@/lib/cn';
@@ -27,6 +28,13 @@ const COPY: Record<ServerConnectionStatus, { title: string; detail: string }> = 
   },
 };
 
+// The desktop is down and the backup computer has taken over. Still green:
+// nothing for the crew to do, everything still goes through.
+const ON_BACKUP_COPY = {
+  title: 'Connected to the backup computer',
+  detail: 'The office computer is down, so the backup has taken over. Surveys and photos still go through.',
+};
+
 interface ConnectionStatusCardProps {
   status: ServerConnectionStatus;
   className?: string;
@@ -35,10 +43,11 @@ interface ConnectionStatusCardProps {
 /** Green when the server answers, red when it doesn't. Tap to check again. */
 export function ConnectionStatusCard({ status, className }: ConnectionStatusCardProps) {
   const [rechecking, setRechecking] = useState<boolean>(false);
+  const onBackup = useServerConnectionStore((s) => s.onBackup);
   const connected = status === 'connected';
   const offline = status === 'no-server' || status === 'no-internet';
   const busy = status === 'checking' || rechecking;
-  const { title, detail } = COPY[status];
+  const { title, detail } = connected && onBackup ? ON_BACKUP_COPY : COPY[status];
 
   const handlePress = async () => {
     if (busy) return;

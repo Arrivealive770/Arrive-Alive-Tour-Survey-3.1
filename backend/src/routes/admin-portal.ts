@@ -489,6 +489,10 @@ adminPortalRouter.get("/", (c) => {
         </nav>
 
         <main class="content">
+          <!-- Backup computer status. Filled in by loadFailoverBanner(); stays
+               hidden on a server with no backup set up. -->
+          <div id="failoverBanner" style="display: none; margin-bottom: 20px; padding: 14px 18px; border-radius: 10px; font-size: 14px; line-height: 1.5;"></div>
+
           <!-- Teams Tab -->
           <div class="tab-content active" id="teamsTab">
             <div class="card">
@@ -1352,6 +1356,10 @@ adminPortalRouter.get("/", (c) => {
           loadTeams();
           // Pre-load overlays for the event dropdown
           loadOverlaysForDropdown();
+          loadFailoverBanner();
+          if (!window.failoverBannerTimer) {
+            window.failoverBannerTimer = setInterval(loadFailoverBanner, 30000);
+          }
         }
 
         // Load overlays silently for dropdown (doesn't update UI table)
@@ -4534,6 +4542,89 @@ adminPortalRouter.get("/", (c) => {
         }
 
         // Utility
+        // ---- Backup computer status (src/lib/failover) ----
+        // On the main server: is the backup copying us? On the backup: is it
+        // on standby, or has it taken over?
+        function agoText(iso) {
+          if (!iso) return 'never';
+          const seconds = Math.max(0, Math.round((Date.now() - new Date(iso).getTime()) / 1000));
+          if (seconds < 90) return seconds + ' seconds ago';
+          const minutes = Math.round(seconds / 60);
+          if (minutes < 90) return minutes + ' minutes ago';
+          return Math.round(minutes / 60) + ' hours ago';
+        }
+
+        function setFailoverBanner(tone, html) {
+          const el = document.getElementById('failoverBanner');
+          const tones = {
+            ok: ['rgba(34,197,94,0.10)', '#86efac', 'rgba(34,197,94,0.35)'],
+            info: ['rgba(59,130,246,0.12)', '#93c5fd', 'rgba(59,130,246,0.40)'],
+            warn: ['rgba(234,179,8,0.12)', '#fde047', 'rgba(234,179,8,0.40)'],
+            bad: ['rgba(239,68,68,0.15)', '#fca5a5', 'rgba(239,68,68,0.50)'],
+          };
+          const t = tones[tone];
+          el.style.background = t[0];
+          el.style.color = t[1];
+          el.style.border = '1px solid ' + t[2];
+          el.innerHTML = html;
+          el.style.display = 'block';
+        }
+
+        async function loadFailoverBanner() {
+          let s;
+          try {
+            const res = await fetch(API_BASE + '/failover/status');
+            if (!res.ok) return;
+            s = (await res.json()).data;
+          } catch (err) {
+            return;
+          }
+          if (!s) return;
+
+          if (s.role === 'main') {
+            const b = s.backup || {};
+            if (!b.configured) {
+              document.getElementById('failoverBanner').style.display = 'none';
+              return;
+            }
+            let versionNote = '';
+            if (b.commit && s.commit && b.commit !== 'unknown' && s.commit !== 'unknown' &&
+                b.commit.slice(0, 7) !== s.commit.slice(0, 7)) {
+              versionNote = '<br>It is running a different version (' + escapeHtml(b.commit.slice(0, 7)) +
+                ', this server is ' + escapeHtml(s.commit.slice(0, 7)) + '). Run <b>update-all.bat</b> on the backup computer too.';
+            }
+            if (!b.lastCopyAt) {
+              setFailoverBanner('warn', '<b>Backup computer:</b> has not checked in since this server started. It checks in every minute - if this stays, make sure the backup computer is on.' + versionNote);
+            } else if (Date.now() - new Date(b.lastCopyAt).getTime() > 5 * 60 * 1000) {
+              setFailoverBanner('bad', '<b>Backup computer: not copying.</b> Last copy ' + agoText(b.lastCopyAt) +
+                '. If this computer goes down now, nothing takes over. Check the backup computer is switched on and Tailscale is running on it.' + versionNote);
+            } else {
+              setFailoverBanner(versionNote ? 'warn' : 'ok', '<b>Backup computer: ready.</b> Last copied this server ' + agoText(b.lastCopyAt) +
+                '. If this computer goes down, it takes over by itself.' + versionNote);
+            }
+            return;
+          }
+
+          // This IS the backup computer.
+          if (s.state === 'active') {
+            setFailoverBanner('bad', '<b>This is the BACKUP computer, and it has taken over.</b> The main server stopped answering, so tablets and phones are sending here (since ' +
+              agoText(s.takenOverAt || s.stateSince) + '). When the main server comes back, everything collected here is handed back to it automatically.' +
+              (s.pendingHandback ? ' ' + s.pendingHandback + ' change(s) waiting to hand back.' : ''));
+          } else if (s.state === 'draining') {
+            setFailoverBanner('warn', '<b>This is the BACKUP computer.</b> The main server is back - handing ' + (s.pendingHandback || 0) +
+              ' change(s) back to it now.' + (s.lastHandbackError ? '<br>Last attempt failed: ' + escapeHtml(s.lastHandbackError) + ' (it keeps retrying)' : ''));
+          } else if (s.notTakingOverBecause) {
+            setFailoverBanner('bad', '<b>This is the BACKUP computer.</b> The main server is down, but this computer is NOT taking over: ' + escapeHtml(s.notTakingOverBecause));
+          } else if (s.lastCopyError) {
+            setFailoverBanner('bad', '<b>This is the BACKUP computer, but it cannot copy the main server.</b> ' + escapeHtml(s.lastCopyError) +
+              (s.lastCopyAt ? '<br>Last good copy: ' + agoText(s.lastCopyAt) + '.' : ''));
+          } else {
+            setFailoverBanner('info', '<b>This is the BACKUP computer, on standby.</b> The main server is running. What you see here is a copy, refreshed every minute (last copy ' +
+              agoText(s.lastCopyAt) + ') - nothing can be changed here. Use the admin site on the main server instead.' +
+              (s.selfReachable === false ? '<br><b>Warning:</b> this computer cannot reach its own Tailscale address, so it could not take over. Run <b>tailscale serve --bg 3000</b> on it.' : ''));
+          }
+        }
+
         function escapeHtml(text) {
           if (!text) return '';
           const div = document.createElement('div');

@@ -24,7 +24,7 @@
     "@sendgrid/mail": "^8.1.6",
     "@vibecodeapp/backend-sdk": "^1.0.1",
     "@vibecodeapp/cloud-studio": "^0.2.4",
-    "@vibecodeapp/proxy": "^2.0.3",
+    "@vibecodeapp/proxy": "^2.0.4",
     "better-auth": "^1.7.1",
     "does": "^0.0.11",
     "fix": "^0.0.6",

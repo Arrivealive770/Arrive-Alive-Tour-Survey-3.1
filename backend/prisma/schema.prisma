@@ -487,3 +487,22 @@ model AdminUser {
   @@index([username])
   @@index([isActive])
 }
+
+// ==========================================
+// Backup computer hand-back journal
+// ==========================================
+
+// Only ever written on the BACKUP computer, and only while it has taken over
+// from the main server. SQLite triggers (src/lib/failover/journal.ts) record
+// every row that changes here, so when the main server comes back the backup
+// can send exactly what it collected — and nothing it merely copied — back to
+// it. Empty on the main server and on a backup that is on standby.
+model FailoverJournal {
+  tbl   String // Table the change happened in
+  rowId String // The changed row's id
+  op    String // "insert" | "update" | "delete" — latest effective change
+  seq   Int    // Increases on every change, so a row changed again mid-hand-back is not lost
+
+  @@id([tbl, rowId])
+  @@index([seq])
+}

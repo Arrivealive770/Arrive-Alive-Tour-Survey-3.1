@@ -36,6 +36,27 @@ const envSchema = z.object({
     .transform((value) => value?.trim() || undefined),
   EMAIL_FROM_ADDRESS: z.string().email().default("noreply@arrivealivetour.com"),
   EMAIL_FROM_NAME: z.string().default("Arrive Alive Tour"),
+  // Backup computer (see src/lib/failover/). Leave all of these out and the
+  // server behaves exactly as it always has.
+  //   main:   the desktop the tablets normally talk to. BACKUP_SERVER_URL is
+  //           optional and only used to hold pledge emails while the backup is
+  //           handing data back.
+  //   backup: the standby machine. Copies the main server every minute and
+  //           takes over when it stops answering. Needs MAIN_SERVER_URL.
+  // FAILOVER_KEY must be the same long random value on both machines.
+  SERVER_ROLE: z.enum(["main", "backup"]).default("main"),
+  MAIN_SERVER_URL: z.url("MAIN_SERVER_URL must be a valid URL").optional(),
+  BACKUP_SERVER_URL: z.url("BACKUP_SERVER_URL must be a valid URL").optional(),
+  FAILOVER_KEY: z
+    .string()
+    .optional()
+    .transform((value) => value?.trim() || undefined),
+  // How long the main server must be silent before the backup takes over.
+  // A string because ProcessEnv is typed from this schema; parsed where used.
+  FAILOVER_TAKEOVER_MINUTES: z
+    .string()
+    .regex(/^\d+(\.\d+)?$/, "FAILOVER_TAKEOVER_MINUTES must be a number")
+    .optional(),
 })
   // NODE_ENV is read from the parsed object rather than process.env directly:
   // ProcessEnv is augmented from this schema at the bottom of the file, so
@@ -50,6 +71,28 @@ const envSchema = z.object({
         message: "BETTER_AUTH_SECRET is required",
       });
       return z.NEVER;
+    }
+
+    // A backup that can't find or prove itself to the main server would sit
+    // there looking set up while copying nothing. Refuse to start instead.
+    if (raw.SERVER_ROLE === "backup") {
+      if (!raw.MAIN_SERVER_URL) {
+        ctx.addIssue({
+          code: "custom",
+          path: ["MAIN_SERVER_URL"],
+          message: "MAIN_SERVER_URL is required when SERVER_ROLE is backup",
+        });
+      }
+      if (!raw.FAILOVER_KEY || raw.FAILOVER_KEY.length < 16) {
+        ctx.addIssue({
+          code: "custom",
+          path: ["FAILOVER_KEY"],
+          message: "FAILOVER_KEY (at least 16 characters, same on both computers) is required when SERVER_ROLE is backup",
+        });
+      }
+      if (!raw.MAIN_SERVER_URL || !raw.FAILOVER_KEY || raw.FAILOVER_KEY.length < 16) {
+        return z.NEVER;
+      }
     }
 
     return {

@@ -1,6 +1,7 @@
 import { prisma } from "../prisma";
 import { purgeEventParticipantData, type EventPurgeResult } from "./pledge-privacy";
 import { describeEventReadiness, RUN_LONG_GRACE_MS } from "./event-readiness";
+import { holdBackgroundCleanup } from "./failover/status";
 
 /**
  * Scheduled end-of-event purge.
@@ -64,6 +65,9 @@ class EventPurgeScheduler {
   async runOnce(): Promise<EventPurgeResult[]> {
     // A slow purge must not overlap with the next tick.
     if (this.isPurging) return [];
+    // A backup computer on standby purges nothing: the main server does it,
+    // and the next copy brings the result over.
+    if (holdBackgroundCleanup()) return [];
     this.isPurging = true;
 
     try {

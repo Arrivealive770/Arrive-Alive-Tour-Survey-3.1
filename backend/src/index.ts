@@ -29,6 +29,9 @@ import { overlaysRouter } from "./routes/overlays";
 import { localPhotosRouter } from "./routes/local-photos";
 import { adminUsersRouter } from "./routes/admin-users";
 import { externalSurveysRouter } from "./routes/external-surveys";
+import { failoverRouter } from "./routes/failover";
+import { isBackup, servesDevices } from "./lib/failover/status";
+import { startBackupWatchdog } from "./lib/failover/backup-watchdog";
 import { logger } from "hono/logger";
 
 // Type the Hono app with user/session variables
@@ -71,6 +74,32 @@ app.use(
 
 // Logging
 app.use("*", logger());
+
+// A backup computer on standby is a read-only copy of the main server: its
+// data is replaced every minute, so anything written here would vanish. Say
+// so plainly instead. Tablets only come here once it has taken over.
+const STANDBY_WRITABLE = new Set(["/api/admin-users/login", "/admin/verify-password"]);
+app.use("*", async (c, next) => {
+  if (
+    servesDevices() ||
+    ["GET", "HEAD", "OPTIONS"].includes(c.req.method) ||
+    c.req.path.startsWith("/api/failover/") ||
+    STANDBY_WRITABLE.has(c.req.path)
+  ) {
+    await next();
+    return;
+  }
+  return c.json(
+    {
+      error: {
+        message:
+          "This is the backup computer, and the main server is running. Nothing can be changed here - use the main server's admin site.",
+        code: "BACKUP_STANDBY",
+      },
+    },
+    503
+  );
+});
 
 // Auth middleware - populates user/session for all routes
 app.use("*", async (c, next) => {
@@ -125,6 +154,7 @@ app.route("/api/overlays", overlaysRouter);
 app.route("/api/local-photos", localPhotosRouter);
 app.route("/api/admin-users", adminUsersRouter);
 app.route("/api/external-surveys", externalSurveysRouter);
+app.route("/api/failover", failoverRouter);
 app.route("/admin", adminPortalRouter);
 
 // Anything that escapes a route handler still answers in the standard JSON
@@ -178,6 +208,13 @@ backfillEventOverlayIds().catch((err: unknown) =>
 backfillEventTimeZones().catch((err: unknown) =>
   console.error("[TimeZoneBackfill] Failed:", err)
 );
+
+// Backup computer: copy the main server and take over if it goes quiet.
+if (isBackup) {
+  startBackupWatchdog().catch((err: unknown) =>
+    console.error("[Backup] Could not start the backup watchdog:", err)
+  );
+}
 
 const port = Number(process.env.PORT) || 3000;
 

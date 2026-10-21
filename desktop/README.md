@@ -547,6 +547,11 @@ cd C:\ArriveAlive
 machine. Run `eas login` once, ever. If you're not signed in, the script
 says so and the server half still completes.
 
+**Have a backup computer?** Double-click `update-all.bat` on it too, after
+the main desktop. It updates its code and server only — it knows it's the
+backup and never publishes to the tablets. The main desktop's admin site
+warns you if the two are on different versions.
+
 The manual steps below still work and are worth reading once — they explain
 what the script is doing and how to recover when something goes wrong.
 
@@ -752,6 +757,9 @@ The tablets and phones keep working with the desktop switched off, asleep, or
 unreachable. Everything they collect is saved on the device and sent by
 itself once the server answers again. Nobody has to press anything.
 
+With a backup computer set up (next section), the backup takes over after 3
+minutes and everything below works as normal again until the desktop is back.
+
 **Works with the server off:** surveys, email-only pledges, taking photos on
 the phone, ending an event, and picking the next event area. The event list
 comes from the last time the server answered.
@@ -769,6 +777,135 @@ every 15 seconds and never give up.
 **Don't Reset Device or uninstall the app while things are waiting.** A reset
 needs the server to set the device up again, and an uninstall deletes
 anything not yet sent.
+
+---
+
+## Backup computer (takes over automatically)
+
+A second Windows computer that keeps a copy of everything and takes over by
+itself if the main desktop stops answering — a Windows Update restart, a
+power cut, a dead drive. Nobody has to be in the office.
+
+**What happens, start to finish:**
+
+1. **Every minute** the backup copies the main desktop's surveys, events,
+   devices, photos and overlays. It does nothing else: it doesn't talk to
+   the tablets and doesn't send emails.
+2. **The main desktop stops answering for 3 minutes.** The backup takes
+   over. Tablets and phones notice within seconds and switch to it on their
+   own — the connection card on the tablet turns green and says **"Connected
+   to the backup computer"**. Surveys, pledges, photos and pledge emails all
+   carry on as normal.
+3. **The main desktop comes back.** The tablets switch straight back to it.
+   About a minute later the backup hands over everything it collected, and
+   goes back to copying. Nothing is collected twice, and nothing the main
+   desktop deleted on purpose (purged photos, deleted events) comes back.
+
+For the 3 minutes before the backup takes over, the tablets keep working
+offline as they always have, and send everything once a server answers.
+
+**What it costs you:** at worst, the last minute of surveys that had
+already reached the main desktop before its drive died — and only if the
+drive really is dead. If the main desktop just restarts, nothing is lost.
+
+### Setting it up
+
+You need: a second Windows computer that can stay on and plugged in, and
+the same Tailscale account (the free plan allows it).
+
+**B1. On the main desktop**, update first, then make the backup's settings.
+Double-click `C:\ArriveAlive\desktop\update-all.bat`, then double-click
+`C:\ArriveAlive\desktop\prepare-backup-computer.bat`. It adds a shared
+secret key to this computer's settings, restarts the server, and puts a file
+called **`ArriveAlive-backup-settings.env`** on your Desktop.
+
+**B2. On the backup computer, Tailscale.** Install Tailscale and sign in
+with the same account. Then in the
+[Tailscale admin page](https://login.tailscale.com/admin/machines), click
+the **…** next to the new computer:
+
+- **Edit machine name** → set it to exactly **`arrivealive-backup`**. The
+  tablets look for that name; any other name and they can't find it.
+- **Disable key expiry**, same as the tablets.
+
+**B3. On the backup computer, the project and Bun.** Do steps 1 and 2 at
+the top of this guide (put the project in `C:\ArriveAlive`, install Bun).
+
+**B4. Copy the settings file** from the main desktop's Desktop to the
+backup computer's Desktop — a USB stick is easiest.
+
+**B5. Run the installer.** On the backup computer, right-click PowerShell →
+**Run as Administrator**:
+
+```powershell
+cd C:\ArriveAlive
+powershell -ExecutionPolicy Bypass -File desktop\install-backup-computer.ps1
+```
+
+It puts the settings in place, publishes the server on Tailscale, sets it
+to start at boot (same as step 5), starts it, and waits until it has made
+its first copy of the main desktop. It ends with **"Backup computer is
+ready"**, or tells you exactly what's wrong.
+
+**B6. Check from the main desktop.** Open the main admin site. A green line
+at the top now says **"Backup computer: ready. Last copied this server …
+seconds ago."** That line is the thing to glance at from now on.
+
+**B7. Delete `ArriveAlive-backup-settings.env`** from both Desktops. It
+holds your email key, and the backup has its own copy now.
+
+The tablets need nothing — the backup's address went out with the update in
+B1. (Tablets that haven't opened the app since then pick it up next time
+they do: open, close fully, open again.)
+
+### Reading the admin site
+
+| Where | What it says | Meaning |
+|---|---|---|
+| Main admin site | Green **"Backup computer: ready"** | All good |
+| Main admin site | Red **"Backup computer: not copying"** | The backup is off, asleep, or offline. If the main desktop fails now, nothing takes over |
+| Main admin site | Yellow **"different version"** | Run `update-all.bat` on the backup computer |
+| Backup's admin site | Blue **"on standby"** | All good. It's a read-only copy; nothing can be changed there |
+| Backup's admin site | Red **"has taken over"** | The main desktop is down and the tablets are sending to the backup |
+
+The backup's own admin site is `http://localhost:3000/admin` on the backup
+computer, or `https://arrivealive-backup.tail04a318.ts.net/admin` from
+anywhere on Tailscale. While it has taken over, you can use it exactly like
+the main one.
+
+### Test it once
+
+Do this on a day with no events, with one tablet open on its main menu:
+
+1. On the main desktop: `Stop-ScheduledTask -TaskName ArriveAliveServer`
+   in an Administrator PowerShell, then
+   `Get-Process bun | Stop-Process -Force`.
+2. Wait 3–4 minutes. The tablet's connection card turns green with
+   **"Connected to the backup computer"**, and the backup's admin site
+   says **"has taken over"**.
+3. Take a survey on the tablet.
+4. Start the main desktop again: `Start-ScheduledTask -TaskName ArriveAliveServer`.
+5. Within about 2 minutes the tablet goes back to **"Connected to
+   Tailscale"**, the backup's admin site says **"on standby"** again, and
+   the survey shows up in the main admin site.
+
+### Things to know
+
+- **Leave the backup computer on**, plugged in, with Tailscale running. The
+  installer stops it sleeping while plugged in, same as the main desktop.
+- **Make changes on the main admin site.** The backup's admin site refuses
+  changes while on standby, because its copy is replaced every minute.
+- **Pledge emails** go out from whichever computer is in charge, and never
+  from both. The Resend key travels in the settings file.
+- **If the main desktop dies for good**, the backup simply stays in charge.
+  To make it the main desktop permanently, follow "Moving the server to a
+  different computer" below, using the backup as the new computer.
+- **Each takeover leaves a safety copy** on the backup computer in
+  `backend\prisma\backups\takeover-<date>.db`, holding exactly what it had
+  when it handed back. You never need it unless something went wrong.
+- **The backup's log** is `desktop\logs\server.log` on the backup computer.
+  Lines starting `[Backup]` say what it decided and why.
+- **The test app** (`Arrive Alive TEST`) never fails over to the backup.
 
 ---
 

@@ -13,6 +13,7 @@ import { useSyncStore } from '@/lib/state/sync-store';
 import { useDeviceStore } from '@/lib/state/device-store';
 import { cacheEventOverlay } from '@/lib/overlays/overlay-cache';
 import { useDatabaseReady } from '@/providers/DatabaseProvider';
+import { useServerConnection } from '@/lib/connection/server-connection';
 import type { SyncResult } from '@/lib/services/sync-types';
 
 interface SyncContextValue {
@@ -33,6 +34,11 @@ interface SyncProviderProps {
 export function SyncProvider({ children }: SyncProviderProps) {
   const isInitialized = useRef(false);
   const isDatabaseReady = useDatabaseReady();
+
+  // Keep the server check running for as long as the app is open, not just
+  // while a screen with a connection card is showing. It is also what moves
+  // syncing to the backup computer when the desktop is down, and back again.
+  useServerConnection();
 
   // Subscribe to device store state
   const deviceType = useDeviceStore((s) => s.deviceType);

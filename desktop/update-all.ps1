@@ -71,6 +71,22 @@ if ($Testing) {
   }
 }
 
+# The backup computer (SERVER_ROLE=backup in backend\.env) runs this to get
+# the same code as the main desktop, but must never publish to the tablets:
+# that is the main desktop's job, and two publishers is how a tablet ends up
+# on whichever code was published last.
+$isBackupComputer = $false
+$roleFile = Join-Path $Root "backend\.env"
+if (Test-Path $roleFile) {
+  $isBackupComputer = [bool](Get-Content $roleFile | Where-Object { $_ -match '^\s*SERVER_ROLE\s*=\s*"?backup"?\s*$' })
+}
+if ($isBackupComputer -and -not $SkipTablets) {
+  Write-Host ""
+  Write-Host "   This is the BACKUP computer: updating its code and server only." -ForegroundColor Yellow
+  Write-Host "   The tablet app is published from the main desktop." -ForegroundColor DarkGray
+  $SkipTablets = $true
+}
+
 # Each step records its own outcome instead of throwing, so one failure
 # doesn't hide the results of the others. The summary at the end is the
 # part worth reading.
@@ -286,7 +302,12 @@ Get-NetTCPConnection -LocalPort $Port -State Listen -ErrorAction SilentlyContinu
 # Step 3 - publish the tablet app over the air
 # -------------------------------------------------------------------
 if ($SkipTablets) {
-  Write-Step "3/3  Tablet update - skipped (-SkipTablets)"
+  if ($isBackupComputer) {
+    Write-Step "3/3  Tablet update - skipped (backup computer; the main desktop publishes)"
+  }
+  else {
+    Write-Step "3/3  Tablet update - skipped (-SkipTablets)"
+  }
   $results["Tablets"] = "skipped"
 }
 else {

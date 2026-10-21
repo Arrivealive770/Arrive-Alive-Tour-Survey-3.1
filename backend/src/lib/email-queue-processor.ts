@@ -1,6 +1,7 @@
 import { prisma } from "../prisma";
 import { emailService } from "./email-service";
 import { scrubPledgeAfterSend } from "./pledge-privacy";
+import { holdPledgeEmails } from "./failover/status";
 import type { EmailQueue } from "@prisma/client";
 
 export interface ProcessResult {
@@ -81,6 +82,13 @@ class EmailQueueProcessor {
       failed: 0,
       errors: [],
     };
+
+    // The backup computer only sends while it is in charge, and the main
+    // server waits while the backup is handing back. Otherwise both would
+    // send the same queued email. See lib/failover/status.ts.
+    if (await holdPledgeEmails()) {
+      return result;
+    }
 
     try {
       // Get pending emails (status = 'pending', attempts < maxAttempts)

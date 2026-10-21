@@ -9,7 +9,7 @@ import { useSyncStore } from '@/lib/state/sync-store';
 import { useDeviceStore } from '@/lib/state/device-store';
 import { deletePhoto, clearStoredPhotos } from '@/lib/overlays/overlay-service';
 import type { PhotoQueueItem } from '@/lib/db/schema';
-import { BACKEND_URL } from '@/lib/api/backend-url';
+import { getBackendUrl } from '@/lib/api/backend-url';
 
 export default function PhotoQueueScreen() {
   const { db, isReady } = useDatabase();
@@ -86,7 +86,7 @@ export default function PhotoQueueScreen() {
     setUploading(true);
 
     try {
-      const baseUrl = BACKEND_URL;
+      const baseUrl = getBackendUrl();
 
       for (const photo of photos) {
         if (photo.uploadStatus === 'uploaded') continue;

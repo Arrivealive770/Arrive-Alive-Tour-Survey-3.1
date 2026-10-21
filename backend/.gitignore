@@ -49,3 +49,9 @@ prisma/prod.db
 prisma/prod.db-*
 prisma/production.db
 prisma/production.db-*
+
+# Backup computer: scratch copies of the survey database made while copying
+# between the two machines (participant emails, so never committed), and the
+# backup's own record of whether it is in charge.
+prisma/failover-tmp/
+failover-state.json

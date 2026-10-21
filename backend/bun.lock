@@ -12,7 +12,7 @@
         "@sendgrid/mail": "^8.1.6",
         "@vibecodeapp/backend-sdk": "^1.0.1",
         "@vibecodeapp/cloud-studio": "^0.2.4",
-        "@vibecodeapp/proxy": "^2.0.3",
+        "@vibecodeapp/proxy": "^2.0.4",
         "better-auth": "^1.7.1",
         "does": "^0.0.11",
         "fix": "^0.0.6",
@@ -213,7 +213,7 @@
 
     "@vibecodeapp/cloud-studio": ["@vibecodeapp/cloud-studio@0.2.4", "", { "dependencies": { "@hono/node-server": "^1.13.7", "@prisma/client": "^6.0.0", "@radix-ui/react-popover": "^1.1.15", "@radix-ui/react-select": "^2.1.2", "@tanstack/react-query": "^5.84.1", "clsx": "^2.1.1", "hono": "^4.6.11", "lucide-react": "^0.462.0", "react": "^18.3.1", "react-dom": "^18.3.1", "sonner": "^2.0.7", "tailwind-merge": "^2.5.2", "zod": "^3.24.1" }, "bin": { "cloud-studio": "dist/server/index.js" } }, "sha512-2DzGefnZR+ZslS67MDM7XGenKI11mvFYvLA5AUeXfCT+56AEiQAsW3xX/UW192wdEbwl/hI1jekrRx6m95b87w=="],
 
-    "@vibecodeapp/proxy": ["@vibecodeapp/proxy@2.0.3", "", {}, "sha512-JCkfnwWliO7YtvfbRQEOqzlvcEOEy10OflT/awgSskeKrbt1cneI4ElxvgqkIqbPGmkO0+HEtuna11bQPUiCkg=="],
+    "@vibecodeapp/proxy": ["@vibecodeapp/proxy@2.0.4", "", {}, "sha512-tO96wBY/NAqMigNJr3Vy4i/psJHeIIy3IrmDtRYfIktbelQ+Uy9Fa6E+6OrKtOZGa6w5TuKOyTJsBKpjhd8tLA=="],
 
     "also": ["also@0.0.13", "", { "dependencies": { "node-uuid": "~1.4.1", "when": "~2.3.0" } }, "sha512-UFXnLX+kdW/L4+aCSvUuqbGerYicDNx+lJ/txntEK/Ry9k0Go8j3wUXIAF8A6d+P3oaO8Pq/5NOSBej1TtRJ5Q=="],
 

@@ -19,7 +19,7 @@ import type {
   RetryConfig,
 } from './sync-types';
 import { DEFAULT_RETRY_CONFIG } from './sync-types';
-import { BACKEND_URL } from '@/lib/api/backend-url';
+import { getBackendUrl } from '@/lib/api/backend-url';
 import {
   getPendingEventCompletionCount,
   sendPendingEventCompletions,
@@ -72,10 +72,13 @@ class SyncService {
   private deletionPollTimer: ReturnType<typeof setInterval> | null = null;
   private pendingSyncTimer: ReturnType<typeof setInterval> | null = null;
   private isInitialized = false;
-  private baseUrl: string;
 
-  constructor() {
-    this.baseUrl = BACKEND_URL;
+  /**
+   * Read on every request, never stored: when the desktop is down and the
+   * backup computer has taken over, the next sync goes there by itself.
+   */
+  private get baseUrl(): string {
+    return getBackendUrl();
   }
 
   /**

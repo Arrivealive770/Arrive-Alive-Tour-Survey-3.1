@@ -19,7 +19,7 @@ import {
 import { useSurveyTypes, type SurveyTypeDefinition } from '@/lib/survey-questions';
 import { cn } from '@/lib/cn';
 import { useRouter } from 'expo-router';
-import { BACKEND_URL } from '@/lib/api/backend-url';
+import { getBackendUrl } from '@/lib/api/backend-url';
 
 export default function SurveysScreen() {
   const router = useRouter();
@@ -32,7 +32,7 @@ export default function SurveysScreen() {
   const inactiveSurveys = surveyTypes?.filter((s) => !s.isActive) || [];
 
   const openWebAdmin = () => {
-    const backendUrl = BACKEND_URL;
+    const backendUrl = getBackendUrl();
     if (backendUrl) {
       Linking.openURL(`${backendUrl}/admin`);
     }

@@ -16,7 +16,8 @@
         "buildType": "apk"
       },
       "env": {
-        "EXPO_PUBLIC_BACKEND_URL": "https://arrivealive.tail04a318.ts.net"
+        "EXPO_PUBLIC_BACKEND_URL": "https://arrivealive.tail04a318.ts.net",
+        "EXPO_PUBLIC_BACKUP_BACKEND_URL": "https://arrivealive-backup.tail04a318.ts.net"
       }
     },
     "testing": {
@@ -43,7 +44,8 @@
     "production": {
       "channel": "production",
       "env": {
-        "EXPO_PUBLIC_BACKEND_URL": "https://arrivealive.tail04a318.ts.net"
+        "EXPO_PUBLIC_BACKEND_URL": "https://arrivealive.tail04a318.ts.net",
+        "EXPO_PUBLIC_BACKUP_BACKEND_URL": "https://arrivealive-backup.tail04a318.ts.net"
       }
     }
   },
