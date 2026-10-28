@@ -374,5 +374,5 @@ if [[ -n "${VIBECODE_PROJECT_ID:-}" && -z "${GARY7_BACKEND_URL:-}" ]]; then
 elif [[ -n "${VIBECODE_PROJECT_ID:-}" ]]; then
   echo "Enabling database viewer..."
   VIBECODE_PLATFORM_BACKEND_URL="${GARY7_BACKEND_URL}"
-  curl -s -X POST "${VIBECODE_PLATFORM_BACKEND_URL%/}/api/projects/${VIBECODE_PROJECT_ID}/cloud/db/enable" || true
+  curl -s -H "X-Vibecode-Project-Token: ${VIBECODE_PROJECT_TOKEN:-}" -X POST "${VIBECODE_PLATFORM_BACKEND_URL%/}/api/projects/${VIBECODE_PROJECT_ID}/cloud/db/enable" || true
 fi
