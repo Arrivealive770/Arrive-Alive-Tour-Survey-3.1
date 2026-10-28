@@ -336,6 +336,22 @@ adminPortalRouter.get("/", (c) => {
           font-size: 14px;
         }
 
+        /* A compact dropdown that sits in a table row or beside a btn-sm. */
+        .select-sm {
+          padding: 6px 10px;
+          background: #252525;
+          border: 1px solid #333;
+          border-radius: 8px;
+          color: #fff;
+          font-size: 14px;
+          max-width: 340px;
+        }
+
+        .select-sm:focus {
+          outline: none;
+          border-color: #4a9eff;
+        }
+
         .modal {
           display: none;
           position: fixed;
@@ -634,19 +650,52 @@ adminPortalRouter.get("/", (c) => {
               </div>
             </div>
 
+            <!-- Surveys taken with "no event" picked. Hidden until there are some. -->
+            <div class="card" id="noEventCard" style="display: none; border-color: #f59e0b;">
+              <h2 style="margin: 0;">Surveys Collected With No Event</h2>
+              <p class="text-muted" style="margin: 8px 0 16px; font-size: 12px;">
+                These were taken on a tablet started with "no event", so they don't count toward
+                any event yet. They're grouped by day and tablet — pick the event each group was
+                taken at and press Move. If one tablet worked two events on the same day, tick
+                "No Event (collected offline)" under Select Events below, then tick the surveys in
+                the table and use Move Selected.
+              </p>
+              <table>
+                <thead>
+                  <tr>
+                    <th>Day</th>
+                    <th>Team</th>
+                    <th>Tablet</th>
+                    <th>Surveys</th>
+                    <th>Taken Between</th>
+                    <th>Move To</th>
+                    <th></th>
+                  </tr>
+                </thead>
+                <tbody id="noEventBody"></tbody>
+              </table>
+            </div>
+
             <div class="card">
               <div style="display: flex; justify-content: space-between; align-items: center; gap: 12px; flex-wrap: wrap;">
                 <h2 style="margin: 0;">Survey Responses</h2>
-                <button class="btn btn-danger btn-sm" id="deleteSelectedResponses" onclick="deleteSelectedResponses()" disabled>Delete Selected</button>
+                <div style="display: flex; gap: 8px; align-items: center; flex-wrap: wrap;">
+                  <select class="select-sm" id="moveResponsesTarget" aria-label="Event to move the selected surveys to">
+                    <option value="">Move to event...</option>
+                  </select>
+                  <button class="btn btn-primary btn-sm" id="moveSelectedResponses" onclick="moveSelectedResponses()" style="width: auto;" disabled>Move Selected</button>
+                  <button class="btn btn-danger btn-sm" id="deleteSelectedResponses" onclick="deleteSelectedResponses()" disabled>Delete Selected</button>
+                </div>
               </div>
               <p class="text-muted" style="margin: 8px 0 16px; font-size: 12px;">
                 Tick a survey and use Delete to remove that one answer — a test run or a
-                double tap. The event, its photos and every other survey are kept.
+                double tap. The event, its photos and every other survey are kept. To file
+                surveys under a different event, tick them, pick the event and use Move Selected.
               </p>
               <div class="filter-row">
                 <div class="form-group">
                   <label for="dataTeamFilter">Team</label>
-                  <select id="dataTeamFilter" onchange="loadEventsForTeam(); loadSurveyResponses();">
+                  <select id="dataTeamFilter" onchange="loadEventsForTeam(); loadSurveyResponses(); loadNoEventSurveys();">
                     <option value="">All Teams</option>
                   </select>
                 </div>
@@ -1248,6 +1297,7 @@ adminPortalRouter.get("/", (c) => {
                 loadEventsForTeam();
                 loadAnalytics();
                 loadSurveyResponses();
+                loadNoEventSurveys();
               }
               if (tab.dataset.tab === 'email') {
                 loadEmailStatus();
@@ -3030,6 +3080,12 @@ adminPortalRouter.get("/", (c) => {
           button.textContent = count > 0 ? 'Delete Selected (' + count + ')' : 'Delete Selected';
           button.disabled = count === 0;
 
+          const moveButton = document.getElementById('moveSelectedResponses');
+          if (moveButton) {
+            moveButton.textContent = count > 0 ? 'Move Selected (' + count + ')' : 'Move Selected';
+            moveButton.disabled = count === 0;
+          }
+
           const headerBox = document.getElementById('responsesSelectAll');
           if (headerBox) {
             const boxes = document.querySelectorAll('.response-checkbox');
@@ -3104,6 +3160,268 @@ adminPortalRouter.get("/", (c) => {
             console.error('Error deleting survey responses:', err);
             alert('Error deleting surveys');
           }
+        }
+
+        /**
+         * Moving surveys onto the right event.
+         *
+         * Surveys taken with "no event" picked wait in the team's holding event
+         * (src/lib/no-event.ts) and count toward nothing until someone files
+         * them under the event they were really taken at. They're grouped by
+         * day and tablet because that is what the office knows: "tablet 2 was
+         * at Austin High on Tuesday".
+         */
+
+        // Every event a survey can be moved to: all teams, holding events left out.
+        let moveTargetEvents = [];
+        let noEventGroups = [];
+
+        function isHoldingEvent(event) {
+          return event.id.indexOf('no-event-') === 0;
+        }
+
+        // escapeHtml leaves quotes alone, which is fine for text but not for
+        // a value inside label="...".
+        function escapeAttr(text) {
+          return escapeHtml(text).replace(/"/g, '&quot;');
+        }
+
+        // "2026-10-25" for an instant, read in the given zone. Lines a day's
+        // surveys up with the event held that day.
+        function dayKey(isoString, timeZone) {
+          try {
+            return new Intl.DateTimeFormat('en-CA', {
+              timeZone: timeZone || browserTimeZone(),
+              year: 'numeric', month: '2-digit', day: '2-digit'
+            }).format(new Date(isoString));
+          } catch (err) {
+            return new Date(isoString).toISOString().slice(0, 10);
+          }
+        }
+
+        function moveTargetLabel(event) {
+          const place = [event.venueCity, event.venueState].filter(Boolean).join(', ');
+          return event.venueName + (place ? ' — ' + place : '') + ' — ' +
+            formatEventInstant(event.eventDate, event.timeZone, { hour: undefined, minute: undefined });
+        }
+
+        function moveTargetOption(event, selected) {
+          return '<option value="' + escapeAttr(event.id) + '"' + (selected ? ' selected' : '') + '>' +
+            escapeHtml(moveTargetLabel(event)) + '</option>';
+        }
+
+        async function loadMoveTargetEvents() {
+          const res = await fetch(API_BASE + '/events');
+          const data = await res.json();
+          moveTargetEvents = (data.data || []).filter(e => !isHoldingEvent(e));
+          renderMoveSelectedTargets();
+        }
+
+        // The dropdown beside Move Selected: every event, grouped by team.
+        function renderMoveSelectedTargets() {
+          const select = document.getElementById('moveResponsesTarget');
+          if (!select) return;
+          const previous = select.value;
+
+          const byTeam = new Map();
+          moveTargetEvents.forEach(e => {
+            const team = (e.team && e.team.name) || 'No team';
+            if (!byTeam.has(team)) byTeam.set(team, []);
+            byTeam.get(team).push(e);
+          });
+
+          select.innerHTML = '<option value="">Move to event...</option>' +
+            Array.from(byTeam.keys()).sort().map(team =>
+              '<optgroup label="' + escapeAttr(team) + '">' +
+                byTeam.get(team).map(e => moveTargetOption(e, e.id === previous)).join('') +
+              '</optgroup>'
+            ).join('');
+        }
+
+        // One group per day, team and tablet, newest day first.
+        function groupNoEventSurveys(rows) {
+          const groups = new Map();
+          rows.forEach(r => {
+            const day = dayKey(r.completedAt);
+            const key = day + '|' + r.teamId + '|' + (r.deviceId || '');
+            let group = groups.get(key);
+            if (!group) {
+              group = {
+                day,
+                teamId: r.teamId,
+                teamName: r.teamName || '-',
+                deviceName: r.deviceName || 'Unknown tablet',
+                ids: [],
+                first: r.completedAt,
+                last: r.completedAt,
+              };
+              groups.set(key, group);
+            }
+            group.ids.push(r.id);
+            group.last = r.completedAt; // the server sends them oldest first
+          });
+
+          const time = iso => new Date(iso).toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' });
+          return Array.from(groups.values())
+            .map(g => Object.assign(g, {
+              dayLabel: new Date(g.first).toLocaleDateString([], {
+                weekday: 'short', month: 'short', day: 'numeric', year: 'numeric'
+              }),
+              timeRange: time(g.first) + ' – ' + time(g.last),
+            }))
+            .sort((a, b) => new Date(b.first) - new Date(a.first));
+        }
+
+        // The group's own team first, nearest date first, with the event held
+        // that day already picked when there is exactly one. Other teams'
+        // events follow, for a tablet that was lent out.
+        function noEventGroupOptions(group) {
+          const at = new Date(group.first).getTime();
+          const own = moveTargetEvents
+            .filter(e => e.teamId === group.teamId)
+            .sort((a, b) =>
+              Math.abs(new Date(a.eventDate).getTime() - at) - Math.abs(new Date(b.eventDate).getTime() - at));
+          const others = moveTargetEvents.filter(e => e.teamId !== group.teamId);
+          const sameDay = own.filter(e => dayKey(e.eventDate, e.timeZone) === group.day);
+          const preselect = sameDay.length === 1 ? sameDay[0].id : '';
+
+          let html = '<option value="">Pick the event...</option>';
+          if (own.length > 0) {
+            html += '<optgroup label="' + escapeAttr(group.teamName) + '">' +
+              own.map(e => moveTargetOption(e, e.id === preselect)).join('') + '</optgroup>';
+          }
+          if (others.length > 0) {
+            html += '<optgroup label="Other teams">' +
+              others.map(e => moveTargetOption(e, false)).join('') + '</optgroup>';
+          }
+          return html;
+        }
+
+        async function loadNoEventSurveys() {
+          const card = document.getElementById('noEventCard');
+          const teamId = document.getElementById('dataTeamFilter').value;
+
+          try {
+            const [res] = await Promise.all([
+              fetch(API_BASE + '/surveys/no-event' + (teamId ? '?teamId=' + encodeURIComponent(teamId) : '')),
+              loadMoveTargetEvents(),
+            ]);
+            const data = await res.json();
+            noEventGroups = groupNoEventSurveys(data.data || []);
+          } catch (err) {
+            console.error('Error loading no-event surveys:', err);
+            return;
+          }
+
+          if (noEventGroups.length === 0) {
+            card.style.display = 'none';
+            return;
+          }
+
+          document.getElementById('noEventBody').innerHTML = noEventGroups.map((group, i) => \`
+            <tr>
+              <td>\${escapeHtml(group.dayLabel)}</td>
+              <td>\${escapeHtml(group.teamName)}</td>
+              <td>\${escapeHtml(group.deviceName)}</td>
+              <td>\${group.ids.length}</td>
+              <td>\${escapeHtml(group.timeRange)}</td>
+              <td><select class="select-sm" id="noEventTarget\${i}" aria-label="Event to move these surveys to">\${noEventGroupOptions(group)}</select></td>
+              <td><button class="btn btn-primary btn-sm" onclick="moveNoEventGroup(\${i}, this)" style="width: auto;">Move</button></td>
+            </tr>
+          \`).join('');
+          card.style.display = 'block';
+        }
+
+        // The server's answer, or an Error carrying a message worth showing.
+        async function moveSurveys(ids, eventId) {
+          const res = await fetch(API_BASE + '/surveys/responses/move', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ ids, eventId })
+          });
+          const data = await res.json();
+          if (data.error) throw new Error(data.error.message || 'the server refused the move');
+          return data.data;
+        }
+
+        function reportMissing(result) {
+          const missing = (result.missingIds || []).length;
+          if (missing > 0) {
+            alert('Moved ' + result.movedCount + ' survey(s). ' + missing +
+              ' had already been removed by someone else.');
+          }
+        }
+
+        function refreshAfterMove() {
+          loadNoEventSurveys();
+          loadEventsForTeam(); // the event list shows survey counts
+          loadSurveyResponses(); // refreshes the counts too
+        }
+
+        async function moveNoEventGroup(index, button) {
+          const group = noEventGroups[index];
+          if (!group) return;
+
+          const eventId = document.getElementById('noEventTarget' + index).value;
+          if (!eventId) {
+            alert('Pick the event these surveys were taken at first.');
+            return;
+          }
+          const event = moveTargetEvents.find(e => e.id === eventId);
+          const count = group.ids.length;
+
+          if (!confirm(
+            'Move ' + count + ' survey' + (count === 1 ? '' : 's') + ' from ' + group.deviceName +
+            ' on ' + group.dayLabel + ' to:\\n\\n' +
+            (event ? moveTargetLabel(event) : 'the chosen event') + '\\n\\n' +
+            'They will count toward that event from now on. If this is wrong you can\\n' +
+            'move them again from the Survey Responses table.'
+          )) return;
+
+          button.disabled = true;
+          button.textContent = 'Moving...';
+
+          try {
+            reportMissing(await moveSurveys(group.ids, eventId));
+          } catch (err) {
+            console.error('Error moving surveys:', err);
+            alert('Could not move: ' + err.message);
+            button.disabled = false;
+            button.textContent = 'Move';
+            return;
+          }
+
+          refreshAfterMove();
+        }
+
+        async function moveSelectedResponses() {
+          const ids = Array.from(selectedResponseIds);
+          if (ids.length === 0) return;
+
+          const eventId = document.getElementById('moveResponsesTarget').value;
+          if (!eventId) {
+            alert('Pick the event to move them to from the list next to Move Selected.');
+            return;
+          }
+          const event = moveTargetEvents.find(e => e.id === eventId);
+
+          if (!confirm(
+            'Move ' + ids.length + ' survey' + (ids.length === 1 ? '' : 's') + ' to:\\n\\n' +
+            (event ? moveTargetLabel(event) : 'the chosen event') + '\\n\\n' +
+            'Their answers stay exactly as they are; they just count toward\\n' +
+            'that event from now on.'
+          )) return;
+
+          try {
+            reportMissing(await moveSurveys(ids, eventId));
+            selectedResponseIds.clear();
+          } catch (err) {
+            console.error('Error moving surveys:', err);
+            alert('Could not move: ' + err.message);
+            return;
+          }
+
+          refreshAfterMove();
         }
 
         /**

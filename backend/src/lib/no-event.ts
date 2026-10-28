@@ -16,8 +16,15 @@ import { prisma } from "../prisma";
  */
 export const NO_EVENT_ID = "no-event";
 
+/** Every holding event's id starts with this; real event ids are cuids. */
+export const HOLDING_EVENT_PREFIX = "no-event-";
+
 export function holdingEventIdFor(teamId: string): string {
-  return `no-event-${teamId}`;
+  return `${HOLDING_EVENT_PREFIX}${teamId}`;
+}
+
+export function isHoldingEventId(eventId: string): boolean {
+  return eventId.startsWith(HOLDING_EVENT_PREFIX);
 }
 
 /** The team's holding event, created the first time it's needed. */

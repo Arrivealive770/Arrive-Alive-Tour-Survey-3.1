@@ -3,6 +3,7 @@ import { zValidator } from "@hono/zod-validator";
 import { z } from "zod";
 import { prisma } from "../prisma";
 import { csvResponse, timestampedFilename } from "../lib/csv";
+import { HOLDING_EVENT_PREFIX, isHoldingEventId } from "../lib/no-event";
 
 const surveysRouter = new Hono();
 
@@ -610,6 +611,105 @@ surveysRouter.post(
     return c.json({
       data: {
         deletedCount: deleted.count,
+        requestedCount: ids.length,
+        missingIds: ids.filter((id) => !found.some((r) => r.id === id)),
+      },
+    });
+  }
+);
+
+/**
+ * Moving surveys onto the right event.
+ *
+ * Surveys taken with no event picked wait in the team's "No Event" holding
+ * event (lib/no-event.ts), where they count toward nothing. Once the office
+ * knows where a tablet was, these file them under the real event so they show
+ * up in its numbers and reports. The same move fixes a tablet that was simply
+ * left on the wrong event.
+ *
+ * As with deleting, every move names the rows it is moving.
+ */
+
+// GET /api/surveys/no-event - Surveys still waiting in a "No Event" holding event
+surveysRouter.get("/no-event", async (c) => {
+  const teamId = c.req.query("teamId");
+
+  const responses = await prisma.surveyResponse.findMany({
+    where: {
+      eventId: { startsWith: HOLDING_EVENT_PREFIX },
+      ...(teamId && { teamId }),
+    },
+    select: {
+      id: true,
+      teamId: true,
+      deviceId: true,
+      completedAt: true,
+      team: { select: { name: true } },
+      device: { select: { deviceName: true } },
+    },
+    orderBy: { completedAt: "asc" },
+  });
+
+  return c.json({
+    data: responses.map((r) => ({
+      id: r.id,
+      teamId: r.teamId,
+      teamName: r.team.name,
+      deviceId: r.deviceId,
+      deviceName: r.device?.deviceName ?? null,
+      completedAt: r.completedAt,
+    })),
+  });
+});
+
+// POST /api/surveys/responses/move - Move survey responses to another event
+const moveResponsesSchema = z.object({
+  // Higher than the delete limit: one tablet's day at a busy event is
+  // regularly several hundred surveys, and they move as one group.
+  ids: z.array(z.string().min(1)).min(1, "At least one response id is required").max(5000),
+  eventId: z.string().min(1, "Pick the event to move them to"),
+});
+
+surveysRouter.post(
+  "/responses/move",
+  zValidator("json", moveResponsesSchema),
+  async (c) => {
+    const { ids, eventId } = c.req.valid("json");
+
+    const event = await prisma.event.findUnique({
+      where: { id: eventId },
+      select: { id: true, teamId: true, venueName: true },
+    });
+
+    if (!event) {
+      return c.json({ error: { message: "Event not found", code: "EVENT_NOT_FOUND" } }, 404);
+    }
+
+    // Moving into a holding event would only hide them again.
+    if (isHoldingEventId(event.id)) {
+      return c.json(
+        { error: { message: "Pick the real event these surveys were taken at.", code: "INVALID_EVENT" } },
+        400
+      );
+    }
+
+    const found = await prisma.surveyResponse.findMany({
+      where: { id: { in: ids } },
+      select: { id: true },
+    });
+
+    const moved = await prisma.surveyResponse.updateMany({
+      where: { id: { in: found.map((r) => r.id) } },
+      // The team follows the event, so a tablet borrowed from another team
+      // counts toward the team that actually ran the event.
+      data: { eventId: event.id, teamId: event.teamId },
+    });
+
+    console.log(`[Surveys] Moved ${moved.count} response(s) to event ${event.id} (${event.venueName})`);
+
+    return c.json({
+      data: {
+        movedCount: moved.count,
         requestedCount: ids.length,
         missingIds: ids.filter((id) => !found.some((r) => r.id === id)),
       },
